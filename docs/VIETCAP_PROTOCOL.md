@@ -48,7 +48,21 @@ library, zero attempts means no attempt limit; delay doubles up to the cap and
 includes jitter. Active subscription markers are cleared on disconnect, while
 normalized desired symbol lists are retained. After reconnect the client restores
 match-price, index, and bid-ask subscriptions independently. This behavior is
-unit-tested but is not yet evidence that streams resume after a real interruption.
+unit-tested. Three simulated reconnect cycles also confirm reconnect does not
+register duplicate lifecycle or market-data listeners. These offline tests are not
+yet evidence that streams resume after a real interruption.
+
+Malformed binary frames for `w-match-price`, `index`, and `w-bid-ask` are wrapped
+as explicit decoder errors and rejected by their pipeline boundaries. Offline
+tests confirm a rejected frame does not mutate state or prevent the immediately
+following valid frame from being processed. Actual malformed provider frames have
+not been observed.
+
+Raw debug mode is opt-in through `VietcapRealtimeClient(raw_debug=True)` or the
+`--raw-debug` option on each realtime acceptance script. It records only event
+name, payload type, payload size, sequence number, and configured per-event limit;
+raw binary content is never logged. The default limit is 20 records per event and
+can be changed with `raw_debug_event_limit` or `--raw-debug-event-limit`.
 
 ## Proto
 

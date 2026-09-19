@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import wraps
 import logging
 import os
+from threading import Lock
 
 import socketio
 
@@ -16,6 +18,7 @@ from data.vietcap.constants import (
     DEFAULT_RECONNECTION_DELAY_SECONDS,
     DEFAULT_RECONNECTION_ENABLED,
     DEFAULT_RECONNECTION_RANDOMIZATION_FACTOR,
+    DEFAULT_RAW_DEBUG_EVENT_LIMIT,
     DEFAULT_SOCKET_PATH,
     DEFAULT_SOCKET_URL,
     BID_ASK_EVENT,
@@ -58,8 +61,16 @@ class VietcapRealtimeClient:
         socket_url: str | None = None,
         socket_path: str | None = None,
         engineio_logger: bool = False,
+        raw_debug: bool = False,
+        raw_debug_event_limit: int = DEFAULT_RAW_DEBUG_EVENT_LIMIT,
         socket_client: socketio.Client | None = None,
     ) -> None:
+        if isinstance(raw_debug_event_limit, bool) or not isinstance(
+            raw_debug_event_limit, int
+        ):
+            raise TypeError("raw_debug_event_limit must be an integer")
+        if raw_debug_event_limit < 1:
+            raise ValueError("raw_debug_event_limit must be at least 1")
         self.socket_url = socket_url or os.getenv(
             "VIETCAP_SOCKET_URL", DEFAULT_SOCKET_URL
         )
@@ -81,6 +92,10 @@ class VietcapRealtimeClient:
         self._desired_match_price_symbols: tuple[str, ...] | None = None
         self._desired_index_symbols: tuple[str, ...] | None = None
         self._desired_bid_ask_symbols: tuple[str, ...] | None = None
+        self._raw_debug = raw_debug
+        self._raw_debug_event_limit = raw_debug_event_limit
+        self._raw_debug_event_counts: dict[str, int] = {}
+        self._raw_debug_lock = Lock()
         self._socket.on("connect", self._on_connect)
         self._socket.on("disconnect", self._on_disconnect)
         self._socket.on("connect_error", self._on_connect_error)
@@ -145,9 +160,7 @@ class VietcapRealtimeClient:
 
     def on_match_price(self, handler: Callable[[object], None]) -> None:
         """Register the callback for binary match-price events."""
-        if not callable(handler):
-            raise TypeError("Match-price handler must be callable")
-        self._socket.on(MATCH_PRICE_EVENT, handler)
+        self._register_market_handler(MATCH_PRICE_EVENT, handler)
 
     def subscribe_match_price(self, symbols: tuple[str, ...]) -> None:
         """Subscribe connected clients to the requested match-price symbols."""
@@ -189,9 +202,7 @@ class VietcapRealtimeClient:
 
     def on_index(self, handler: Callable[[object], None]) -> None:
         """Register the callback for binary index events."""
-        if not callable(handler):
-            raise TypeError("Index handler must be callable")
-        self._socket.on(INDEX_EVENT, handler)
+        self._register_market_handler(INDEX_EVENT, handler)
 
     def subscribe_index(self, symbols: tuple[str, ...]) -> None:
         """Subscribe connected clients to the requested index symbols."""
@@ -232,9 +243,7 @@ class VietcapRealtimeClient:
 
     def on_bid_ask(self, handler: Callable[[object], None]) -> None:
         """Register the callback for binary bid-ask events."""
-        if not callable(handler):
-            raise TypeError("Bid-ask handler must be callable")
-        self._socket.on(BID_ASK_EVENT, handler)
+        self._register_market_handler(BID_ASK_EVENT, handler)
 
     def subscribe_bid_ask(self, symbols: tuple[str, ...]) -> None:
         """Subscribe connected clients to the requested bid-ask symbols."""
@@ -283,6 +292,50 @@ class VietcapRealtimeClient:
 
     def _on_connect_error(self, data: object) -> None:
         logger.error("Socket.IO connection error", extra={"error_data": data})
+
+    def _register_market_handler(
+        self,
+        event: str,
+        handler: Callable[[object], None],
+    ) -> None:
+        if not callable(handler):
+            raise TypeError(f"{event} handler must be callable")
+        if not self._raw_debug:
+            self._socket.on(event, handler)
+            return
+
+        @wraps(handler)
+        def debug_handler(payload: object) -> None:
+            self._log_raw_event_metadata(event, payload)
+            handler(payload)
+
+        self._socket.on(event, debug_handler)
+
+    def _log_raw_event_metadata(self, event: str, payload: object) -> None:
+        with self._raw_debug_lock:
+            event_number = self._raw_debug_event_counts.get(event, 0) + 1
+            if event_number > self._raw_debug_event_limit:
+                return
+            self._raw_debug_event_counts[event] = event_number
+
+        payload_size = (
+            len(payload)
+            if isinstance(payload, (bytes, bytearray, memoryview))
+            else None
+        )
+        logger.debug(
+            "Received raw Vietcap event metadata",
+            extra={
+                "event": event,
+                "payload_type": type(payload).__name__,
+                "payload_size": payload_size,
+                "raw_debug_event_number": event_number,
+                "raw_debug_event_limit": self._raw_debug_event_limit,
+                "raw_debug_limit_reached": (
+                    event_number == self._raw_debug_event_limit
+                ),
+            },
+        )
 
     def _restore_subscriptions(self) -> None:
         self._restore_subscription(

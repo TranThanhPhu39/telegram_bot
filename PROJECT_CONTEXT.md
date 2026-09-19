@@ -78,13 +78,16 @@ Phase 7 — Reliability — authorized for offline implementation by explicit us
 - [x] Socket.IO automatic reconnect handling enabled and unit-tested
 - [x] Explicit exponential reconnect backoff configured and unit-tested
 - [x] Desired subscriptions restored automatically after reconnect in unit tests
+- [x] Listener registration remains single across repeated reconnect cycles in unit tests
+- [x] Decode failures are isolated and all three realtime pipelines recover in unit tests
+- [x] Bounded metadata-only raw debug mode implemented and unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 7 reliability work is active. Automatic reconnect uses explicit exponential backoff and restores desired subscriptions; listener deduplication, raw debug mode, and forced-interruption acceptance remain pending. Phases 3–6 retain their pending live-validation status.
+Phase 7 offline reliability implementation is complete: reconnect/backoff, resubscription, listener stability, decode error isolation, and bounded raw debug metadata are covered by tests. Phase 7 acceptance still requires a real forced interruption followed by resumed market data, so `STOP and report` remains unchecked. Phases 3–6 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -154,7 +157,9 @@ Main classes/functions: `VietcapRealtimeClient`, `ConnectionInfo`, `normalize_so
 
 Dependencies: `python-socketio` and its synchronous client transport stack.
 
-Status: automatic reconnect, explicit backoff, and restoration of all desired subscriptions are unit-tested. Forced-interruption recovery remains NOT TESTED.
+Status: automatic reconnect, explicit backoff, restoration of desired subscriptions,
+single listener registration, and bounded raw debug metadata are unit-tested.
+Forced-interruption recovery remains NOT TESTED.
 
 ### `scripts/inspect_connection.py`
 
@@ -172,7 +177,11 @@ Status: created.
 
 Purpose: verifies path normalization, WebSocket-only connection arguments, reconnect configuration, lifecycle handlers, idempotent disconnect, all stream registrations/subscriptions, duplicate suppression, and reset after disconnect without network access.
 
-Status: all client tests pass as part of the 128-test suite.
+Status: all client tests pass as part of the 140-test suite.
+
+Raw debug behavior: disabled by default. When enabled, it logs only event name,
+payload type, payload size, sequence number, limit, and whether the limit was
+reached. It never logs payload content and defaults to 20 records per event.
 
 ### `data/vietcap/subscriptions.py`
 
@@ -188,7 +197,17 @@ Purpose: converts bytes-like payloads into `MatchPriceMessage` objects and logs 
 
 Main function/class: `decode_match_price`, `VietcapDecodeError`.
 
-Status: created and unit-tested; not yet exercised on a live Vietcap market frame.
+Status: match-price, index, and bid-ask decoders reject non-binary and malformed
+payloads with explicit errors. Pipeline recovery after each decode failure is
+unit-tested; no decoder has yet processed a live Vietcap market frame.
+
+### `tests/test_decode_reliability.py`
+
+Purpose: verifies a malformed protobuf frame is logged and isolated for each of
+the three realtime pipelines, and that the next valid frame is still normalized
+and stored.
+
+Status: three recovery tests pass as part of the 140-test suite.
 
 ### `data/vietcap/validation.py`
 
@@ -767,6 +786,77 @@ restoration continued. The full suite returned `128 passed in 0.42s`.
 Result: PASS for offline automatic resubscription. Recovery after an actual
 transport interruption remains NOT TESTED.
 
+### 2026-09-19 — Phase 7 listener deduplication
+
+Commands:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests\test_client.py
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pip check
+```
+
+Expected: lifecycle and market-data listeners are each registered once, repeated
+disconnect/connect cycles do not call `.on(...)` again, and one simulated payload
+per stream produces exactly one handler invocation per cycle.
+
+Actual: after three simulated reconnect cycles, the three lifecycle listeners and
+three market-data listeners each had one registration. Each stream handler ran
+exactly three times for three simulated payloads. Client tests returned
+`22 passed in 0.28s`; the full suite returned `129 passed in 0.49s`; dependency
+validation reported `No broken requirements found.`
+
+Result: PASS for offline listener deduplication. Actual forced-interruption stream
+recovery remains NOT TESTED.
+
+### 2026-09-19 — Phase 7 decode error handling
+
+Commands:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests\test_decode_reliability.py tests\test_decoder.py tests\test_index_stream.py tests\test_bid_ask_stream.py tests\test_pipeline.py
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pip check
+```
+
+Expected: malformed match-price, index, and bid-ask protobuf frames are logged,
+return no normalized object, do not mutate state, and do not prevent the next
+valid frame from being processed.
+
+Actual: all three pipelines rejected a malformed frame and then normalized and
+stored the next valid frame. The focused decode/pipeline group returned
+`81 passed in 0.39s`; the full suite returned `132 passed in 0.43s`; dependency
+validation reported `No broken requirements found.`
+
+Result: PASS for offline decode error isolation and recovery. Behavior against
+actual malformed provider frames remains NOT TESTED.
+
+### 2026-09-19 — Phase 7 bounded raw debug mode
+
+Commands:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests\test_client.py
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pip check
+# Each realtime acceptance script was also run with --help and audited for:
+# --raw-debug and --raw-debug-event-limit
+```
+
+Expected: raw debug is disabled by default; when enabled it logs bounded metadata
+for all three market events without logging binary content, continues delivering
+every payload to the registered handler, and exposes validated CLI controls in all
+four realtime acceptance scripts.
+
+Actual: client tests returned `30 passed in 0.25s`. Metadata logging stopped after
+the configured per-event limit while the handler still received all payloads.
+All three streams reported event/type/size metadata without payload content. All
+four script help audits passed. The final full suite returned `140 passed in 0.42s`;
+dependency validation reported `No broken requirements found.`
+
+Result: PASS for offline bounded raw debug mode. Live raw-event metadata remains
+NOT TESTED because no market event was received during this task.
+
 ## 10. Known Problems
 
 - The upstream schema is not directly compilable by standard `protoc` without reordering its first two declarations.
@@ -786,9 +876,9 @@ transport interruption remains NOT TESTED.
 
 ## 11. Next Steps
 
-Continue Phase 7 with one small task: prove event listeners are registered once
-and are not duplicated across repeated reconnect cycles. Do not add raw debug mode
-in the same task group.
+Run the Phase 7 forced-interruption acceptance during an active market session:
+subscribe, receive changing data, interrupt the transport, and prove the same
+stream resumes after automatic reconnect without duplicate callbacks.
 
 ## 12. How To Run
 
@@ -935,6 +1025,27 @@ on disconnect, while the desired normalized symbol tuples persist. After reconne
 each stream is restored independently so one failed subscription does not prevent
 the remaining streams from being restored. This keeps desired configuration
 separate from connection-scoped state.
+
+### Decision: register listeners outside reconnect handling
+
+Reason: lifecycle listeners are installed once when the client is constructed,
+and market-data listeners are installed only through the explicit `on_*` methods.
+Reconnect handling restores subscriptions but never registers listeners, preventing
+callback multiplication across repeated reconnect cycles.
+
+### Decision: isolate expected payload failures at the pipeline boundary
+
+Reason: decoders raise explicit type or protobuf decode errors, while each
+realtime pipeline logs and converts expected decode/validation failures to `None`.
+Malformed frames therefore do not mutate market state or terminate the event
+callback, and later valid frames can still be processed.
+
+### Decision: raw debug logs metadata, never payload content
+
+Reason: raw protobuf bytes may be large or unexpectedly sensitive. Debugging only
+requires the event name, runtime type, and byte length at this stage. The mode is
+off by default, caps records independently per event, uses a lock for counters,
+and does not stop handler delivery after the logging limit is reached.
 
 ## 14. Change Log
 
@@ -1102,3 +1213,30 @@ separate from connection-scoped state.
 - Added deterministic reconnect simulation tests.
 - Passed the full 128-test suite.
 - Did not address listener deduplication or forced-interruption acceptance.
+
+### 2026-09-19 — Phase 7 listener-deduplication task group
+
+- Instrumented the fake Socket.IO client to record every listener registration.
+- Simulated three disconnect/connect cycles with all three market streams active.
+- Verified lifecycle and market listeners remained registered exactly once.
+- Verified one incoming payload caused one handler invocation per stream per cycle.
+- Passed the focused 22-test client suite and full 129-test regression suite.
+- Did not address decode error handling, raw debug mode, or forced-interruption acceptance.
+
+### 2026-09-19 — Phase 7 decode-error-handling task group
+
+- Audited existing type, protobuf decode, validation, and pipeline error boundaries.
+- Added one malformed-frame recovery test for each realtime stream.
+- Verified bad frames are logged, ignored, and never update market state.
+- Verified the next valid frame is processed normally for every stream.
+- Passed 81 focused tests and the full 132-test regression suite.
+- Did not add raw debug mode or claim forced-interruption acceptance.
+
+### 2026-09-19 — Phase 7 bounded-raw-debug task group
+
+- Added an opt-in raw debug wrapper for all three market events.
+- Logged only bounded event/type/size metadata and never raw payload content.
+- Added thread-safe per-event counters with a default limit of 20 records.
+- Exposed validated raw-debug flags in all four realtime acceptance scripts.
+- Passed 30 client tests, all four CLI help audits, and 140 total tests.
+- Left Phase 7 acceptance open because forced-interruption stream recovery is NOT TESTED.

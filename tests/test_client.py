@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import logging
 from typing import Any
 
 import pytest
@@ -15,11 +16,13 @@ class FakeSocketClient:
         self.connected = False
         self.sid = "test-sid"
         self.handlers: dict[str, Callable[..., None]] = {}
+        self.on_calls: list[tuple[str, Callable[..., None]]] = []
         self.connect_calls: list[tuple[str, dict[str, Any]]] = []
         self.emit_calls: list[tuple[str, object]] = []
         self.disconnect_calls = 0
 
     def on(self, event: str, handler: Callable[..., None]) -> None:
+        self.on_calls.append((event, handler))
         self.handlers[event] = handler
 
     def connect(self, url: str, **kwargs: Any) -> None:
@@ -106,6 +109,105 @@ def test_default_socket_client_enables_reconnection(monkeypatch: pytest.MonkeyPa
         "logger": False,
         "engineio_logger": False,
     }
+
+
+@pytest.mark.parametrize("invalid_limit", [0, -1])
+def test_raw_debug_rejects_non_positive_event_limit(invalid_limit: int) -> None:
+    with pytest.raises(ValueError, match="must be at least 1"):
+        VietcapRealtimeClient(
+            socket_client=FakeSocketClient(),  # type: ignore[arg-type]
+            raw_debug_event_limit=invalid_limit,
+        )
+
+
+def test_raw_debug_rejects_non_integer_event_limit() -> None:
+    with pytest.raises(TypeError, match="must be an integer"):
+        VietcapRealtimeClient(
+            socket_client=FakeSocketClient(),  # type: ignore[arg-type]
+            raw_debug_event_limit=True,
+        )
+
+
+def test_raw_debug_is_disabled_by_default(caplog: pytest.LogCaptureFixture) -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+    received: list[object] = []
+    client.on_match_price(received.append)
+
+    with caplog.at_level(logging.DEBUG, logger="data.vietcap.client"):
+        socket_client.handlers["w-match-price"](b"sensitive-payload")
+
+    assert received == [b"sensitive-payload"]
+    assert "Received raw Vietcap event metadata" not in caplog.text
+
+
+def test_raw_debug_logs_bounded_metadata_without_payload(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(  # type: ignore[arg-type]
+        socket_client=socket_client,
+        raw_debug=True,
+        raw_debug_event_limit=2,
+    )
+    received: list[object] = []
+    client.on_match_price(received.append)
+
+    with caplog.at_level(logging.DEBUG, logger="data.vietcap.client"):
+        for payload in (b"secret-one", b"secret-two", b"secret-three"):
+            socket_client.handlers["w-match-price"](payload)
+
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Received raw Vietcap event metadata"
+    ]
+    assert received == [b"secret-one", b"secret-two", b"secret-three"]
+    assert len(records) == 2
+    assert [record.event for record in records] == [
+        "w-match-price",
+        "w-match-price",
+    ]
+    assert [record.payload_type for record in records] == ["bytes", "bytes"]
+    assert [record.payload_size for record in records] == [10, 10]
+    assert [record.raw_debug_event_number for record in records] == [1, 2]
+    assert records[-1].raw_debug_limit_reached is True
+    assert "secret" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("register_method", "event"),
+    [
+        ("on_match_price", "w-match-price"),
+        ("on_index", "index"),
+        ("on_bid_ask", "w-bid-ask"),
+    ],
+)
+def test_raw_debug_covers_each_market_stream(
+    register_method: str,
+    event: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(  # type: ignore[arg-type]
+        socket_client=socket_client,
+        raw_debug=True,
+    )
+    received: list[object] = []
+    getattr(client, register_method)(received.append)
+
+    with caplog.at_level(logging.DEBUG, logger="data.vietcap.client"):
+        socket_client.handlers[event](memoryview(b"frame"))
+
+    record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Received raw Vietcap event metadata"
+    )
+    assert received == [memoryview(b"frame")]
+    assert record.event == event
+    assert record.payload_type == "memoryview"
+    assert record.payload_size == 5
 
 
 def test_disconnect_is_idempotent() -> None:
@@ -330,3 +432,44 @@ def test_subscription_restore_continues_after_one_stream_fails() -> None:
         ("index", '{"symbols":["VNINDEX"]}'),
         ("w-bid-ask", '{"symbols":["FPT","ACB"]}'),
     ]
+
+
+def test_repeated_reconnects_do_not_register_duplicate_listeners() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+    received = {"w-match-price": 0, "index": 0, "w-bid-ask": 0}
+
+    def count(event: str) -> Callable[[object], None]:
+        def handler(payload: object) -> None:
+            del payload
+            received[event] += 1
+
+        return handler
+
+    client.on_match_price(count("w-match-price"))
+    client.on_index(count("index"))
+    client.on_bid_ask(count("w-bid-ask"))
+    client.connect()
+    client.subscribe_match_price(("FPT", "ACB"))
+    client.subscribe_index(("VNINDEX",))
+    client.subscribe_bid_ask(("FPT", "ACB"))
+
+    for _ in range(3):
+        socket_client.connected = False
+        socket_client.handlers["disconnect"]("transport error")
+        socket_client.connected = True
+        socket_client.handlers["connect"]()
+        socket_client.handlers["w-match-price"](b"match-price")
+        socket_client.handlers["index"](b"index")
+        socket_client.handlers["w-bid-ask"](b"bid-ask")
+
+    registered_events = [event for event, _handler in socket_client.on_calls]
+    assert registered_events == [
+        "connect",
+        "disconnect",
+        "connect_error",
+        "w-match-price",
+        "index",
+        "w-bid-ask",
+    ]
+    assert received == {"w-match-price": 3, "index": 3, "w-bid-ask": 3}

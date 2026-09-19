@@ -150,9 +150,9 @@ Acceptance:
 - [x] Reconnect handling
 - [x] Exponential/reasonable retry
 - [x] Re-subscribe after reconnect
-- [ ] No duplicate listeners
-- [ ] Decode error handling
-- [ ] Raw debug mode
+- [x] No duplicate listeners
+- [x] Decode error handling
+- [x] Raw debug mode
 - [ ] STOP and report
 
 Acceptance:

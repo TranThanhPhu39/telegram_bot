@@ -42,11 +42,24 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable Socket.IO and Engine.IO protocol logs.",
     )
+    parser.add_argument(
+        "--raw-debug",
+        action="store_true",
+        help="Log bounded payload metadata without logging binary content.",
+    )
+    parser.add_argument(
+        "--raw-debug-event-limit",
+        type=int,
+        default=20,
+        help="Maximum raw-debug metadata records per market event.",
+    )
     args = parser.parse_args()
     if args.hold_seconds <= 0:
         parser.error("--hold-seconds must be positive")
     if args.min_updates < 2:
         parser.error("--min-updates must be at least 2 to prove changing ticks")
+    if args.raw_debug_event_limit < 1:
+        parser.error("--raw-debug-event-limit must be at least 1")
     return args
 
 
@@ -75,11 +88,19 @@ def print_tick(message: price_pb2.MatchPriceMessage) -> None:
 def main() -> int:
     args = parse_args()
     logging.basicConfig(
-        level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
+        level=getattr(
+            logging,
+            os.getenv("LOG_LEVEL", "DEBUG" if args.raw_debug else "INFO").upper(),
+            logging.INFO,
+        ),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     log = logging.getLogger(__name__)
-    client = VietcapRealtimeClient(engineio_logger=args.engineio_logs)
+    client = VietcapRealtimeClient(
+        engineio_logger=args.engineio_logs,
+        raw_debug=args.raw_debug,
+        raw_debug_event_limit=args.raw_debug_event_limit,
+    )
     distinct_ticks: set[tuple[object, ...]] = set()
     success = threading.Event()
     first_event = True

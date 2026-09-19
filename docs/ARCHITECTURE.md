@@ -117,7 +117,16 @@ attempt, caps at 30 seconds, and applies a 0.5 jitter factor. Attempts continue
 until success or an explicit client stop. Desired match-price, index, and bid-ask
 subscriptions persist separately from active connection state and are restored in
 that order after reconnect. Failure to restore one stream is logged and does not
-prevent restoration attempts for the remaining streams.
+prevent restoration attempts for the remaining streams. Lifecycle listeners are
+registered once during client construction, while market listeners are registered
+only through the explicit `on_*` methods; reconnect restores subscriptions without
+registering another listener. Each realtime pipeline catches expected payload type,
+protobuf decode, and validation errors at its boundary, logs the rejected event,
+leaves market state unchanged, and remains available for the next valid frame.
+An opt-in raw debug wrapper can log event name, payload runtime type, and byte
+length before handler dispatch. It is disabled by default, never logs payload
+content, and caps records per event with thread-safe counters while continuing to
+deliver every payload to the handler.
 
 ## Universe
 
