@@ -340,11 +340,11 @@ maximum drawdown, and profit factor. Profit factor is unavailable when there are
 no losing trades rather than reported as an artificial infinite number.
 `/performance` is exposed through the Telegram data-service boundary.
 
-`scripts/run_preliminary_backtest` is a bounded diagnostic for 140 aligned FPT and
-VNINDEX daily bars. Its daily volume ratio and trend-only index regime are clearly
-marked as preliminary proxies, not final live-strategy evidence. At the current
-runtime boundary Vietcap returned zero daily bars, so no 3–6 month performance
-claim has been produced.
+`scripts/run_preliminary_backtest` is a bounded diagnostic using the latest 120
+aligned ACB and VNINDEX daily bars. Its daily volume ratio and trend-only index
+regime are clearly marked as preliminary proxies, not final live-strategy
+evidence. The accepted sample spans 175 calendar days and produced zero closed
+trades. Metrics therefore describe zero activity and make no profitability claim.
 
 ## Planned V1 signal features
 - Market Regime

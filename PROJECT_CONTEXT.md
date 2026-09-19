@@ -46,9 +46,9 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 16 — Backtest & performance — IN PROGRESS. The engine, metrics, and Telegram
-performance command are complete, but the 3–6 month preliminary run is blocked
-because Vietcap returned zero requested daily bars. Phases
+Phase 16 — Backtest & performance — COMPLETE. Development is stopped before Phase
+17. The 120-session preliminary ACB/VNINDEX run spans 175 calendar days and
+produced zero trades; it is explicitly not a profitability claim. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -107,18 +107,18 @@ because Vietcap returned zero requested daily bars. Phases
 - [x] HOSE/HNX/UPCoM common-stock liquidity scanner and bounded watch universe implemented
 - [x] Telegram commands, live token authentication, and deduplicated signal alerts implemented
 - [x] Shared SignalEngine backtest adapter and performance metrics implemented and unit-tested
-- [ ] Three-to-six-month preliminary backtest (NOT TESTED: zero historical bars returned)
+- [x] Preliminary 120-session ACB/VNINDEX backtest executed with explicit proxy limitations
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 16 is split at a concrete external-data blocker. Shared-engine replay,
-closed-trade accounting, win rate, average return, maximum drawdown, profit factor,
-and `/performance` are implemented and verified. The required 3–6 month preliminary
-run remains NOT TESTED because authenticated Vietcap requests returned zero FPT
-and VNINDEX daily bars. Phase 17 must not start yet.
+Phase 16 is complete. Shared-engine replay, trade accounting, performance metrics,
+and `/performance` are implemented. Separate authenticated requests resolved the
+historical-data issue and produced 170 aligned ACB/VNINDEX bars. The accepted
+latest 120-session/175-day preliminary run produced zero trades. Development stops
+until the user explicitly opens Phase 17.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
@@ -136,9 +136,9 @@ by five focused tests.
 
 Purpose: bounded authenticated 140-session FPT/VNINDEX preliminary backtest probe.
 
-Status: NOT TESTED to completion. Vietcap returned zero FPT and zero VNINDEX daily
-bars for both attempted request boundaries, so the script correctly emitted no
-performance claim.
+Status: PASS as a preliminary runtime diagnostic. Separate ACB and VNINDEX
+requests produced 170 aligned bars; the latest 120 sessions span 175 calendar
+days. The run emitted zero trades and clearly labels its daily proxies.
 
 ### `tests/test_backtest.py`
 
@@ -1198,9 +1198,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Resolve the Phase 16 historical-data blocker and rerun
-`py -3.12 -m scripts.run_preliminary_backtest`. Do not open Phase 17 while the
-3–6 month preliminary checkbox remains unchecked.
+Await explicit user authorization before opening Phase 17. Do not implement the
+fundamental filter automatically.
 
 ## 12. How To Run
 
@@ -1863,3 +1862,17 @@ three observed values before request construction.
 - Passed five focused tests and the complete 365-test suite.
 - Split Phase 16 due to the concrete external historical-data blocker. The 3–6
   month preliminary backtest and Phase STOP remain unchecked and NOT TESTED.
+
+### 2026-09-19 — Phase 16 historical-data resolution and completion
+
+- Changed the preliminary acquisition from a combined FPT/VNINDEX request to
+  separate ACB and VNINDEX requests matching the proven single-symbol contract.
+- Received and aligned 170 real `ONE_DAY` bars for each series.
+- Limited acceptance to the latest 120 aligned sessions, spanning 175 calendar
+  days, to satisfy the requested 3–6 month preliminary window.
+- Ran the shared SignalEngine with the documented daily volume and trend-only
+  regime proxies. It produced zero closed trades and zero open positions.
+- Reported 0% win rate, 0% average return, 0% maximum drawdown, and unavailable
+  profit factor. These are zero-activity metrics, not a profitability claim.
+- Preserved thresholds and did not tune the strategy merely to manufacture trades.
+- Marked Phase 16 complete and stopped before Phase 17.

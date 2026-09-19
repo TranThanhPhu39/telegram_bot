@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 16 — Backtest & performance (IN PROGRESS; historical-data blocker)**
+**Phase 16 — Backtest & performance (COMPLETE; stopped before Phase 17)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -269,18 +269,19 @@ Acceptance:
 
 ## Phase 16 — Backtest & performance
 - [x] Shared live/backtest strategy code
-- [ ] 3–6 month preliminary backtest
+- [x] 3–6 month preliminary backtest
 - [x] Win rate
 - [x] Average return
 - [x] Max drawdown
 - [x] Profit factor
 - [x] `/performance`
-- [ ] STOP and report
+- [x] STOP and report
 
-Blocker: authenticated Vietcap `ONE_DAY` requests for 140 FPT + VNINDEX bars
-returned HTTP success with zero bars on 2026-09-19, both with the runtime clock
-and the previously browser-confirmed `to=1790035200` boundary. The preliminary
-3–6 month result remains NOT TESTED; no synthetic performance is reported.
+Preliminary evidence: separate authenticated ACB and VNINDEX `ONE_DAY` requests
+returned 170 aligned bars. The latest 120 aligned sessions span 175 calendar
+days. The explicitly limited daily-proxy run produced zero closed trades, 0%
+win rate/average return/max drawdown, and undefined profit factor. This is valid
+zero-activity evidence, not a profitability claim or final live-strategy result.
 
 ---
 

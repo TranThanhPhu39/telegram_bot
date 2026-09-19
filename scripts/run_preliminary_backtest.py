@@ -8,6 +8,7 @@ available from the current Phase 8 boundary. Results are not production claims.
 from __future__ import annotations
 
 import os
+import sys
 
 from dotenv import load_dotenv
 
@@ -20,6 +21,8 @@ from strategy.signal_engine import SignalEngine, SignalEngineConfig, SignalInput
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     load_dotenv()
     secrets = [os.getenv(name, "").strip() for name in ("VIETCAP_AUTHORIZATION", "VIETCAP_DEVICE_ID", "VIETCAP_COOKIE")]
     if not all(secrets):
@@ -27,22 +30,34 @@ def main() -> int:
         return 2
     client = VietcapRestClient(authorization=secrets[0], device_id=secrets[1], cookie=secrets[2])
     to_timestamp = int(os.getenv("BACKTEST_TO_TIMESTAMP", "1790035200"))
-    payload = client.get_gap_chart(
-        ("FPT", "VNINDEX"), time_frame=VietcapTimeFrame.ONE_DAY,
-        count_back=140, to_timestamp=to_timestamp,
+    stock_symbol = os.getenv("BACKTEST_SYMBOL", "ACB").strip().upper()
+    stock_payload = client.get_gap_chart(
+        (stock_symbol,), time_frame=VietcapTimeFrame.ONE_DAY,
+        count_back=170, to_timestamp=to_timestamp,
     )
-    all_bars = normalize_gap_chart(payload, time_frame=VietcapTimeFrame.ONE_DAY)
-    stock = tuple(bar for bar in all_bars if bar.symbol == "FPT")
-    benchmark = tuple(bar for bar in all_bars if bar.symbol == "VNINDEX")
+    benchmark_payload = client.get_gap_chart(
+        ("VNINDEX",), time_frame=VietcapTimeFrame.ONE_DAY,
+        count_back=170, to_timestamp=to_timestamp,
+    )
+    stock = tuple(
+        bar for bar in normalize_gap_chart(stock_payload, time_frame=VietcapTimeFrame.ONE_DAY)
+        if bar.symbol == stock_symbol
+    )
+    benchmark = tuple(
+        bar for bar in normalize_gap_chart(benchmark_payload, time_frame=VietcapTimeFrame.ONE_DAY)
+        if bar.symbol == "VNINDEX"
+    )
     benchmark_by_time = {bar.timestamp: bar for bar in benchmark}
     raw_stock_count = len(stock)
     raw_benchmark_count = len(benchmark)
     stock = tuple(bar for bar in stock if bar.timestamp in benchmark_by_time)
     benchmark = tuple(benchmark_by_time[bar.timestamp] for bar in stock)
+    stock = stock[-120:]
+    benchmark = benchmark[-120:]
     if len(stock) < 90:
         print(
             f"[NOT TESTED] Only {len(stock)} aligned daily observations returned; "
-            f"FPT={raw_stock_count}; VNINDEX={raw_benchmark_count}"
+            f"{stock_symbol}={raw_stock_count}; VNINDEX={raw_benchmark_count}"
         )
         return 1
 
@@ -66,7 +81,7 @@ def main() -> int:
         exit_triggered = stock20[index] is not None and bar.close < stock20[index]
         observations.append(
             SignalInputs(
-                "FPT", bar.timestamp, bar.close,
+                stock_symbol, bar.timestamp, bar.close,
                 MarketRegime.BULL if market_bull else MarketRegime.NEUTRAL,
                 stock_trend, rs[index], volume_proxy, breakout, exit_triggered,
             )
@@ -74,7 +89,10 @@ def main() -> int:
     engine = SignalEngine(SignalEngineConfig(1.5, 0.0, 0))
     _, report = run_backtest(engine, observations)
     days = (report.end_timestamp - report.start_timestamp) // 86_400
-    print(f"[PASS] Preliminary daily backtest; aligned_bars={len(stock)}; calendar_days={days}")
+    print(
+        f"[PASS] Preliminary daily backtest; symbol={stock_symbol}; "
+        f"aligned_bars={len(stock)}; calendar_days={days}"
+    )
     print(format_performance(report))
     print("LIMITATION: daily volume proxy and trend-only VNINDEX regime; not final live-strategy evidence")
     return 0
