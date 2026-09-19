@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 14 — Scanner universe (COMPLETE; stopped before Phase 15)**
+**Phase 15 — Telegram Bot (COMPLETE; stopped before Phase 16)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -255,15 +255,15 @@ Acceptance:
 ---
 
 ## Phase 15 — Telegram Bot
-- [ ] BotFather token via `.env`
-- [ ] `/start`
-- [ ] `/help`
-- [ ] `/soi FPT`
-- [ ] `/scan`
-- [ ] `/market`
-- [ ] `/why FPT`
-- [ ] auto alerts
-- [ ] STOP and report
+- [x] BotFather token via `.env`
+- [x] `/start`
+- [x] `/help`
+- [x] `/soi FPT`
+- [x] `/scan`
+- [x] `/market`
+- [x] `/why FPT`
+- [x] auto alerts
+- [x] STOP and report
 
 ---
 

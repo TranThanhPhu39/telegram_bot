@@ -312,6 +312,21 @@ symbol. Both pre-screen and watch-list ordering are deterministic. The scanner
 does not fetch a listing catalog; a future provider adapter must supply normalized
 metadata and history.
 
+## Telegram layer
+
+`telegram_bot` uses pinned `python-telegram-bot` and reads
+`TELEGRAM_BOT_TOKEN` only from local environment configuration. Application
+wiring registers `/start`, `/help`, `/soi`, `/scan`, `/market`, and `/why`.
+Rendering is separated behind `BotDataService`, so handlers do not call Vietcap
+or strategy internals directly and can be connected to the live orchestrator
+later. The runnable fallback reports unavailable data instead of fabricating it.
+
+`TelegramAlertPublisher` formats `SignalEvent` transitions and deduplicates by
+chat, symbol, lifecycle, and sequence. A delivery is marked sent only after
+Telegram accepts it, so a failed attempt remains retryable. `scripts/test_telegram`
+performs a bounded `getMe` authentication check without printing the token;
+`scripts/run_telegram_bot` starts long polling.
+
 ## Planned V1 signal features
 - Market Regime
 - Trend

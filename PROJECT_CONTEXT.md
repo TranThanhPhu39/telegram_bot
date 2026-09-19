@@ -46,7 +46,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 14 — Scanner universe — COMPLETE. Development is stopped before Phase 15. Phases
+Phase 15 — Telegram Bot — COMPLETE. Development is stopped before Phase 16. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -103,19 +103,41 @@ Phase 14 — Scanner universe — COMPLETE. Development is stopped before Phase 
 - [x] Explainable VNINDEX trend-and-breadth market regime implemented and unit-tested
 - [x] Provider-independent V1 signal lifecycle with cooldown/dedup implemented and unit-tested
 - [x] HOSE/HNX/UPCoM common-stock liquidity scanner and bounded watch universe implemented
+- [x] Telegram commands, live token authentication, and deduplicated signal alerts implemented
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 14 is complete. The scanner filters normalized HOSE/HNX/UPCoM instrument
-metadata to active common stocks, applies a completed-history liquidity screen,
-and builds a deterministic bounded realtime watch universe. Development stops
-until the user explicitly opens Phase 15.
+Phase 15 is complete. Telegram token authentication succeeded, all required
+commands are wired through a provider-independent data-service boundary, and
+automatic signal alerts are deduplicated per recipient. Development stops until
+the user explicitly opens Phase 16.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
+
+### `telegram_bot/commands.py`, `telegram_bot/app.py`, `telegram_bot/alerts.py`
+
+Purpose: pure command rendering, python-telegram-bot handler wiring, environment
+token loading, and deduplicated SignalEvent alert delivery.
+
+Status: all required commands, safe unavailable-data fallback, handler registry,
+formatting, successful deduplication, and failed-send retry behavior are unit-tested.
+
+### `scripts/run_telegram_bot.py` and `scripts/test_telegram.py`
+
+Purpose: long-polling entry point and bounded live token authentication check.
+
+Status: Telegram `getMe` returned PASS for the configured bot without exposing the
+token. The polling process itself was not left running during acceptance.
+
+### `tests/test_telegram_bot.py`
+
+Purpose: deterministic Phase 15 command and alert acceptance coverage.
+
+Status: eight focused tests pass; the full suite passes with 360 tests.
 
 ### `scanner/universe.py`
 
@@ -1148,8 +1170,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Await explicit user authorization before opening Phase 15. Do not implement the
-Telegram bot automatically.
+Await explicit user authorization before opening Phase 16. Do not implement the
+backtest/performance layer automatically.
 
 ## 12. How To Run
 
@@ -1777,4 +1799,21 @@ three observed values before request construction.
   volume, and symbol.
 - Passed sixteen focused tests and the complete 352-test suite.
 - Marked Phase 14 complete and stopped before Phase 15. Phases 3–7 remain pending
+  live validation.
+
+### 2026-09-19 — Phase 15 Telegram Bot
+
+- Opened and completed Phase 15 after explicit user authorization and confirmation
+  that `TELEGRAM_BOT_TOKEN` was present in ignored local `.env`.
+- Pinned and installed `python-telegram-bot==22.8` from the stable library line.
+- Added `/start`, `/help`, `/soi`, `/scan`, `/market`, and `/why` through an
+  injected data-service boundary with deterministic usage/missing-data responses.
+- Added a safe runnable fallback that never fabricates unavailable market or signal
+  data, plus a long-polling entry point.
+- Added automatic SignalEvent alerts deduplicated by recipient, symbol, lifecycle,
+  and event sequence; failed sends remain retryable.
+- Verified the user-supplied token with Telegram `getMe`; authentication PASS for
+  `@stock_vinavn_bot` without printing or logging the token.
+- Passed eight focused tests and the complete 360-test suite.
+- Marked Phase 15 complete and stopped before Phase 16. Phases 3–7 remain pending
   live validation.
