@@ -46,7 +46,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 13 — Signal Engine V1 — COMPLETE. Development is stopped before Phase 14. Phases
+Phase 14 — Scanner universe — COMPLETE. Development is stopped before Phase 15. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -102,18 +102,35 @@ Phase 13 — Signal Engine V1 — COMPLETE. Development is stopped before Phase 
 - [x] Time-matched intraday RVOL implemented and unit-tested without look-ahead
 - [x] Explainable VNINDEX trend-and-breadth market regime implemented and unit-tested
 - [x] Provider-independent V1 signal lifecycle with cooldown/dedup implemented and unit-tested
+- [x] HOSE/HNX/UPCoM common-stock liquidity scanner and bounded watch universe implemented
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 13 is complete. The shared signal engine implements the complete V1 state
-lifecycle, explainable transition events, per-symbol deduplication, and post-exit
-cooldown. Development stops until the user explicitly opens Phase 14.
+Phase 14 is complete. The scanner filters normalized HOSE/HNX/UPCoM instrument
+metadata to active common stocks, applies a completed-history liquidity screen,
+and builds a deterministic bounded realtime watch universe. Development stops
+until the user explicitly opens Phase 15.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
+
+### `scanner/universe.py`
+
+Purpose: provider-independent exchange/type filtering, daily liquidity pre-screen,
+and bounded deterministic realtime watch-universe selection.
+
+Status: three-exchange coverage, exclusions, liquidity thresholds, completed-bar
+lookback, no-look-ahead boundary, ranking, and validation are covered by sixteen
+focused tests.
+
+### `scanner/__init__.py` and `tests/test_scanner_universe.py`
+
+Purpose: scanner package boundary and deterministic Phase 14 acceptance suite.
+
+Status: sixteen focused tests pass; the full suite passes with 352 tests.
 
 ### `strategy/signal_engine.py`
 
@@ -1131,8 +1148,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Await explicit user authorization before opening Phase 14. Do not implement the
-scanner universe automatically.
+Await explicit user authorization before opening Phase 15. Do not implement the
+Telegram bot automatically.
 
 ## 12. How To Run
 
@@ -1744,4 +1761,20 @@ three observed values before request construction.
   positive, negative, missing, and trigger fields.
 - Passed sixteen focused tests and the complete 336-test suite.
 - Marked Phase 13 complete and stopped before Phase 14. Phases 3–7 remain pending
+  live validation.
+
+### 2026-09-19 — Phase 14 scanner universe
+
+- Opened and completed Phase 14 after explicit user authorization.
+- Added normalized instrument metadata and explicit scanner configuration models.
+- Limited eligibility to active common-stock metadata on HOSE, HNX, and UPCoM;
+  non-stock types and unsupported venues are excluded without ticker-name guesses.
+- Added a daily liquidity pre-screen requiring configurable average volume and
+  average traded-value thresholds over a complete lookback window.
+- Enforced an explicit `as_of` boundary so only earlier completed daily bars enter
+  the screen; insufficient history fails closed.
+- Added deterministic bounded watch-list ranking by average traded value, average
+  volume, and symbol.
+- Passed sixteen focused tests and the complete 352-test suite.
+- Marked Phase 14 complete and stopped before Phase 15. Phases 3–7 remain pending
   live validation.

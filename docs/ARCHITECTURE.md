@@ -288,17 +288,29 @@ Thresholds and cooldown are explicit configuration for later backtesting.
 
 ## Universe
 
-Data universe:
+`scanner.universe.daily_prescreen` consumes provider-independent instrument
+metadata and normalized completed daily bars. The supported universe is:
+
 - HOSE
 - HNX
 - UPCoM
 
-Strategy scanner should later use:
-- common stocks only
-- exclude ETF/CW/fund/bond where applicable
-- liquidity filter
-- daily pre-screen
-- smaller realtime watch universe
+Only active `STOCK`/`COMMON_STOCK` instruments are eligible; ETF, CW, fund, bond,
+index, inactive, and unsupported-exchange records are excluded. This filtering
+depends on upstream instrument metadata; Phase 14 does not invent security types
+from ticker names.
+
+The daily pre-screen requires an explicit lookback, minimum average daily volume,
+minimum average daily traded value, and `as_of` timestamp. Average traded value is
+computed as mean `close * volume` across the latest completed lookback window.
+Only bars strictly earlier than `as_of` participate, preventing current/future
+data leakage. Symbols without enough completed history fail closed.
+
+`realtime_watch_universe` bounds realtime load by taking the configured number of
+most liquid screened symbols, ranked by average daily value, then volume, then
+symbol. Both pre-screen and watch-list ordering are deterministic. The scanner
+does not fetch a listing catalog; a future provider adapter must supply normalized
+metadata and history.
 
 ## Planned V1 signal features
 - Market Regime
