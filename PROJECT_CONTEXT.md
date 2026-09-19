@@ -46,8 +46,9 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 8 — Historical REST — COMPLETE. Development is stopped before Phase 9.
-Phases 3–7 remain pending live validation and may not be reported as PASS.
+Phase 9 — Database — active by explicit user instruction. The SQLite connection
+foundation is implemented; application tables have not been started. Phases 3–7
+remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
 
@@ -88,19 +89,33 @@ Phases 3–7 remain pending live validation and may not be reported as PASS.
 - [x] ONE_MINUTE, ONE_HOUR, and ONE_DAY request semantics implemented and unit-tested
 - [x] Evidence-backed gap-chart OHLCV normalization and fixture tests implemented
 - [x] Authenticated Python historical fetch and normalization verified live
+- [x] SQLite selected for V1 and connection boundary unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 8 is complete. Python received HTTP 200 and normalized 121 ACB
-`ONE_MINUTE` bars after reproducing the observed request headers and using
-user-managed authorization, device ID, and cookie from ignored local `.env`.
-Development stops here until the user explicitly opens Phase 9. Phases 3–7
-retain their pending live-validation status.
+Phase 9 is active. SQLite is selected for the single-process V1 bot and a small
+stdlib connection boundary now validates `sqlite:///` URLs, enables foreign keys,
+sets a five-second busy timeout, and returns named rows. No application tables or
+migrations exist yet. Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
+
+### `data/database.py`
+
+Purpose: validates V1 SQLite URLs and opens consistently configured connections.
+
+Status: unit-tested with in-memory and temporary file databases. It intentionally
+creates no application tables yet.
+
+### `tests/test_database.py`
+
+Purpose: verifies URL rejection, connection pragmas, empty initial schema, and
+file-backed persistence without touching the configured production database.
+
+Status: nine focused tests pass.
 
 ### `requirements.txt`
 
@@ -984,8 +999,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Await explicit user authorization before opening Phase 9. Do not implement the
-database automatically.
+Continue Phase 9 with one small task: define and test the `symbols` table schema
+without creating the remaining Phase 9 tables.
 
 ## 12. How To Run
 
@@ -1461,3 +1476,11 @@ three observed values before request construction.
 - Kept authorization, device ID, and cookie only in ignored local `.env` and
   never printed their values.
 - Marked Phase 8 acceptance and STOP complete; did not start Phase 9.
+
+### 2026-09-19 — Phase 9 SQLite foundation
+
+- Opened Phase 9 by explicit user instruction and selected SQLite for V1.
+- Added a standard-library connection boundary for `sqlite:///` URLs.
+- Enabled foreign-key enforcement, a five-second busy timeout, and named rows.
+- Verified both in-memory isolation and temporary file persistence in nine tests.
+- Created no application tables and did not start the schema bootstrap task.

@@ -154,6 +154,15 @@ runtime inputs. The provider also required the observed same-origin browser
 request headers during live verification; no credential value is logged or
 stored in tracked files.
 
+## V1 database
+
+V1 uses Python's standard-library SQLite driver behind `data.database`.
+`DATABASE_URL=sqlite:///stock_bot.db` remains the local default. The connection
+boundary enables foreign-key enforcement, a five-second busy timeout, and named
+row access. It creates no application tables; schema creation and migrations are
+separate Phase 9 tasks. SQLite is appropriate for the initial single-process bot
+and can later be replaced behind this boundary if write concurrency grows.
+
 ## Universe
 
 Data universe:

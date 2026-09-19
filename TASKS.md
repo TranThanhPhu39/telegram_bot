@@ -37,7 +37,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 8 — Historical REST (COMPLETE; stopped before Phase 9)**
+**Phase 9 — Database**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -92,7 +92,7 @@ Acceptance:
 - [ ] Decode using MatchPrice protobuf
 - [ ] Print normalized FPT tick
 - [ ] Validate price/volume fields
-- [x] STOP and report
+- [ ] STOP and report
 
 Acceptance:
 - Valid changing FPT realtime ticks observed
@@ -176,7 +176,7 @@ Acceptance:
   - Verified from an authenticated-browser HTTP 200 response: `t/o/h/l/c/v`
     arrays normalize to immutable `OHLCVBar` values.
 - [x] Add fixtures/tests
-- [ ] STOP and report
+- [x] STOP and report
 
 Acceptance:
 - Historical bars can be fetched and normalized
@@ -186,7 +186,7 @@ Acceptance:
 ---
 
 ## Phase 9 — Database
-- [ ] Choose SQLite for V1 unless repo already uses another DB
+- [x] Choose SQLite for V1 unless repo already uses another DB
 - [ ] Create symbols table
 - [ ] Create candles table
 - [ ] Create signals table
