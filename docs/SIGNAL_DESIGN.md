@@ -106,3 +106,11 @@ Every emitted transition stores:
 
 The reason structure is JSON-serializable for database persistence and the future
 `/why FPT` command.
+
+## Fundamental context
+
+Phase 17 normalizes EPS, P/E, P/B, ROE, revenue growth, and profit growth from a
+controlled CSV snapshot with source provenance and as-of date. Threshold results
+are `PASS`, `FAIL`, or `INSUFFICIENT_DATA`. They may narrow the scanner universe
+or enrich explanations, but they are deliberately absent from `SignalInputs` and
+cannot trigger a lifecycle transition by themselves.

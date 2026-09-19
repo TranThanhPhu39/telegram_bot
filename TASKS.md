@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 16 — Backtest & performance (COMPLETE; stopped before Phase 17)**
+**Phase 17 — Fundamental filter (COMPLETE; stopped before Phase 18)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -286,14 +286,17 @@ zero-activity evidence, not a profitability claim or final live-strategy result.
 ---
 
 ## Phase 17 — Fundamental filter
-- [ ] Select data source
-- [ ] EPS
-- [ ] P/E
-- [ ] P/B
-- [ ] ROE
-- [ ] revenue/profit growth
-- [ ] Integrate as filter/context, not uncontrolled signal
-- [ ] STOP and report
+- [x] Select data source
+- [x] EPS
+- [x] P/E
+- [x] P/B
+- [x] ROE
+- [x] revenue/profit growth
+- [x] Integrate as filter/context, not uncontrolled signal
+- [x] STOP and report
+
+V1 source decision: controlled UTF-8 CSV snapshots with mandatory per-row source
+provenance and as-of date. No unstable or unlicensed fundamentals API is assumed.
 
 ---
 

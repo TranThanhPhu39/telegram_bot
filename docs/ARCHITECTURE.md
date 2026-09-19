@@ -346,6 +346,21 @@ regime are clearly marked as preliminary proxies, not final live-strategy
 evidence. The accepted sample spans 175 calendar days and produced zero closed
 trades. Metrics therefore describe zero activity and make no profitability claim.
 
+## Fundamental context layer
+
+V1 selects controlled UTF-8 CSV snapshots as the fundamental source boundary.
+Every row must include a normalized symbol, ISO as-of date, and non-empty source
+provenance alongside optional EPS, P/E, P/B, ROE percentage, revenue-growth
+percentage, and profit-growth percentage. This avoids coupling core strategy code
+to an unstable, undocumented, or unlicensed API; a licensed provider export can be
+normalized into the same schema later.
+
+`fundamentals.filter` evaluates explicit thresholds and returns `PASS`, `FAIL`, or
+`INSUFFICIENT_DATA` with positive, negative, and missing factors. Missing values do
+not silently pass or fail. The result can be applied after the Phase 14 liquidity
+screen, with configurable treatment of insufficient data, or exposed purely as
+context. It is not imported by `SignalEngine` and cannot directly create a signal.
+
 ## Planned V1 signal features
 - Market Regime
 - Trend

@@ -46,9 +46,9 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 16 — Backtest & performance — COMPLETE. Development is stopped before Phase
-17. The 120-session preliminary ACB/VNINDEX run spans 175 calendar days and
-produced zero trades; it is explicitly not a profitability claim. Phases
+Phase 17 — Fundamental filter — COMPLETE. Development is stopped before optional
+Phase 18. V1 uses controlled CSV snapshots with required provenance and keeps
+fundamentals outside direct signal generation. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -108,20 +108,35 @@ produced zero trades; it is explicitly not a profitability claim. Phases
 - [x] Telegram commands, live token authentication, and deduplicated signal alerts implemented
 - [x] Shared SignalEngine backtest adapter and performance metrics implemented and unit-tested
 - [x] Preliminary 120-session ACB/VNINDEX backtest executed with explicit proxy limitations
+- [x] Provider-independent fundamental CSV source and explainable scanner context implemented
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 16 is complete. Shared-engine replay, trade accounting, performance metrics,
-and `/performance` are implemented. Separate authenticated requests resolved the
-historical-data issue and produced 170 aligned ACB/VNINDEX bars. The accepted
-latest 120-session/175-day preliminary run produced zero trades. Development stops
-until the user explicitly opens Phase 17.
+Phase 17 is complete. EPS, P/E, P/B, ROE, revenue growth, and profit growth are
+normalized from provenance-bearing CSV snapshots and assessed as pass, fail, or
+insufficient context. Fundamental results can filter the scanner but do not enter
+SignalEngine. Development stops until the user explicitly opens optional Phase 18.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
+
+### `fundamentals/models.py`, `fundamentals/csv_source.py`, `fundamentals/filter.py`
+
+Purpose: normalized point-in-time fundamentals, strict provenance-bearing CSV
+ingestion, explainable threshold assessment, and optional scanner filtering.
+
+Status: all six requested metrics, missing data, provenance, schema validation,
+threshold failures, and scanner integration are covered by thirteen focused tests.
+
+### `tests/test_fundamentals.py`
+
+Purpose: deterministic Phase 17 source, normalization, assessment, and integration
+acceptance coverage.
+
+Status: thirteen focused tests pass; the full suite passes with 378 tests.
 
 ### `backtest/engine.py`
 
@@ -1198,8 +1213,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Await explicit user authorization before opening Phase 17. Do not implement the
-fundamental filter automatically.
+Await explicit user authorization before opening optional Phase 18. Do not
+implement the news collector automatically.
 
 ## 12. How To Run
 
@@ -1876,3 +1891,19 @@ three observed values before request construction.
   profit factor. These are zero-activity metrics, not a profitability claim.
 - Preserved thresholds and did not tune the strategy merely to manufacture trades.
 - Marked Phase 16 complete and stopped before Phase 17.
+
+### 2026-09-19 — Phase 17 fundamental filter
+
+- Opened and completed Phase 17 after explicit user authorization.
+- Selected controlled UTF-8 CSV snapshots as the V1 source boundary, requiring an
+  ISO as-of date and non-empty per-row provenance rather than assuming an unstable
+  or unlicensed remote fundamentals API.
+- Added immutable normalized EPS, P/E, P/B, ROE, revenue-growth, and profit-growth
+  fields with explicit missing-value support.
+- Added configurable, explainable PASS/FAIL/INSUFFICIENT_DATA assessments.
+- Integrated assessments as an optional post-liquidity scanner filter with
+  configurable handling of insufficient data.
+- Kept fundamentals out of `SignalInputs` and `SignalEngine`, preventing any
+  uncontrolled direct Buy/Sell transition.
+- Passed thirteen focused tests and the complete 378-test suite.
+- Marked Phase 17 complete and stopped before optional Phase 18.
