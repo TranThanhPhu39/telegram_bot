@@ -201,3 +201,60 @@ def test_match_price_and_index_subscriptions_are_independent() -> None:
         ("w-match-price", '{"symbols":["FPT","ACB"]}'),
         ("index", '{"symbols":["VNINDEX"]}'),
     ]
+
+
+def test_bid_ask_subscription_requires_connection() -> None:
+    client = VietcapRealtimeClient(  # type: ignore[arg-type]
+        socket_client=FakeSocketClient()
+    )
+
+    with pytest.raises(ConnectionError, match="Connect before subscribing"):
+        client.subscribe_bid_ask(("FPT", "ACB"))
+
+
+def test_register_and_subscribe_fpt_acb_bid_ask() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+    handler = lambda payload: None
+
+    client.on_bid_ask(handler)
+    client.connect()
+    client.subscribe_bid_ask(("fpt", "ACB"))
+    client.subscribe_bid_ask(("acb", "FPT"))
+
+    assert socket_client.handlers["w-bid-ask"] is handler
+    assert socket_client.emit_calls == [
+        ("w-bid-ask", '{"symbols":["FPT","ACB"]}')
+    ]
+
+
+def test_bid_ask_subscription_can_emit_again_after_disconnect() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+
+    client.connect()
+    client.subscribe_bid_ask(("FPT", "ACB"))
+    client.disconnect()
+    client.connect()
+    client.subscribe_bid_ask(("FPT", "ACB"))
+
+    assert socket_client.emit_calls == [
+        ("w-bid-ask", '{"symbols":["FPT","ACB"]}'),
+        ("w-bid-ask", '{"symbols":["FPT","ACB"]}'),
+    ]
+
+
+def test_all_three_stream_subscriptions_are_independent() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+
+    client.connect()
+    client.subscribe_match_price(("FPT", "ACB"))
+    client.subscribe_index(("VNINDEX",))
+    client.subscribe_bid_ask(("FPT", "ACB"))
+
+    assert socket_client.emit_calls == [
+        ("w-match-price", '{"symbols":["FPT","ACB"]}'),
+        ("index", '{"symbols":["VNINDEX"]}'),
+        ("w-bid-ask", '{"symbols":["FPT","ACB"]}'),
+    ]

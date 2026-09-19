@@ -13,6 +13,7 @@ from data.vietcap.constants import (
     DEFAULT_CONNECT_TIMEOUT_SECONDS,
     DEFAULT_SOCKET_PATH,
     DEFAULT_SOCKET_URL,
+    BID_ASK_EVENT,
     INDEX_EVENT,
     MATCH_PRICE_EVENT,
     SOCKET_TRANSPORTS,
@@ -70,6 +71,7 @@ class VietcapRealtimeClient:
         self._socket.on("connect_error", self._on_connect_error)
         self._match_price_subscription: frozenset[str] | None = None
         self._index_subscription: frozenset[str] | None = None
+        self._bid_ask_subscription: frozenset[str] | None = None
 
     @property
     def connected(self) -> bool:
@@ -214,12 +216,53 @@ class VietcapRealtimeClient:
             raise
         self._index_subscription = subscription
 
+    def on_bid_ask(self, handler: Callable[[object], None]) -> None:
+        """Register the callback for binary bid-ask events."""
+        if not callable(handler):
+            raise TypeError("Bid-ask handler must be callable")
+        self._socket.on(BID_ASK_EVENT, handler)
+
+    def subscribe_bid_ask(self, symbols: tuple[str, ...]) -> None:
+        """Subscribe connected clients to the requested bid-ask symbols."""
+        if not self.connected:
+            raise ConnectionError("Connect before subscribing to bid-ask data")
+        normalized_symbols = normalize_symbols(symbols)
+        subscription = frozenset(normalized_symbols)
+        if subscription == self._bid_ask_subscription:
+            logger.info(
+                "Skipping unchanged Vietcap bid-ask subscription",
+                extra={
+                    "event": BID_ASK_EVENT,
+                    "symbols": list(normalized_symbols),
+                },
+            )
+            return
+
+        payload = build_symbol_subscription(normalized_symbols)
+        logger.info(
+            "Subscribing to Vietcap bid-ask stream",
+            extra={"event": BID_ASK_EVENT, "symbols": list(normalized_symbols)},
+        )
+        try:
+            self._socket.emit(BID_ASK_EVENT, payload)
+        except Exception:
+            logger.exception(
+                "Failed to subscribe to Vietcap bid-ask stream",
+                extra={
+                    "event": BID_ASK_EVENT,
+                    "symbols": list(normalized_symbols),
+                },
+            )
+            raise
+        self._bid_ask_subscription = subscription
+
     def _on_connect(self) -> None:
         logger.info("Socket.IO namespace connected")
 
     def _on_disconnect(self, reason: object | None = None) -> None:
         self._match_price_subscription = None
         self._index_subscription = None
+        self._bid_ask_subscription = None
         logger.info("Socket.IO namespace disconnected", extra={"reason": reason})
 
     def _on_connect_error(self, data: object) -> None:

@@ -122,14 +122,21 @@ Acceptance:
 ---
 
 ## Phase 6 — Bid/Ask
-- [ ] Subscribe FPT + ACB to `w-bid-ask`
-- [ ] Decode `BidAskMessage`
-- [ ] Normalize `OrderBook`
-- [ ] Validate bid/ask levels
+- [x] Subscribe FPT + ACB to `w-bid-ask`
+  - Offline only: `w-bid-ask` listener registration and the exact
+    `{"symbols":["FPT","ACB"]}` JSON-string emission are unit-tested. Live
+    emission over a real session is NOT TESTED.
+- [x] Decode `BidAskMessage`
+  - Offline only: binary decode and malformed-payload rejection are
+    unit-tested against the vendored schema. Live frames are NOT TESTED.
+- [x] Normalize `OrderBook`
+- [x] Validate bid/ask levels
 - [ ] STOP and report
 
 Acceptance:
 - Valid order book updates decoded
+  - NOT TESTED. Requires `scripts/test_realtime_bidask.py` to report `[PASS]`
+    during an active Vietnamese market session.
 
 ---
 

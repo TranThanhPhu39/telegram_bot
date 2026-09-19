@@ -93,6 +93,22 @@ validation/normalization, expected-index filtering, and cache update in that
 order. Malformed, invalid, or unexpected index events are logged and do not
 alter index state.
 
+## Normalized order-book data
+
+`data.models.OrderBook` is the provider-independent boundary for decoded
+bid-ask events, built from immutable `OrderBookLevel` values held in tuples so
+cached depth cannot be mutated. Levels keep the order the provider sent them,
+because the schema does not document a sort order. `bidCount` and `askCount`
+exist in the Vietcap schema but are not normalized, because their meaning is
+undocumented.
+
+`data.market_state.LatestOrderBookState` stores one `OrderBook` per normalized
+symbol, alongside but separate from `LatestMarketState` and `LatestIndexState`;
+none of the three accepts another's model type. Vietcap binary `w-bid-ask`
+events enter through `data.vietcap.pipeline.BidAskStatePipeline`, which
+performs decode, validation/normalization, expected-symbol filtering, and cache
+update in that order.
+
 ## Universe
 
 Data universe:

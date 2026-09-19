@@ -59,3 +59,26 @@ def decode_index(
         )
         raise VietcapDecodeError("Invalid IndexMessage payload") from exc
     return message
+
+
+def decode_bid_ask(
+    payload: bytes | bytearray | memoryview,
+) -> price_pb2.BidAskMessage:
+    """Decode one binary ``BidAskMessage`` payload."""
+    if not isinstance(payload, (bytes, bytearray, memoryview)):
+        raise TypeError(
+            "Bid-ask payload must be bytes-like, "
+            f"received {type(payload).__name__}"
+        )
+
+    raw = bytes(payload)
+    message = price_pb2.BidAskMessage()
+    try:
+        message.ParseFromString(raw)
+    except DecodeError as exc:
+        logger.exception(
+            "Failed to decode BidAskMessage",
+            extra={"event": "w-bid-ask", "payload_size": len(raw)},
+        )
+        raise VietcapDecodeError("Invalid BidAskMessage payload") from exc
+    return message

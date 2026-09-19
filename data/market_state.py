@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from threading import RLock
 from types import MappingProxyType
 
-from data.models import IndexSnapshot, TradeTick
+from data.models import IndexSnapshot, OrderBook, TradeTick
 
 
 class LatestMarketState:
@@ -92,3 +92,43 @@ class LatestIndexState:
     def __len__(self) -> int:
         with self._lock:
             return len(self._snapshots)
+
+
+class LatestOrderBookState:
+    """Thread-safe cache containing the latest order book for each symbol."""
+
+    def __init__(self) -> None:
+        self._books: dict[str, OrderBook] = {}
+        self._lock = RLock()
+
+    def update(self, book: OrderBook) -> OrderBook | None:
+        """Store a normalized order book and return the previous value."""
+        if not isinstance(book, OrderBook):
+            raise TypeError("LatestOrderBookState accepts only OrderBook values")
+        if not book.symbol or book.symbol != book.symbol.strip().upper():
+            raise ValueError("OrderBook symbol must be non-empty and normalized")
+
+        with self._lock:
+            previous = self._books.get(book.symbol)
+            self._books[book.symbol] = book
+            return previous
+
+    def get(self, symbol: str) -> OrderBook | None:
+        """Return the latest order book for a symbol, if present."""
+        if not isinstance(symbol, str):
+            raise TypeError("Symbol must be a string")
+        normalized = symbol.strip().upper()
+        if not normalized:
+            raise ValueError("Symbol must not be empty")
+
+        with self._lock:
+            return self._books.get(normalized)
+
+    def snapshot(self) -> Mapping[str, OrderBook]:
+        """Return a read-only point-in-time copy of all cached order books."""
+        with self._lock:
+            return MappingProxyType(self._books.copy())
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._books)

@@ -74,3 +74,43 @@ def validate_index(message: price_pb2.IndexMessage) -> list[str]:
         elif value != int(value):
             errors.append(f"{field} must be a whole stock count")
     return errors
+
+
+def _validate_levels(
+    levels: "list[price_pb2.BidAskPrice]", side: str
+) -> list[str]:
+    """Return errors for one side of a decoded order book."""
+    errors: list[str] = []
+    prices: list[float] = []
+    for position, level in enumerate(levels):
+        label = f"{side}Prices[{position}]"
+        if math.isnan(level.price) or math.isinf(level.price):
+            errors.append(f"{label}.price must be a finite number")
+        elif level.price <= 0:
+            errors.append(f"{label}.price must be positive")
+        else:
+            prices.append(level.price)
+        if math.isnan(level.volume) or math.isinf(level.volume):
+            errors.append(f"{label}.volume must be a finite number")
+        elif level.volume < 0:
+            errors.append(f"{label}.volume must be non-negative")
+
+    if len(set(prices)) != len(prices):
+        errors.append(f"{side}Prices must not repeat a price level")
+    return errors
+
+
+def validate_bid_ask(message: price_pb2.BidAskMessage) -> list[str]:
+    """Return data-quality errors for a decoded bid-ask message.
+
+    Only schema-supported constraints are enforced. Level ordering is not
+    asserted because the schema does not document it, and a crossed book is
+    not rejected because Vietnamese auction sessions can legitimately produce
+    one. An empty side is accepted as a valid proto3 default.
+    """
+    errors: list[str] = []
+    if not message.symbol:
+        errors.append("symbol is empty")
+    errors.extend(_validate_levels(list(message.bidPrices), "bid"))
+    errors.extend(_validate_levels(list(message.askPrices), "ask"))
+    return errors

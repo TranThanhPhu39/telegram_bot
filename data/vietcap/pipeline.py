@@ -5,10 +5,22 @@ from __future__ import annotations
 from collections.abc import Iterable
 import logging
 
-from data.market_state import LatestIndexState, LatestMarketState
-from data.models import IndexSnapshot, TradeTick
-from data.vietcap.decoder import decode_index, decode_match_price
-from data.vietcap.normalizer import normalize_index, normalize_match_price
+from data.market_state import (
+    LatestIndexState,
+    LatestMarketState,
+    LatestOrderBookState,
+)
+from data.models import IndexSnapshot, OrderBook, TradeTick
+from data.vietcap.decoder import (
+    decode_bid_ask,
+    decode_index,
+    decode_match_price,
+)
+from data.vietcap.normalizer import (
+    normalize_bid_ask,
+    normalize_index,
+    normalize_match_price,
+)
 from data.vietcap.subscriptions import normalize_index_symbols, normalize_symbols
 
 logger = logging.getLogger(__name__)
@@ -96,3 +108,44 @@ class IndexStatePipeline:
 
         self._state.update(snapshot)
         return snapshot
+
+
+class BidAskStatePipeline:
+    """Decode expected bid-ask events into the latest order-book state."""
+
+    def __init__(
+        self,
+        state: LatestOrderBookState,
+        expected_symbols: Iterable[str],
+    ) -> None:
+        if not isinstance(state, LatestOrderBookState):
+            raise TypeError("state must be a LatestOrderBookState")
+        self._state = state
+        self._expected_symbols = frozenset(normalize_symbols(expected_symbols))
+
+    @property
+    def expected_symbols(self) -> frozenset[str]:
+        """Return the normalized symbols accepted by this pipeline."""
+        return self._expected_symbols
+
+    def handle(self, payload: object) -> OrderBook | None:
+        """Decode, normalize, filter, and cache one bid-ask payload."""
+        try:
+            message = decode_bid_ask(payload)  # type: ignore[arg-type]
+            book = normalize_bid_ask(message)
+        except (TypeError, ValueError):
+            logger.exception("Rejected Vietcap bid-ask payload")
+            return None
+
+        if book.symbol not in self._expected_symbols:
+            logger.warning(
+                "Ignoring unexpected bid-ask symbol",
+                extra={
+                    "expected_symbols": sorted(self._expected_symbols),
+                    "symbol": book.symbol,
+                },
+            )
+            return None
+
+        self._state.update(book)
+        return book

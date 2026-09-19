@@ -47,3 +47,27 @@ class IndexSnapshot:
     ceiling_count: float
     floor_count: float
     exchange_time: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class OrderBookLevel:
+    """One normalized price level without provider-specific types."""
+
+    price: float
+    volume: float
+
+
+@dataclass(frozen=True, slots=True)
+class OrderBook:
+    """Normalized order-book state without provider-specific types.
+
+    ``bids`` and ``asks`` keep the provider's level order, which is not
+    documented as sorted, and are tuples so cached state cannot be mutated.
+    ``bidCount`` and ``askCount`` are not exposed because their meaning is
+    undocumented.
+    """
+
+    symbol: str
+    bids: tuple[OrderBookLevel, ...]
+    asks: tuple[OrderBookLevel, ...]
+    session: str | None

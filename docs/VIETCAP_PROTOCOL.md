@@ -296,6 +296,49 @@ through decode, normalization, and `LatestIndexState`, and requires two distinct
 valid snapshots before reporting PASS. Only its offline logic is tested. Live
 VNINDEX delivery, binary payload shape, and `time` format remain NOT TESTED.
 
+### Phase 6 bid-ask offline coverage — 2026-09-19
+
+Implemented from the vendored `price.proto` and the event table above:
+
+- socket event: `w-bid-ask`
+- payload shape: JSON string, `{"symbols":["FPT","ACB"]}`
+- decoded type: `pricePackage.BidAskMessage`
+
+Stock symbols are upper-cased, de-duplicated, and suppressed when the
+normalized set is unchanged, reusing the Phase 4 subscription helper. The
+bid-ask subscription state is tracked independently from the match-price and
+index subscriptions and is cleared on disconnect.
+
+Mapped fields (schema-supported only):
+
+| Proto field | Normalized field |
+|---|---|
+| `symbol` | `symbol` (upper-cased) |
+| `bidPrices[]` | `bids[]` as `OrderBookLevel(price, volume)` |
+| `askPrices[]` | `asks[]` as `OrderBookLevel(price, volume)` |
+| `session` | `session` (empty string becomes `None`) |
+
+Not mapped: `type`, `code`, `bidCount`, `askCount`. The two count fields also
+appear in `MatchPriceMessage`, but no observed evidence defines whether they
+count orders, levels, or something else.
+
+Level validation enforces only schema-supported constraints: every level price
+must be finite and positive, every level volume finite and non-negative, and a
+side must not repeat the same price. Deliberately NOT asserted:
+
+- level ordering, because the schema documents no sort order; provider order is
+  preserved as received
+- a non-crossed book, because Vietnamese ATO/ATC auction sessions can
+  legitimately produce a crossed book
+- a fixed depth, because proto3 permits an empty repeated field; an empty side
+  normalizes to an empty tuple
+
+`scripts/test_realtime_bidask.py` subscribes FPT and ACB to `w-bid-ask`, routes
+binary events through decode, normalization, and `LatestOrderBookState`, and
+requires two distinct valid books per symbol before reporting PASS. Only its
+offline logic is tested. Live delivery, real binary payload shape, actual depth,
+and level ordering remain NOT TESTED.
+
 ## Historical REST
 
 Endpoint:

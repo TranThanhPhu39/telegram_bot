@@ -980,3 +980,24 @@ and accumulated value. Invalid and unexpected events never enter the cache.
 - Did not attempt live VNINDEX validation; Phase 5 acceptance stays NOT TESTED.
 - Did not implement Phase 6 bid/ask, reconnect, REST, database, indicators,
   signals, or Telegram.
+
+### 2026-09-19 — Phase 6 bid-ask offline task group
+
+- Began Phase 6 offline implementation under explicit user authorization while
+  Phase 3, Phase 4, and Phase 5 live checks stayed unchecked.
+- Added the `w-bid-ask` event constant and a bid-ask subscription that reuses
+  the stock symbol helper but tracks its own duplicate-suppression state.
+- Added `decode_bid_ask` with the same error wrapping as the other decoders.
+- Added immutable `OrderBookLevel` and `OrderBook` models using tuples so
+  cached depth cannot be mutated.
+- Added `validate_bid_ask` limited to schema-supported level constraints;
+  ordering, non-crossing, and fixed depth were deliberately not asserted.
+- Left `type`, `code`, `bidCount`, and `askCount` unmapped as undocumented.
+- Added `LatestOrderBookState` and `BidAskStatePipeline` as separate types from
+  the trade and index equivalents.
+- Added `scripts/test_realtime_bidask.py` requiring two distinct valid books
+  per symbol.
+- Passed the full suite twice: 125 tests, up from 89.
+- Did not attempt live bid-ask validation; Phase 6 acceptance stays NOT TESTED.
+- Did not implement Phase 7 reconnect, REST, database, indicators, signals,
+  or Telegram.
