@@ -1,7 +1,7 @@
 # Signal Design — Draft
 
-Status: Phase 10 indicators, Phase 11 RVOL, and Phase 12 market regime implemented;
-signal-state composition remains planned.
+Status: Phase 10 indicators, Phase 11 RVOL, Phase 12 market regime, and Phase 13
+Signal Engine V1 implemented.
 
 ## Planned V1
 
@@ -75,14 +75,34 @@ Later define:
 - stop logic
 - ATR-based use in risk logic (ATR14 itself is implemented with Wilder smoothing)
 - support
-- cooldown
-- duplicate alert prevention
+- alert-delivery deduplication
+
+The Phase 13 engine implements a configurable post-EXIT cooldown and suppresses
+duplicate observations. An explicit `exit_triggered` input is required because
+the concrete stop/exit policy has not yet been selected.
+
+## Signal lifecycle
+
+Implemented transition order:
+
+`WATCH → MONEY_FLOW → BREAKOUT → CONFIRMED → ACTIVE → EXIT`
+
+- `WATCH` opens a new symbol lifecycle.
+- `MONEY_FLOW` requires Bull regime, stock trend, Relative Strength, and RVOL.
+- `BREAKOUT` requires the explicit prior-resistance breakout feature.
+- `CONFIRMED` rechecks breakout and all money-flow confirmations.
+- `ACTIVE` requires confirmations to persist for another observation.
+- `EXIT` requires an explicit exit condition.
+
+The engine advances at most one state for each observation. After cooldown, a
+new observation opens a separate lifecycle at `WATCH`.
 
 ## Explainability
-Every signal must store:
+Every emitted transition stores:
 - positive factors
 - negative factors
 - missing confirmation
 - trigger price/condition
 
-Planned `/why FPT` should expose this.
+The reason structure is JSON-serializable for database persistence and the future
+`/why FPT` command.

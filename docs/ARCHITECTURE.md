@@ -261,6 +261,31 @@ strategy constants, so they can be evaluated in Phase 16 backtests. The immutabl
 assessment carries the trend, breadth score, population, and explanatory reasons
 for later signal and Telegram consumers.
 
+## Signal engine
+
+`strategy.signal_engine.SignalEngine` is the provider-independent state machine
+shared by future live and backtest paths. Each symbol owns an independent
+lifecycle:
+
+`WATCH -> MONEY_FLOW -> BREAKOUT -> CONFIRMED -> ACTIVE -> EXIT`
+
+The first observation opens `WATCH`. Money flow requires Bull market regime,
+confirmed stock trend, and configurable minimum Relative Strength and RVOL.
+`BREAKOUT` requires an explicit breakout input; `CONFIRMED` rechecks breakout and
+all money-flow evidence; `ACTIVE` requires those confirmations to persist.
+`EXIT` requires an explicit upstream exit condition, because Phase 13 does not
+guess stop-loss or sell rules that have not been designed.
+
+One observation can advance at most one state. Exact repeated observations emit
+no duplicate event, out-of-order observations are rejected per symbol, and an
+exited lifecycle cannot restart until its configurable cooldown has elapsed. A
+restart opens a new lifecycle with sequence one and no source state, matching the
+Phase 9 database model.
+
+Every emitted event includes positive factors, negative factors, missing
+confirmations, and a trigger description in a JSON-serializable reason payload.
+Thresholds and cooldown are explicit configuration for later backtesting.
+
 ## Universe
 
 Data universe:

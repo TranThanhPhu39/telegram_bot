@@ -46,7 +46,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 12 — Market Regime — COMPLETE. Development is stopped before Phase 13. Phases
+Phase 13 — Signal Engine V1 — COMPLETE. Development is stopped before Phase 14. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -101,18 +101,34 @@ Phase 12 — Market Regime — COMPLETE. Development is stopped before Phase 13.
 - [x] Prior-period breakout resistance/support implemented and unit-tested
 - [x] Time-matched intraday RVOL implemented and unit-tested without look-ahead
 - [x] Explainable VNINDEX trend-and-breadth market regime implemented and unit-tested
+- [x] Provider-independent V1 signal lifecycle with cooldown/dedup implemented and unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 12 is complete. The market-regime layer classifies Bull/Neutral/Bear only
-when VNINDEX EMA trend and advance/decline breadth provide sufficient, consistent
-evidence. Development stops until the user explicitly opens Phase 13.
+Phase 13 is complete. The shared signal engine implements the complete V1 state
+lifecycle, explainable transition events, per-symbol deduplication, and post-exit
+cooldown. Development stops until the user explicitly opens Phase 14.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
+
+### `strategy/signal_engine.py`
+
+Purpose: provider-independent, deterministic V1 signal state machine intended for
+both live and backtest callers.
+
+Status: all six states, transition gates, independent symbols, explanations,
+deduplication, ordering, cooldown, lifecycle restart, and validation are covered
+by sixteen focused tests.
+
+### `strategy/__init__.py` and `tests/test_signal_engine.py`
+
+Purpose: strategy package boundary and deterministic Phase 13 acceptance suite.
+
+Status: sixteen focused tests pass; the full suite passes with 336 tests.
 
 ### `data/market_regime.py`
 
@@ -1115,8 +1131,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Await explicit user authorization before opening Phase 13. Do not implement the
-signal-state engine automatically.
+Await explicit user authorization before opening Phase 14. Do not implement the
+scanner universe automatically.
 
 ## 12. How To Run
 
@@ -1709,4 +1725,23 @@ three observed values before request construction.
   insufficient populations, conflicting inputs, and validation boundaries.
 - Passed fifteen focused tests and the complete 320-test suite.
 - Marked Phase 12 complete and stopped before Phase 13. Phases 3–7 remain pending
+  live validation.
+
+### 2026-09-19 — Phase 13 Signal Engine V1
+
+- Opened and completed Phase 13 after explicit user authorization.
+- Added the provider-independent `WATCH -> MONEY_FLOW -> BREAKOUT -> CONFIRMED ->
+  ACTIVE -> EXIT` lifecycle with independent state per normalized symbol.
+- Required Bull regime, stock trend, Relative Strength, and RVOL for money-flow
+  confirmation; breakout and confirmation stages use explicit feature inputs.
+- Required an explicit exit condition rather than inventing an unapproved stop or
+  sell policy.
+- Limited every observation to at most one transition, rejected out-of-order
+  inputs, and suppressed exact duplicate observations.
+- Added configurable post-exit cooldown; restart creates a new lifecycle with its
+  event sequence reset to one.
+- Added immutable transition events and JSON-serializable explanations containing
+  positive, negative, missing, and trigger fields.
+- Passed sixteen focused tests and the complete 336-test suite.
+- Marked Phase 13 complete and stopped before Phase 14. Phases 3–7 remain pending
   live validation.

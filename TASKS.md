@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 12 — Market Regime (COMPLETE; stopped before Phase 13)**
+**Phase 13 — Signal Engine V1 (COMPLETE; stopped before Phase 14)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -232,15 +232,15 @@ Acceptance:
 ---
 
 ## Phase 13 — Signal Engine V1
-- [ ] WATCH state
-- [ ] MONEY_FLOW state
-- [ ] BREAKOUT state
-- [ ] CONFIRMED state
-- [ ] ACTIVE state
-- [ ] EXIT state
-- [ ] Reason/explanation payload
-- [ ] Cooldown/dedup
-- [ ] STOP and report
+- [x] WATCH state
+- [x] MONEY_FLOW state
+- [x] BREAKOUT state
+- [x] CONFIRMED state
+- [x] ACTIVE state
+- [x] EXIT state
+- [x] Reason/explanation payload
+- [x] Cooldown/dedup
+- [x] STOP and report
 
 ---
 
