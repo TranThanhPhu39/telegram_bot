@@ -47,7 +47,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 ## 3. Current Development Phase
 
 Phase 9 — Database — active by explicit user instruction. The SQLite connection
-foundation is implemented; application tables have not been started. Phases 3–7
+foundation plus all four planned application tables are implemented. Phases 3–7
 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -90,6 +90,10 @@ remain pending live validation and may not be reported as PASS.
 - [x] Evidence-backed gap-chart OHLCV normalization and fixture tests implemented
 - [x] Authenticated Python historical fetch and normalization verified live
 - [x] SQLite selected for V1 and connection boundary unit-tested
+- [x] Normalized SQLite `symbols` table implemented and unit-tested
+- [x] Provider-independent SQLite `candles` table implemented and unit-tested
+- [x] High-level SQLite `signals` table implemented and unit-tested
+- [x] Ordered SQLite `signal_events` audit table implemented and unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
@@ -98,8 +102,10 @@ remain pending live validation and may not be reported as PASS.
 
 Phase 9 is active. SQLite is selected for the single-process V1 bot and a small
 stdlib connection boundary now validates `sqlite:///` URLs, enables foreign keys,
-sets a five-second busy timeout, and returns named rows. No application tables or
-migrations exist yet. Phases 3–7 retain their pending live-validation status.
+sets a five-second busy timeout, and returns named rows. The normalized `symbols`,
+`candles`, `signals`, and `signal_events` tables are implemented idempotently.
+The migration/schema bootstrap does not exist yet. Phases 3–7 retain their
+pending live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -116,6 +122,43 @@ Purpose: verifies URL rejection, connection pragmas, empty initial schema, and
 file-backed persistence without touching the configured production database.
 
 Status: nine focused tests pass.
+
+### `data/schema.py`
+
+Purpose: contains incremental, provider-independent SQLite table definitions.
+
+Status: creates all four planned application tables while preserving existing
+rows when individual table functions are invoked repeatedly.
+
+### `tests/test_schema_symbols.py`
+
+Purpose: verifies columns, defaults, accepted stock/index rows, normalization
+constraints, primary-key uniqueness, and idempotent table creation.
+
+Status: twelve focused tests pass.
+
+### `tests/test_schema_candles.py`
+
+Purpose: verifies candle columns and composite identity, OHLCV constraints,
+symbol foreign keys, deletion protection, and idempotent table creation.
+
+Status: seventeen focused tests pass.
+
+### `tests/test_schema_signals.py`
+
+Purpose: verifies signal identity, normalized metadata, timestamps, optional
+trigger price, JSON reason payload, symbol foreign key, lookup index, and
+idempotent table creation.
+
+Status: nineteen focused tests pass.
+
+### `tests/test_schema_signal_events.py`
+
+Purpose: verifies ordered transition identity, initial and later transitions,
+signal foreign keys, audit deletion protection, normalized states, timestamps,
+optional price, JSON reasons, lookup index, and idempotent creation.
+
+Status: twenty focused tests pass.
 
 ### `requirements.txt`
 
@@ -999,8 +1042,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Continue Phase 9 with one small task: define and test the `symbols` table schema
-without creating the remaining Phase 9 tables.
+Continue Phase 9 with one small task: add the versioned schema bootstrap/migration
+runner for the four tested tables, then verify it on a temporary file database.
 
 ## 12. How To Run
 
@@ -1484,3 +1527,44 @@ three observed values before request construction.
 - Enabled foreign-key enforcement, a five-second busy timeout, and named rows.
 - Verified both in-memory isolation and temporary file persistence in nine tests.
 - Created no application tables and did not start the schema bootstrap task.
+
+### 2026-09-19 — Phase 9 symbols table
+
+- Added an idempotent provider-independent `symbols` table definition.
+- Used normalized symbol as the primary key, with optional exchange,
+  instrument type, and active-state fields.
+- Enforced uppercase ASCII identifiers, valid active flags, and duplicate
+  rejection while allowing both stocks and indices.
+- Passed 21 focused database/schema tests.
+- Did not create candles, signal tables, or the migration runner.
+
+### 2026-09-19 — Phase 9 candles table
+
+- Added an idempotent `candles` table linked to the normalized symbol catalog.
+- Used `(symbol, timeframe, timestamp)` as the composite primary key.
+- Enforced normalized timeframe, positive timestamp/prices, non-negative volume,
+  valid OHLC relationships, and known-symbol references.
+- Restricted deletion of symbols that still own candle history.
+- Passed 38 focused database/schema tests.
+- Did not create signal tables or the migration runner.
+
+### 2026-09-19 — Phase 9 signals table
+
+- Added an idempotent high-level `signals` table linked to `symbols`.
+- Used an integer signal identity so repeated lifecycles remain distinct.
+- Stored normalized strategy/timeframe/state identifiers, lifecycle timestamps,
+  optional trigger price, and a JSON-validated reason payload.
+- Kept strategy states open rather than hard-coding Phase 13 behavior early.
+- Added a symbol/time lookup index and passed 57 focused schema tests.
+- Did not create `signal_events` or the migration runner.
+
+### 2026-09-19 — Phase 9 signal-events table
+
+- Added an idempotent `signal_events` audit table linked to `signals`.
+- Used a unique per-signal sequence and recorded from/to state, occurrence time,
+  optional price, and JSON-validated reason details.
+- Allowed a null source state for the initial event and kept transition rules out
+  of the database until the Phase 13 strategy engine exists.
+- Restricted deletion of signals that own event history.
+- Passed 77 focused database/schema tests.
+- Did not implement the migration/schema bootstrap runner.

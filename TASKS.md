@@ -187,10 +187,10 @@ Acceptance:
 
 ## Phase 9 — Database
 - [x] Choose SQLite for V1 unless repo already uses another DB
-- [ ] Create symbols table
-- [ ] Create candles table
-- [ ] Create signals table
-- [ ] Create signal_events table
+- [x] Create symbols table
+- [x] Create candles table
+- [x] Create signals table
+- [x] Create signal_events table
 - [ ] Add migrations/schema bootstrap
 - [ ] STOP and report
 

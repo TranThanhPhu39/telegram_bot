@@ -163,6 +163,34 @@ row access. It creates no application tables; schema creation and migrations are
 separate Phase 9 tasks. SQLite is appropriate for the initial single-process bot
 and can later be replaced behind this boundary if write concurrency grows.
 
+The first incremental schema object is `symbols`, keyed by the normalized symbol.
+It stores an optional normalized exchange, a normalized instrument type (default
+`STOCK`), and an active flag. Exchange values are not restricted to a hard-coded
+venue list so index and future provider metadata can be represented without a
+schema migration. Table creation is idempotent and separate from connection setup.
+
+`candles` stores provider-independent OHLCV bars and references `symbols`. Its
+composite primary key `(symbol, timeframe, timestamp)` prevents duplicate bars
+while allowing multiple intervals. Database constraints require normalized
+timeframes, positive integer timestamps, positive OHLC prices, non-negative
+volume, and valid high/low relationships. Symbol deletion is restricted while
+bars reference it; table creation is idempotent.
+
+`signals` stores one high-level record per signal lifecycle, using an integer
+identity so the same symbol/strategy/timeframe may produce later independent
+signals. It references `symbols` and stores normalized strategy, timeframe, and
+state identifiers, created/updated Unix timestamps, an optional trigger price,
+and a valid JSON reason payload. State values are deliberately not hard-coded
+before the Phase 13 strategy state machine is implemented. An index supports
+recent-signal lookup by symbol.
+
+`signal_events` is the append-oriented audit trail for one signal lifecycle. It
+uses a unique `(signal_id, sequence)` pair, records occurrence time, optional
+source state, required destination state, optional price, and a valid JSON reason
+payload. The first event may have no source state. Signal deletion is restricted
+while events exist so lifecycle history cannot disappear accidentally. State
+transition rules remain the responsibility of the Phase 13 strategy engine.
+
 ## Universe
 
 Data universe:
