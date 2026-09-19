@@ -46,7 +46,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 11 — Intraday RVOL — COMPLETE. Development is stopped before Phase 12. Phases
+Phase 12 — Market Regime — COMPLETE. Development is stopped before Phase 13. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -100,19 +100,34 @@ Phase 11 — Intraday RVOL — COMPLETE. Development is stopped before Phase 12.
 - [x] Timestamp-aligned Relative Strength versus VNINDEX implemented and unit-tested
 - [x] Prior-period breakout resistance/support implemented and unit-tested
 - [x] Time-matched intraday RVOL implemented and unit-tested without look-ahead
+- [x] Explainable VNINDEX trend-and-breadth market regime implemented and unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 11 is complete. Intraday RVOL compares current cumulative volume with the
-mean prior-session cumulative volume at the same Vietnam-local clock minute and
-rejects non-prior baseline dates. Development stops until the user explicitly
-opens Phase 12.
+Phase 12 is complete. The market-regime layer classifies Bull/Neutral/Bear only
+when VNINDEX EMA trend and advance/decline breadth provide sufficient, consistent
+evidence. Development stops until the user explicitly opens Phase 13.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
+
+### `data/market_regime.py`
+
+Purpose: combines normalized VNINDEX trend and breadth into an immutable,
+explainable Bull/Neutral/Bear assessment using explicit configuration.
+
+Status: classification, boundary, missing/conflicting evidence, input validation,
+and configuration behavior are covered by fifteen focused tests.
+
+### `tests/test_market_regime.py`
+
+Purpose: deterministic Phase 12 acceptance coverage without provider or network
+dependencies.
+
+Status: fifteen focused tests pass; the full suite passes with 320 tests.
 
 ### `data/rvol.py`
 
@@ -1100,8 +1115,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Await explicit user authorization before opening Phase 12. Do not implement the
-market-regime classifier automatically.
+Await explicit user authorization before opening Phase 13. Do not implement the
+signal-state engine automatically.
 
 ## 12. How To Run
 
@@ -1677,4 +1692,21 @@ three observed values before request construction.
   observation and that a zero historical baseline returns no ratio.
 - Passed eight focused tests and the complete 305-test suite.
 - Marked Phase 11 complete and stopped before Phase 12. Phases 3–7 remain pending
+  live validation.
+
+### 2026-09-19 — Phase 12 market regime
+
+- Opened and completed Phase 12 after explicit user authorization.
+- Added explicit Bull, Neutral, Bear and VNINDEX trend states plus immutable,
+  explainable assessment and configuration models.
+- Defined bullish trend as `VNINDEX > EMA20 > EMA50` and bearish trend as the
+  symmetric ordering; mixed or unavailable EMA evidence cannot confirm a regime.
+- Defined breadth from advances, declines, and unchanged issues. Ceiling/floor
+  counts are excluded to avoid potentially double-counting overlapping groups.
+- Required configurable breadth threshold and minimum population so strategy
+  assumptions can be evaluated rather than hidden in implementation constants.
+- Verified bullish/bearish confirmation, neutral fallbacks, inclusive thresholds,
+  insufficient populations, conflicting inputs, and validation boundaries.
+- Passed fifteen focused tests and the complete 320-test suite.
+- Marked Phase 12 complete and stopped before Phase 13. Phases 3–7 remain pending
   live validation.

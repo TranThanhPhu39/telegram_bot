@@ -241,6 +241,26 @@ baseline yields an unavailable (`None`) ratio rather than infinity. Inputs and
 outputs remain provider-independent, so live and backtest paths can share this
 implementation.
 
+## Market regime layer
+
+`data.market_regime.classify_vnindex_regime` combines two independent inputs:
+
+- VNINDEX trend is bullish for `value > EMA20 > EMA50`, bearish for
+  `value < EMA20 < EMA50`, and mixed or unavailable otherwise.
+- breadth score is `(advances - declines) / (advances + declines + unchanged)`.
+
+Ceiling and floor counts do not enter the denominator because they may overlap
+with advances and declines. Bull requires both bullish trend and breadth at or
+above the configured positive threshold. Bear requires both bearish trend and
+breadth at or below its negative counterpart. Every other combination is
+Neutral. Missing EMAs or an insufficient breadth population also produce a
+conservative Neutral result.
+
+Threshold and minimum breadth population are mandatory configuration, not hidden
+strategy constants, so they can be evaluated in Phase 16 backtests. The immutable
+assessment carries the trend, breadth score, population, and explanatory reasons
+for later signal and Telegram consumers.
+
 ## Universe
 
 Data universe:

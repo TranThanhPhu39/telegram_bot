@@ -1,19 +1,31 @@
 # Signal Design — Draft
 
-Status: Phase 10 indicators implemented; signal composition remains planned.
+Status: Phase 10 indicators, Phase 11 RVOL, and Phase 12 market regime implemented;
+signal-state composition remains planned.
 
 ## Planned V1
 
 ### Market Regime
-Use VNINDEX trend + market breadth.
+Implemented using VNINDEX trend plus market breadth.
 
-Possible inputs:
+Inputs:
 - VNINDEX price/trend
 - totalStockIncrease
 - totalStockDecline
 - totalStockNoChange
 - totalStockCeiling
 - totalStockFloor
+
+Trend is bullish when `VNINDEX > EMA20 > EMA50` and bearish when
+`VNINDEX < EMA20 < EMA50`. Breadth is:
+
+`(advances - declines) / (advances + declines + unchanged)`
+
+Bull or Bear requires trend and breadth to confirm in the same direction.
+Conflicting, missing, or insufficient evidence returns Neutral. Ceiling/floor
+counts remain available context but are excluded from the denominator because
+they may overlap advance/decline groups. Breadth threshold and minimum population
+are explicit configuration intended for backtesting rather than fixed assumptions.
 
 ### Trend
 Implemented inputs:

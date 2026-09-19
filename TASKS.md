@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 11 — Intraday RVOL (COMPLETE; stopped before Phase 12)**
+**Phase 12 — Market Regime (COMPLETE; stopped before Phase 13)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -223,11 +223,11 @@ Acceptance:
 ---
 
 ## Phase 12 — Market Regime
-- [ ] VNINDEX trend
-- [ ] Breadth using advance/decline
-- [ ] Bull/Neutral/Bear states
-- [ ] Tests
-- [ ] STOP and report
+- [x] VNINDEX trend
+- [x] Breadth using advance/decline
+- [x] Bull/Neutral/Bear states
+- [x] Tests
+- [x] STOP and report
 
 ---
 
