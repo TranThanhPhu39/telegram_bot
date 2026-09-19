@@ -1,0 +1,269 @@
+syntax = "proto3";
+package pricePackage;
+
+message IndexMessage {
+    string code = 1;
+    string symbol = 2;
+    double price = 3;
+    double change = 4;
+    double changePercent = 5;
+    double totalShares = 6;
+    double totalValue = 7;
+
+    double totalStockIncrease = 8;
+    double totalStockDecline = 9;
+    double totalStockNoChange = 10;
+    double totalStockCeiling = 11;
+    double totalStockFloor = 12;
+    double estimatedChange = 13;
+    double estimatedFsp = 14;
+    string time  = 15;
+}
+
+//------------------------------------------------//
+
+message MatchPriceMessage {
+    string type = 1;
+    string code = 2;
+    string symbol = 3;
+    double matchPrice = 4;
+    double matchVol = 5;
+    double highest = 6;
+    double lowest = 7;
+    double foreignBuyVolume = 8;
+    double foreignSellVolume = 9;
+    double foreignBuyValue = 10;
+    double foreignSellValue = 11;
+    string session = 12;
+    double referencePrice = 13;
+    double ceilingPrice = 14;
+    double floorPrice = 15;
+    double accumulatedVolume = 16;
+    double avgMatchPrice  = 17;
+
+    string time  = 18;
+    double openPrice = 19;
+
+    double totalBuyOrders = 20;
+    double totalSellOrders = 21;
+    double currentRoom=22;
+    double totalRoom=23;
+    double accumulatedValue=24;
+    string matchType=25;
+    bool isMatchPrice=26;
+    bool isRE = 27;
+    double bidCount = 29;
+    double askCount = 30;
+}
+
+message OddLotMatchPriceMessage{
+    string code = 1;
+    string symbol = 2;
+    double matchPrice = 3;
+    double matchVol = 4;
+    double matchType = 5;
+    string session = 6;
+    bool isRE = 7;
+}
+
+message FutureMatchPrice {
+    //-- extend MatchPriceMessage --//
+    string type = 1;
+    string code = 2;
+    string symbol = 3;
+    double matchPrice = 4;
+    double matchVol = 5;
+    double highest = 6;
+    double lowest = 7;
+    double foreignBuyVolume = 8;
+    double foreignSellVolume = 9;
+    double foreignBuyValue = 10;
+    double foreignSellValue = 11;
+    string session = 12;
+    double referencePrice = 13;
+    double ceilingPrice = 14;
+    double floorPrice = 15;
+    double accumulatedVolume = 16;
+    double avgMatchPrice  = 17;
+    string time  = 18;
+    double openPrice = 19;
+    double totalBuyOrders = 20;
+    double totalSellOrders = 21;
+    double currentRoom=22;
+    double totalRoom=23;
+    double accumulatedValue=24;
+    string matchType=25;
+    //--//
+    string firstTradingDate = 26;
+    string lastTradingDate = 27;
+    double openInterest = 28;
+    double bidCount = 29;
+    double askCount = 30;
+}
+//------------------------------------------------//
+
+message BidAskPrice {
+    double price = 1;
+    double volume = 2;
+}
+
+
+message BidAskMessage {
+    string type = 1;
+    string code = 2;
+    string symbol = 3;
+
+    repeated BidAskPrice bidPrices = 4;
+    repeated BidAskPrice askPrices = 5;
+
+    string session= 6 ;
+    double bidCount = 7;
+    double askCount = 8;
+}
+
+
+message OddLotBidAskMessage {
+    string type = 1;
+    string code = 2;
+    string symbol = 3;
+
+    repeated BidAskPrice bidPrices = 4;
+    repeated BidAskPrice askPrices = 5;
+
+    string session= 6 ;
+}
+
+message PutThroughMessage {
+    string code = 1;
+    string symbol = 2;
+
+    double ptMatchPrice = 3;
+    double ptChange = 4;
+    double ptChangePercent = 5;
+    double ptMatchValue = 6;
+    double ptMatchVolume = 7;
+    double ptAccumulatedValue =8;
+    double ptAccumulatedVolume = 9;
+    string time = 10;
+    double ceiling = 11;
+    double floor = 12;
+    double refPrice = 13;
+}
+
+message AdvertiseMessage {
+    string code = 1;
+    string symbol = 2;
+
+    double price = 3;
+    double volume = 4;
+    string time = 5;
+    string flag = 6;
+    string side = 7;
+    double firm = 8;
+    double trader = 9;
+
+}
+
+message GlobalPriceMessage {
+    string id = 1;
+    string exchange = 2;
+    double quoteType = 3;
+    double price = 4;
+    double timestamp = 5;
+    double marketHours =6;
+    double changePercent = 7;
+    double dayVolume = 8;
+    double change=9;
+    double priceHint=10;
+}
+
+
+message LeDataMessage {
+    string symbol = 1;
+    double accumulatedVolume = 2;
+    double truncTime = 3;
+    string matchType = 4;
+    double matchVol = 5;
+    double matchPrice = 6;
+}
+
+message PriceStepAccumulatedVolumeMessage {
+    string symbol = 1;
+    double priceStep = 2;
+    double accumulatedVolume = 3;
+    double accumulatedBuyVolume = 4;
+    double accumulatedSellVolume = 5;
+    double accumulatedUndefinedVolume = 6;
+}
+
+message MatchPricesMessages {
+    repeated MatchPriceMessage matchPrices = 1;
+}
+
+message HnxBondPriceMessage {
+    HnxBoardBondMessage boardInfo = 1;
+    HnxBondInfoMessage bondInfo = 2;
+}
+
+message HnxBoardBondMessage {
+    string tradingDate = 1;
+    string time = 2;
+    string totalPtTradedQtty = 3;
+    string totalPtTradedValue = 4;
+    string ptTotalBidValue = 5;
+    string ptTotalOfferValue = 6;
+}
+
+message HnxBondInfoMessage {
+    string tradingDate = 1;
+    string time = 2;
+    string symbol = 3;
+    string issuer = 4;
+    string periodRemain = 5;
+    string issueDate = 6;
+    string maturityDate = 7;
+    string parvalue = 8;
+    string totalListingQtty = 9;
+    string interestRate = 10;
+    string interestType = 11;
+    string interestPaymentType = 12;
+    string interestPeriod = 13;
+    string interestPeriodUnit = 14;
+    string interestRateType = 15;
+    string ptTotalTradedQtty = 16;
+    string ptTotalTradedValue = 17;
+    string ptTotalBidQtty = 18;
+    string ptBestBidPrice = 19;
+    string ptBestBidQtty = 20;
+    string ptMatchPrice = 21;
+    string ptMatchQtty = 22;
+    string ptMaxPrice = 23;
+    string ptMaxQtty = 24;
+    string ptMinPrice = 25;
+    string ptMinQtty = 26;
+    string ptTotalOfferQtty = 27;
+    string ptBestOfferQtty = 28;
+    string ptBestOfferPrice = 29;
+}
+
+
+message HnxCarbonInfoMessage {
+   string symbol = 1;
+    string carbonType = 2;
+    int32 remainingTradingDays = 3;
+    double refPrice = 4;
+    double ptMatchPrice = 5;
+    double ptMatchQtty = 6;
+    double ptMaxQtty = 7;
+    double ptMaxPrice = 8;
+    double ptMinQtty = 9;
+    double ptMinPrice = 10;
+    double ptTotalTradedQtty = 11;
+    double ptTotalTradedValue = 12;
+    double ptTotalBidQtty = 13;
+    double ptBestBidQtty = 14;
+    double ptBestBidPrice = 15;
+    double ptTotalOfferQtty = 16;
+    double ptBestOfferQtty = 17;
+    double ptBestOfferPrice = 18;
+}

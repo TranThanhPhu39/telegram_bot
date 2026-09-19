@@ -1,0 +1,250 @@
+# TASKS.md
+
+> Rule: Codex must only work inside the ACTIVE PHASE.
+> Move to the next phase only after explicit user instruction.
+
+## ACTIVE PHASE
+**Phase 1 — Vietcap protocol assets & protobuf**
+
+---
+
+## Phase 0 — Repository bootstrap & planning
+- [x] Inspect repository structure
+- [x] Inspect Python version and dependencies
+- [x] Create missing package folders without overbuilding
+- [x] Create/update `PROJECT_CONTEXT.md`
+- [x] Create/update `.env.example`
+- [x] Create/update `.gitignore`
+- [x] Confirm safe integration point for Vietcap provider
+- [x] Write implementation plan for Phase 1
+- [x] STOP and report
+
+Acceptance:
+- Repository understood
+- No large feature code written
+- Context/docs updated
+
+---
+
+## Phase 1 — Vietcap protocol assets & protobuf
+- [x] Add/fetch `price.proto`
+- [x] Verify package `pricePackage`
+- [x] Verify `MatchPriceMessage`
+- [x] Verify `BidAskMessage`
+- [x] Verify `IndexMessage`
+- [x] Generate/load Python protobuf classes
+- [x] Add unit test for protobuf imports/instantiation
+- [x] STOP and report
+
+Acceptance:
+- Protobuf types load without runtime/import errors
+
+---
+
+## Phase 2 — Vietcap Socket.IO connection only
+- [ ] Connect to Vietcap Socket.IO
+- [ ] Log connect/disconnect
+- [ ] Confirm Engine.IO v4 / Socket.IO client compatibility
+- [ ] No market subscriptions yet
+- [ ] Add connection smoke test
+- [ ] STOP and report
+
+Acceptance:
+- Stable connection can be established
+
+---
+
+## Phase 3 — Realtime Match Price: FPT only
+- [ ] Subscribe only FPT to `w-match-price`
+- [ ] Receive binary event
+- [ ] Decode using MatchPrice protobuf
+- [ ] Print normalized FPT tick
+- [ ] Validate price/volume fields
+- [ ] STOP and report
+
+Acceptance:
+- Valid changing FPT realtime ticks observed
+
+---
+
+## Phase 4 — Realtime ACB + Market State
+- [ ] Add ACB subscription
+- [ ] Prevent duplicate symbol subscriptions
+- [ ] Create normalized `TradeTick`
+- [ ] Create latest market-state cache
+- [ ] Test FPT + ACB simultaneously
+- [ ] STOP and report
+
+Acceptance:
+- FPT and ACB update correctly in normalized form
+
+---
+
+## Phase 5 — Index stream
+- [ ] Subscribe VNINDEX
+- [ ] Decode `IndexMessage`
+- [ ] Normalize `IndexSnapshot`
+- [ ] Validate breadth fields
+- [ ] STOP and report
+
+Acceptance:
+- VNINDEX realtime state available
+
+---
+
+## Phase 6 — Bid/Ask
+- [ ] Subscribe FPT + ACB to `w-bid-ask`
+- [ ] Decode `BidAskMessage`
+- [ ] Normalize `OrderBook`
+- [ ] Validate bid/ask levels
+- [ ] STOP and report
+
+Acceptance:
+- Valid order book updates decoded
+
+---
+
+## Phase 7 — Reliability
+- [ ] Reconnect handling
+- [ ] Exponential/reasonable retry
+- [ ] Re-subscribe after reconnect
+- [ ] No duplicate listeners
+- [ ] Decode error handling
+- [ ] Raw debug mode
+- [ ] STOP and report
+
+Acceptance:
+- Stream resumes after forced interruption
+
+---
+
+## Phase 8 — Historical REST
+- [ ] Implement quote endpoint
+- [ ] Implement OHLC `gap-chart`
+- [ ] Support ONE_MINUTE
+- [ ] Support ONE_HOUR
+- [ ] Support ONE_DAY
+- [ ] Normalize OHLCV
+- [ ] Add fixtures/tests
+- [ ] STOP and report
+
+Acceptance:
+- Historical bars can be fetched and normalized
+
+---
+
+## Phase 9 — Database
+- [ ] Choose SQLite for V1 unless repo already uses another DB
+- [ ] Create symbols table
+- [ ] Create candles table
+- [ ] Create signals table
+- [ ] Create signal_events table
+- [ ] Add migrations/schema bootstrap
+- [ ] STOP and report
+
+---
+
+## Phase 10 — Candle & indicators
+- [ ] 1-minute bar builder
+- [ ] EMA20
+- [ ] EMA50
+- [ ] RSI14
+- [ ] ATR14
+- [ ] daily average volume
+- [ ] Relative Strength vs VNINDEX
+- [ ] Breakout levels
+- [ ] STOP and report
+
+---
+
+## Phase 11 — Intraday RVOL
+- [ ] Define time-matched RVOL
+- [ ] Historical baseline by same intraday time
+- [ ] Validate no look-ahead
+- [ ] Unit tests
+- [ ] STOP and report
+
+---
+
+## Phase 12 — Market Regime
+- [ ] VNINDEX trend
+- [ ] Breadth using advance/decline
+- [ ] Bull/Neutral/Bear states
+- [ ] Tests
+- [ ] STOP and report
+
+---
+
+## Phase 13 — Signal Engine V1
+- [ ] WATCH state
+- [ ] MONEY_FLOW state
+- [ ] BREAKOUT state
+- [ ] CONFIRMED state
+- [ ] ACTIVE state
+- [ ] EXIT state
+- [ ] Reason/explanation payload
+- [ ] Cooldown/dedup
+- [ ] STOP and report
+
+---
+
+## Phase 14 — Scanner universe
+- [ ] Universe HOSE + HNX + UPCoM
+- [ ] Common stocks only
+- [ ] Liquidity filter
+- [ ] Daily pre-screen
+- [ ] Realtime watch universe
+- [ ] STOP and report
+
+---
+
+## Phase 15 — Telegram Bot
+- [ ] BotFather token via `.env`
+- [ ] `/start`
+- [ ] `/help`
+- [ ] `/soi FPT`
+- [ ] `/scan`
+- [ ] `/market`
+- [ ] `/why FPT`
+- [ ] auto alerts
+- [ ] STOP and report
+
+---
+
+## Phase 16 — Backtest & performance
+- [ ] Shared live/backtest strategy code
+- [ ] 3–6 month preliminary backtest
+- [ ] Win rate
+- [ ] Average return
+- [ ] Max drawdown
+- [ ] Profit factor
+- [ ] `/performance`
+- [ ] STOP and report
+
+---
+
+## Phase 17 — Fundamental filter
+- [ ] Select data source
+- [ ] EPS
+- [ ] P/E
+- [ ] P/B
+- [ ] ROE
+- [ ] revenue/profit growth
+- [ ] Integrate as filter/context, not uncontrolled signal
+- [ ] STOP and report
+
+---
+
+## Phase 18 — News V1 (optional / bonus)
+- [ ] News collector
+- [ ] Deduplication
+- [ ] ticker/entity mapping
+- [ ] sentiment/event classification
+- [ ] Telegram news alert
+- [ ] STOP and report
+
+## Explicitly out of V1
+- Real order placement
+- Automated brokerage execution
+- ML price prediction
+- Full news intelligence before core bot works
