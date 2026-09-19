@@ -16,6 +16,28 @@ Observed:
 
 Prefer `python-socketio`.
 
+### Python runtime verification — 2026-09-19
+
+Verified without account credentials using `python-socketio==5.17.0` and
+`websocket-client==1.9.2`:
+
+- base URL: `https://trading.vietcap.com.vn`
+- `socketio_path`: `ws/price/socket.io`
+- requested transport: WebSocket only
+- negotiated URL included `transport=websocket&EIO=4`
+- connection accepted with `upgrades: []`
+- server `pingInterval`: 25,000 ms
+- server `pingTimeout`: 20,000 ms
+- server `maxPayload`: 1,000,000 bytes
+- default Socket.IO namespace connected successfully
+- server PING and client PONG observed after approximately 25 seconds
+- connection remained stable for a 35-second smoke test
+- clean namespace and Engine.IO disconnect completed
+
+The Phase 2 smoke test emitted no market subscription events. Protocol logs
+contained only the Socket.IO namespace handshake, Engine.IO heartbeat, and
+disconnect packets.
+
 ## Proto
 
 Frontend loads:

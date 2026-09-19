@@ -4,7 +4,7 @@
 > Move to the next phase only after explicit user instruction.
 
 ## ACTIVE PHASE
-**Phase 1 — Vietcap protocol assets & protobuf**
+**Phase 2 — Vietcap Socket.IO connection only**
 
 ---
 
@@ -42,12 +42,12 @@ Acceptance:
 ---
 
 ## Phase 2 — Vietcap Socket.IO connection only
-- [ ] Connect to Vietcap Socket.IO
-- [ ] Log connect/disconnect
-- [ ] Confirm Engine.IO v4 / Socket.IO client compatibility
-- [ ] No market subscriptions yet
-- [ ] Add connection smoke test
-- [ ] STOP and report
+- [x] Connect to Vietcap Socket.IO
+- [x] Log connect/disconnect
+- [x] Confirm Engine.IO v4 / Socket.IO client compatibility
+- [x] No market subscriptions yet
+- [x] Add connection smoke test
+- [x] STOP and report
 
 Acceptance:
 - Stable connection can be established

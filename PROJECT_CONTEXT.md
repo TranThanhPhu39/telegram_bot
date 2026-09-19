@@ -13,6 +13,10 @@ data.vietcap
     -> proto/price.proto          vendored, minimally normalized schema
     -> proto/price_pb2.py         generated Python protobuf binding
     -> tests/test_proto.py        protobuf contract and round-trip tests
+    -> constants.py               Vietcap connection defaults
+    -> client.py                  connection-only Socket.IO lifecycle
+scripts/inspect_connection.py     live connection smoke test, no subscriptions
+tests/test_client.py              deterministic connection configuration tests
 ```
 
 Planned layering:
@@ -32,7 +36,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 1 — Vietcap protocol assets and protobuf — acceptance criteria met on 2026-09-19. Work must stop here until the user explicitly authorizes Phase 2.
+Phase 2 — Vietcap Socket.IO connection only — acceptance criteria met on 2026-09-19. Work must stop here until the user explicitly authorizes Phase 3.
 
 ## 4. Completed
 
@@ -48,20 +52,24 @@ Phase 1 — Vietcap protocol assets and protobuf — acceptance criteria met on 
 - [x] Python protobuf classes generated
 - [x] Required messages instantiated, serialized, and decoded in unit tests
 - [x] Project-local dependency environment validated
-- [ ] Socket.IO connection tested
+- [x] Socket.IO and Engine.IO v4 compatibility tested
+- [x] Direct WebSocket connection established without credentials
+- [x] Connect, disconnect, error, and protocol metadata logging added
+- [x] 35-second live connection survived a PING/PONG heartbeat
+- [x] Phase 2 emitted no market subscription events
 - [ ] Realtime market data decoded
 
 ## 5. Currently Working On
 
-Phase 1 is complete. No implementation task is active pending explicit authorization to begin Phase 2.
+Phase 2 is complete. No implementation task is active pending explicit authorization to begin Phase 3.
 
 ## 6. Files Created / Modified
 
 ### `requirements.txt`
 
-Purpose: reproducible Phase 1 runtime, compiler, and test dependencies.
+Purpose: reproducible protobuf, test, Socket.IO, and WebSocket dependencies.
 
-Dependencies: `protobuf==7.36.2`, `grpcio-tools==1.82.2`, `pytest==9.1.1`.
+Direct dependencies: `protobuf==7.36.2`, `grpcio-tools==1.82.2`, `pytest==9.1.1`, `python-socketio[client]==5.17.0`, and `websocket-client==1.9.2`.
 
 Status: installed into the ignored project-local `.venv`; `pip check` passes.
 
@@ -109,17 +117,57 @@ Purpose: verifies the protobuf package, required full message names, and seriali
 
 Status: four tests pass.
 
+### `data/vietcap/constants.py`
+
+Purpose: centralizes the default Socket.IO URL, path, timeout, and WebSocket-only transport selection.
+
+Status: created and covered by client tests.
+
+### `data/vietcap/client.py`
+
+Purpose: manages connection, disconnect, heartbeat-friendly sleep, and lifecycle logging without exposing subscription behavior.
+
+Main classes/functions: `VietcapRealtimeClient`, `ConnectionInfo`, `normalize_socketio_path`.
+
+Dependencies: `python-socketio` and its synchronous client transport stack.
+
+Status: unit-tested and verified against the live endpoint.
+
+### `scripts/inspect_connection.py`
+
+Purpose: human-readable connection smoke test with configurable hold time, timeout, and Engine.IO logs.
+
+Status: direct script entry point verified; 35-second live smoke test passed without subscriptions.
+
+### `scripts/__init__.py`
+
+Purpose: marks the scripts namespace.
+
+Status: created.
+
+### `tests/test_client.py`
+
+Purpose: verifies path normalization, WebSocket-only connection arguments, lifecycle handler registration, and idempotent disconnect behavior without network access.
+
+Status: six tests pass; combined suite contains ten passing tests.
+
+### `docs/VIETCAP_PROTOCOL.md`
+
+Purpose: protocol notes and confirmed runtime evidence.
+
+Status: updated with Engine.IO v4 handshake, heartbeat, and no-subscription evidence.
+
 ### `TASKS.md`
 
 Purpose: phase gate and acceptance checklist.
 
-Status: active phase advanced to Phase 1 after explicit user authorization; all Phase 1 items marked complete from test evidence. Phase 2 remains untouched.
+Status: active phase advanced to Phase 2 after explicit user authorization; all Phase 2 items marked complete from live evidence. Phase 3 remains untouched.
 
 ### `PROJECT_CONTEXT.md`
 
 Purpose: persistent development record.
 
-Status: updated with Phase 1 implementation and evidence.
+Status: updated with Phase 2 implementation and evidence.
 
 ## 7. Important Technical Discoveries
 
@@ -162,6 +210,27 @@ The frontend's `protobuf.js` loader accepts this. Standard `protoc` rejects it b
 
 The dependencies are isolated in `.venv`, which is excluded by `.gitignore`.
 
+### Verified Socket.IO runtime
+
+Live connection command:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\inspect_connection.py --hold-seconds 35 --connect-timeout 20 --engineio-logs
+```
+
+Observed on 2026-09-19:
+
+- `python-socketio==5.17.0` initiated `wss://trading.vietcap.com.vn/ws/price/socket.io/?transport=websocket&EIO=4`.
+- The server accepted the WebSocket without supplied credentials.
+- Engine.IO handshake fields: `upgrades=[]`, `pingInterval=25000`, `pingTimeout=20000`, and `maxPayload=1000000`.
+- The default Socket.IO namespace connected successfully.
+- The client remained connected for 35 seconds.
+- A server PING and client PONG were observed at approximately 25 seconds.
+- The client sent a clean Socket.IO namespace disconnect and Engine.IO close.
+- Protocol logs showed no application event packets or market subscription emits.
+
+The Engine.IO session ID and Socket.IO namespace ID are different values, as expected. Session IDs are runtime diagnostics and are not persisted as credentials.
+
 ### Previously observed realtime protocol information
 
 - Socket.IO endpoint: `wss://trading.vietcap.com.vn/ws/price/socket.io/?EIO=4&transport=websocket`.
@@ -169,7 +238,7 @@ The dependencies are isolated in `.venv`, which is excluded by `.gitignore`.
 - Observed initial event names include `w-match-price`, `w-bid-ask`, and `index`.
 - Observed subscription payload shape is a JSON string containing `{"symbols":[...]}`.
 
-These realtime details have not yet been reproduced by Python and remain outside Phase 1 acceptance.
+The endpoint, Engine.IO version, path, direct WebSocket transport, and heartbeat behavior are now reproduced by Python. Event names, subscription payloads, and protobuf mappings against real frames remain unverified.
 
 ## 8. Confirmed Facts vs Assumptions
 
@@ -182,11 +251,14 @@ These realtime details have not yet been reproduced by Python and remain outside
 - The local schema matches normalized upstream content exactly.
 - Generated Python classes import, instantiate, serialize, and decode successfully.
 - Four protobuf tests pass and the project-local dependency set has no broken requirements.
+- `python-socketio` 5.17.0 connects to the Vietcap endpoint using Engine.IO v4 over direct WebSocket.
+- The server advertises a 25-second ping interval and 20-second ping timeout.
+- A 35-second connection survived one observed PING/PONG cycle and disconnected cleanly.
+- No account credentials, cookies, auth payload, or market subscription events were supplied during the Phase 2 smoke test.
 - Vietcap interfaces are unofficial/internal frontend details and remain isolated.
 
 ### Assumptions
 
-- `python-socketio` can connect without account credentials.
 - The recorded Socket.IO event names match current runtime behavior.
 - Subscription event payloads must be JSON strings with `symbols` arrays.
 - Realtime market data remains accessible without an authenticated session.
@@ -274,25 +346,78 @@ Actual: `Phase 1 gate audit: PASS`.
 
 Result: PASS.
 
+### 2026-09-19 12:50 +07:00 — Phase 2 dependency installation
+
+Command: `.\.venv\Scripts\python.exe -m pip install -r requirements.txt`.
+
+Expected: install the pinned synchronous Socket.IO/WebSocket client stack without breaking Phase 1 dependencies.
+
+Actual: installed `python-socketio==5.17.0`, `python-engineio==4.14.0`, `websocket-client==1.9.2`, and required transitive packages successfully.
+
+Result: PASS.
+
+### 2026-09-19 12:53 +07:00 — Client unit tests
+
+Command: `.\.venv\Scripts\python.exe -m pytest -q`.
+
+Expected: preserve protobuf tests and verify connection configuration/lifecycle without network access.
+
+Actual: initial run `10 passed in 0.36s`; final rerun `10 passed in 0.35s`.
+
+Result: PASS.
+
+### 2026-09-19 12:54 +07:00 — Smoke-script entry point
+
+Command: `.\.venv\Scripts\python.exe scripts\inspect_connection.py --help`.
+
+Expected: direct script execution resolves project imports and exposes bounded connection-only options.
+
+Actual: help displayed successfully with hold time, connection timeout, and Engine.IO logging options.
+
+Result: PASS.
+
+### 2026-09-19 12:55 +07:00 — Live Socket.IO connection smoke test
+
+Command: `.\.venv\Scripts\python.exe scripts\inspect_connection.py --hold-seconds 35 --connect-timeout 20 --engineio-logs`.
+
+Expected: connect directly via WebSocket/Engine.IO v4, connect the default Socket.IO namespace, survive at least one heartbeat, send no market subscription, and disconnect cleanly.
+
+Actual: WebSocket accepted; default namespace connected; server PING/client PONG observed; `[STABLE] connected for 35.0s`; clean close completed. No application event/subscription packet appeared in protocol logs.
+
+Result: PASS.
+
+### 2026-09-19 12:58 +07:00 — Final Phase 2 dependency and gate audit
+
+Commands: `.\.venv\Scripts\python.exe -m pip check` and read-only Phase 2 checklist/artifact/application-emit assertions.
+
+Expected: consistent dependencies, complete Phase 2 evidence, no later-phase checkbox changes, all expected artifacts present, and zero application `.emit(...)` calls.
+
+Actual: `No broken requirements found.`; `Phase 2 gate audit: PASS`; `Application Socket.IO emit calls: 0`.
+
+Result: PASS.
+
 ## 10. Known Problems
 
 - The upstream schema is not directly compilable by standard `protoc` without reordering its first two declarations.
 - The directory is not a Git repository, so changes cannot currently be reviewed through Git status/diff/history.
 - The generated binding validates against protobuf generated-code version 7.35.0, while the installed runtime is 7.36.2; runtime validation and all tests pass.
-- No Vietcap Socket.IO behavior has been validated from Python.
 - No real binary market frame has been decoded; tests currently use valid locally constructed protobuf messages.
+- Only one 35-second live connection has been observed; extended uptime and forced interruption are deferred to Phase 7 reliability work.
+- Automatic reconnection is intentionally disabled in the Phase 2 client.
+- Current code has no subscription or application-event handlers; these begin with Phase 3.
 
 ## 11. Next Steps
 
-Phase 2 only, after explicit user authorization:
+Phase 3 only, after explicit user authorization:
 
-1. Add `python-socketio` with its mature WebSocket client transport dependency to the isolated environment.
-2. Implement a minimal connection-only client under `data/vietcap/` with Python logging and connect/disconnect/error handling.
-3. Add a smoke/inspection script that makes no market subscriptions.
-4. Verify Engine.IO v4 / Socket.IO compatibility against the live endpoint.
-5. Record exact runtime evidence, update this file and `TASKS.md`, then stop.
+1. Register only the exact `w-match-price` runtime event handler.
+2. Subscribe only `FPT` using the observed JSON-string payload shape.
+3. Inspect the received payload type and binary framing without dumping unbounded buffers.
+4. Decode the payload with `MatchPriceMessage` and print a minimal normalized FPT tick.
+5. Validate price/volume fields against the Phase 3 acceptance criteria.
+6. Record exact runtime evidence, update this file and `TASKS.md`, then stop.
 
-Do not subscribe to FPT, ACB, VNINDEX, or any market stream during Phase 2.
+Do not add ACB, index, bid/ask, reconnect, strategy, or Telegram work during Phase 3.
 
 ## 12. How To Run
 
@@ -309,13 +434,19 @@ Regenerate the binding:
 .\.venv\Scripts\python.exe -m grpc_tools.protoc -I. --python_out=. data/vietcap/proto/price.proto
 ```
 
-Run Phase 1 tests:
+Run all current tests:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-There is no realtime collector to run yet.
+Run the connection-only smoke test:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\inspect_connection.py --hold-seconds 35 --engineio-logs
+```
+
+This script connects and observes the heartbeat only. It does not subscribe to or decode market data.
 
 ## 13. Architecture Decisions
 
@@ -338,6 +469,22 @@ Reason: runtime code can import the schema without requiring a compiler in produ
 ### Decision: use an isolated project environment
 
 Reason: Phase 1 requires protobuf 7.x through the selected `grpcio-tools` release, while the user-level environment contains protobuf 5.x. `.venv` prevents unrelated package disruption.
+
+### Decision: use the synchronous `python-socketio` client for protocol validation
+
+Reason: Phase 2 needs one bounded connection and no concurrent market processing. The synchronous client minimizes moving parts while retaining the mature Engine.IO implementation required by project rules.
+
+### Decision: force direct WebSocket transport
+
+Reason: the observed frontend endpoint explicitly uses `transport=websocket`. Forcing that transport verifies the known path and avoids conflating a polling fallback with WebSocket success.
+
+### Decision: disable reconnection in Phase 2
+
+Reason: reconnect and resubscription behavior belongs to Phase 7. This keeps the current acceptance test limited to initial connection stability and makes unexpected disconnects visible.
+
+### Decision: expose no subscription API in the Phase 2 client
+
+Reason: Phase 2 is connection-only. Market events and payload handling must be added incrementally with Phase 3 evidence.
 
 ### Decision: retain provider-independent downstream boundaries
 
@@ -363,3 +510,18 @@ Reason: normalization and market-state code must eventually consume generic mode
 - Added package, descriptor, instantiation, serialization, and decode tests.
 - Passed 4 tests twice, upstream equivalence verification, dependency consistency check, and the Phase 1 gate audit.
 - Marked Phase 1 complete and stopped before Phase 2.
+
+### 2026-09-19 12:55 +07:00 — Phase 2
+
+- Advanced the active phase after explicit user authorization.
+- Added pinned `python-socketio` and `websocket-client` dependencies.
+- Added centralized connection constants and a connection-only lifecycle client.
+- Added connect, disconnect, error, session, and transport logging.
+- Added deterministic unit tests and a human-readable live inspection script.
+- Passed ten unit tests twice and direct script-entry validation.
+- Established a live Engine.IO v4 WebSocket connection without credentials.
+- Observed a successful heartbeat and stable 35-second connection.
+- Verified no market subscription events were emitted.
+- Updated protocol documentation with runtime evidence.
+- Passed final dependency consistency and phase-gate audits.
+- Marked Phase 2 complete and stopped before Phase 3.
