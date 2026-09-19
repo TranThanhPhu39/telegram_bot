@@ -3,6 +3,7 @@
 DEFAULT_SOCKET_URL = "https://trading.vietcap.com.vn"
 DEFAULT_SOCKET_PATH = "/ws/price/socket.io"
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 20.0
+DEFAULT_RECONNECTION_ENABLED = True
 SOCKET_TRANSPORTS = ("websocket",)
 MATCH_PRICE_EVENT = "w-match-price"
 INDEX_EVENT = "index"

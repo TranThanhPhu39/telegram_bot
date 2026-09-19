@@ -38,6 +38,14 @@ The Phase 2 smoke test emitted no market subscription events. Protocol logs
 contained only the Socket.IO namespace handshake, Engine.IO heartbeat, and
 disconnect packets.
 
+### Phase 7 reconnect handling
+
+The Python client now creates `socketio.Client(reconnection=True)`, enabling the
+library's reconnect handling after an established connection is lost. Retry
+parameters remain at library defaults pending the next Phase 7 task. Subscription
+state is cleared on disconnect and is not yet automatically restored, so this is
+not evidence that market streams resume after interruption.
+
 ## Proto
 
 Frontend loads:

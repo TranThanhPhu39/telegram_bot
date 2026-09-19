@@ -45,7 +45,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 6 — Bid/Ask — authorized for offline implementation by explicit user instruction. Phases 3, 4, and 5 remain pending live validation and must not be reported as PASS until their realtime acceptance criteria are observed.
+Phase 7 — Reliability — authorized for offline implementation by explicit user instruction. Phases 3, 4, 5, and 6 remain pending live validation and must not be reported as PASS until their realtime acceptance criteria are observed.
 
 ## 4. Completed
 
@@ -75,13 +75,14 @@ Phase 6 — Bid/Ask — authorized for offline implementation by explicit user i
 - [x] Validated `MatchPriceMessage` to `TradeTick` conversion unit-tested
 - [x] Thread-safe latest market-state cache implemented and unit-tested
 - [x] FPT + ACB decode-to-cache pipeline and bounded acceptance harness implemented
+- [x] Socket.IO automatic reconnect handling enabled and unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 6 is open for offline implementation. No Phase 6 checkbox has been changed by this authorization-only update. The first permitted task is subscribing FPT + ACB to `w-bid-ask`; Phases 3–5 retain their pending live-validation status.
+Phase 7 reliability work is active. Automatic reconnect handling is enabled through `python-socketio`; retry tuning, resubscription, listener deduplication, raw debug mode, and forced-interruption acceptance remain pending. Phases 3–6 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -139,19 +140,19 @@ Status: four tests pass.
 
 ### `data/vietcap/constants.py`
 
-Purpose: centralizes the default Socket.IO URL, path, timeout, and WebSocket-only transport selection.
+Purpose: centralizes the default Socket.IO URL, path, timeout, automatic reconnect setting, and WebSocket-only transport selection.
 
-Status: created and covered by client tests.
+Status: reconnect is enabled by default and covered by client tests.
 
 ### `data/vietcap/client.py`
 
-Purpose: manages connection, disconnect, heartbeat-friendly sleep, lifecycle logging, and match-price subscriptions for normalized symbol sets.
+Purpose: manages connection/reconnection, disconnect, heartbeat-friendly sleep, lifecycle logging, and the three scoped market subscriptions.
 
 Main classes/functions: `VietcapRealtimeClient`, `ConnectionInfo`, `normalize_socketio_path`.
 
 Dependencies: `python-socketio` and its synchronous client transport stack.
 
-Status: unit-tested for FPT + ACB, unchanged-subscription suppression, and reset after disconnect. The endpoint connection is live-verified; dual-symbol event delivery is not yet live-tested.
+Status: automatic reconnect configuration is unit-tested. Subscription state is still cleared on disconnect and is not yet restored automatically after reconnect.
 
 ### `scripts/inspect_connection.py`
 
@@ -167,9 +168,9 @@ Status: created.
 
 ### `tests/test_client.py`
 
-Purpose: verifies path normalization, WebSocket-only connection arguments, lifecycle handlers, idempotent disconnect, match-price handler registration, FPT + ACB emission, duplicate suppression, and reset after disconnect without network access.
+Purpose: verifies path normalization, WebSocket-only connection arguments, reconnect configuration, lifecycle handlers, idempotent disconnect, all stream registrations/subscriptions, duplicate suppression, and reset after disconnect without network access.
 
-Status: ten tests pass.
+Status: all client tests pass as part of the 126-test suite.
 
 ### `data/vietcap/subscriptions.py`
 
@@ -711,6 +712,24 @@ subscription or event-receive stage.
 
 Result: FAIL for live connectivity; FPT + ACB simultaneous delivery remains NOT TESTED.
 
+### 2026-09-19 — Phase 7 reconnect handling unit tests
+
+Commands:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import inspect, socketio; print(inspect.signature(socketio.Client))"
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Expected: confirm the pinned client supports reconnect configuration, enable it
+for the default production client, and preserve all Phase 1–6 behavior.
+
+Actual: the installed `python-socketio==5.17.0` exposes `reconnection=True` and
+related retry parameters; the full suite returned `126 passed in 1.80s`.
+
+Result: PASS for offline reconnect handling. Forced interruption and stream
+recovery remain NOT TESTED.
+
 ## 10. Known Problems
 
 - The upstream schema is not directly compilable by standard `protoc` without reordering its first two declarations.
@@ -718,7 +737,8 @@ Result: FAIL for live connectivity; FPT + ACB simultaneous delivery remains NOT 
 - The generated binding validates against protobuf generated-code version 7.35.0, while the installed runtime is 7.36.2; runtime validation and all tests pass.
 - No real binary market frame has been decoded; tests currently use valid locally constructed protobuf messages.
 - Only one 35-second live connection has been observed; extended uptime and forced interruption are deferred to Phase 7 reliability work.
-- Automatic reconnection is intentionally disabled in the Phase 2 client.
+- Automatic transport reconnect is enabled, but retry parameters are not yet
+  explicitly configured and subscriptions are not yet restored after reconnect.
 - No FPT event arrived during the Saturday Phase 3 test, so the exact server event delivery and live protobuf mapping remain unverified.
 - Phase 3 cannot be marked complete until at least two distinct valid FPT ticks are observed during an active session.
 - The current frontend contract matches the implementation, but static bundle evidence cannot prove that this Python connection will receive data during the next active session.
@@ -729,8 +749,9 @@ Result: FAIL for live connectivity; FPT + ACB simultaneous delivery remains NOT 
 
 ## 11. Next Steps
 
-Begin only the first Phase 6 offline task: subscribe FPT + ACB to `w-bid-ask`
-with deterministic tests. Do not change the pending live status of Phases 3–5.
+Continue Phase 7 with one small task: define and unit-test explicit reasonable
+retry/backoff parameters for the pinned `python-socketio` client. Do not add
+automatic resubscription in the same task group.
 
 ## 12. How To Run
 
@@ -861,6 +882,13 @@ Reason: one cached snapshot per symbol would not demonstrate an updating realtim
 market state. The acceptance harness requires at least two distinct identities for
 both FPT and ACB, based on normalized time, price, last volume, accumulated volume,
 and accumulated value. Invalid and unexpected events never enter the cache.
+
+### Decision: use python-socketio reconnect handling
+
+Reason: the mature Socket.IO client already implements reconnection after an
+established transport is interrupted. Phase 7 enables that mechanism instead of
+adding a handwritten loop. Backoff tuning and subscription restoration remain
+separate tasks and require their own tests.
 
 ## 14. Change Log
 
@@ -1001,3 +1029,12 @@ and accumulated value. Invalid and unexpected events never enter the cache.
 - Did not attempt live bid-ask validation; Phase 6 acceptance stays NOT TESTED.
 - Did not implement Phase 7 reconnect, REST, database, indicators, signals,
   or Telegram.
+
+### 2026-09-19 — Phase 7 reconnect-handling task group
+
+- Moved Phase 6 to pending live validation without changing its unchecked live acceptance.
+- Opened Phase 7 offline implementation by explicit user instruction.
+- Enabled the reconnect mechanism built into `python-socketio`.
+- Added deterministic coverage for the production client constructor setting.
+- Passed the full 126-test suite.
+- Did not tune retry parameters or implement automatic resubscription.

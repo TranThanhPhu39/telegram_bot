@@ -109,6 +109,13 @@ events enter through `data.vietcap.pipeline.BidAskStatePipeline`, which
 performs decode, validation/normalization, expected-symbol filtering, and cache
 update in that order.
 
+## Realtime reliability
+
+`VietcapRealtimeClient` enables the reconnect mechanism provided by
+`python-socketio`. This currently covers transport reconnection only. Retry
+parameters have not yet been tuned, and stream subscriptions are not yet restored
+after reconnect; those remain separate Phase 7 tasks.
+
 ## Universe
 
 Data universe:

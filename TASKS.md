@@ -24,8 +24,14 @@ Reason: offline implementation and tests are complete, but VNINDEX realtime
 acceptance remains NOT TESTED. `scripts/test_realtime_index.py` must report
 `[PASS]` during an active Vietnamese market session.
 
+**Phase 6 — Bid/Ask**
+
+Reason: offline implementation and tests are complete, but realtime order-book
+acceptance remains NOT TESTED. `scripts/test_realtime_bidask.py` must report
+`[PASS]` during an active Vietnamese market session.
+
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 6 — Bid/Ask (offline implementation authorized)**
+**Phase 7 — Reliability (offline implementation authorized)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -141,7 +147,7 @@ Acceptance:
 ---
 
 ## Phase 7 — Reliability
-- [ ] Reconnect handling
+- [x] Reconnect handling
 - [ ] Exponential/reasonable retry
 - [ ] Re-subscribe after reconnect
 - [ ] No duplicate listeners

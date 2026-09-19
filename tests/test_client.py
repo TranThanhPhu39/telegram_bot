@@ -85,6 +85,25 @@ def test_connect_uses_websocket_only_and_custom_path() -> None:
     }
 
 
+def test_default_socket_client_enables_reconnection(monkeypatch: pytest.MonkeyPatch) -> None:
+    socket_client = FakeSocketClient()
+    constructor_options: dict[str, object] = {}
+
+    def create_socket_client(**kwargs: object) -> FakeSocketClient:
+        constructor_options.update(kwargs)
+        return socket_client
+
+    monkeypatch.setattr("data.vietcap.client.socketio.Client", create_socket_client)
+
+    VietcapRealtimeClient()
+
+    assert constructor_options == {
+        "reconnection": True,
+        "logger": False,
+        "engineio_logger": False,
+    }
+
+
 def test_disconnect_is_idempotent() -> None:
     socket_client = FakeSocketClient()
     client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
