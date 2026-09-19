@@ -1,6 +1,10 @@
 # TASKS.md
 
 > Rule: Codex must work inside the ACTIVE IMPLEMENTATION PHASE.
+> By default, Codex must implement and verify that whole phase in one iteration.
+> Split it into smaller task groups only after a concrete failure, blocker,
+> unresolved external dependency, or material technical/safety risk is encountered;
+> record the reason in `PROJECT_CONTEXT.md`.
 > A previous phase may remain under PENDING LIVE VALIDATION when its only blocker
 > is an unavailable external runtime condition and the user explicitly authorizes
 > offline development of the next phase.

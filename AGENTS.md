@@ -4,7 +4,10 @@
 Vietnamese Stock Realtime Signal Telegram Bot.
 
 ## Working principle
-Build incrementally. Never implement the whole system in one pass.
+Build one phase at a time. By default, complete the active phase end-to-end in
+one coding iteration. Split it into smaller task groups only when a failure,
+blocker, unresolved external dependency, or material technical/safety risk
+prevents safe completion. Never implement the whole system in one pass.
 
 ## Mandatory reading order
 Before coding:
@@ -17,7 +20,10 @@ Before coding:
 ## Hard rules
 
 1. Work on ONE phase at a time.
-2. Work on ONE small task group at a time.
+2. By default, implement and verify the whole active phase in one iteration.
+   Split the phase into smaller task groups only after encountering a concrete
+   failure, blocker, unresolved external dependency, or material technical/safety
+   risk. Record the reason for the split in `PROJECT_CONTEXT.md`.
 3. Do not start later phases until the active phase passes its acceptance criteria.
    Exception: if acceptance is blocked solely by an unavailable external runtime
    condition, such as a closed market, the user may explicitly authorize offline
@@ -82,11 +88,14 @@ Confirm updates to:
 - `TASKS.md`
 
 ### Next
-Only the next small task, not the whole roadmap.
+Only the next phase, or the specific follow-up needed when the current phase had
+to be split. Do not report the whole roadmap.
 
 ## Stop condition
-When the current task acceptance criteria are met:
+When the current phase acceptance criteria are met:
 - update docs,
 - report results,
 - STOP.
+If a concrete problem forces the phase to be split, stop at a safe boundary,
+record the problem and remaining work, and report the specific follow-up.
 Do not automatically continue into the next phase.

@@ -13,6 +13,10 @@ Then inspect the repository.
 
 IMPORTANT:
 - Work ONLY on the ACTIVE PHASE in `TASKS.md`.
+- By default, implement and verify the whole active phase in one iteration.
+- Split the phase into smaller task groups only after a concrete failure, blocker,
+  unresolved external dependency, or material technical/safety risk is encountered;
+  record the reason in `PROJECT_CONTEXT.md`.
 - The active phase is Phase 0.
 - Do not code the whole bot.
 - Do not implement Telegram, indicators, scanner, strategy, backtest, or news now.
@@ -30,7 +34,8 @@ For Phase 0:
    - current dependencies,
    - confirmed integration point,
    - assumptions,
-   - next small task.
+   - next phase, or the specific follow-up if a concrete problem forced the active
+     phase to be split.
 7. Update `TASKS.md` checkboxes only for items actually completed.
 8. Do not fabricate tests.
 9. Report:

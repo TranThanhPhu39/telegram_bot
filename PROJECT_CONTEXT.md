@@ -1591,3 +1591,14 @@ three observed values before request construction.
   preservation, and rejection of newer/changed migration metadata.
 - Passed 83 focused database/schema/migration tests.
 - Marked Phase 9 complete and stopped before Phase 10.
+
+### 2026-09-19 — Development workflow rule update
+
+- Changed the default unit of implementation from one small task group to one
+  complete active phase per coding iteration.
+- A phase may be split only after a concrete failure, blocker, unresolved external
+  dependency, or material technical/safety risk prevents safe completion.
+- Any split must be recorded here with its reason and remaining follow-up.
+- Preserved phase gates, evidence-based checkboxes, mandatory testing, pending live
+  validation, and the rule against automatically starting the next phase.
+- Made no feature-code changes, opened no new phase, and changed no phase checkbox.
