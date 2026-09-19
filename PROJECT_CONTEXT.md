@@ -46,7 +46,9 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 15 — Telegram Bot — COMPLETE. Development is stopped before Phase 16. Phases
+Phase 16 — Backtest & performance — IN PROGRESS. The engine, metrics, and Telegram
+performance command are complete, but the 3–6 month preliminary run is blocked
+because Vietcap returned zero requested daily bars. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -104,19 +106,45 @@ Phase 15 — Telegram Bot — COMPLETE. Development is stopped before Phase 16. 
 - [x] Provider-independent V1 signal lifecycle with cooldown/dedup implemented and unit-tested
 - [x] HOSE/HNX/UPCoM common-stock liquidity scanner and bounded watch universe implemented
 - [x] Telegram commands, live token authentication, and deduplicated signal alerts implemented
+- [x] Shared SignalEngine backtest adapter and performance metrics implemented and unit-tested
+- [ ] Three-to-six-month preliminary backtest (NOT TESTED: zero historical bars returned)
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 15 is complete. Telegram token authentication succeeded, all required
-commands are wired through a provider-independent data-service boundary, and
-automatic signal alerts are deduplicated per recipient. Development stops until
-the user explicitly opens Phase 16.
+Phase 16 is split at a concrete external-data blocker. Shared-engine replay,
+closed-trade accounting, win rate, average return, maximum drawdown, profit factor,
+and `/performance` are implemented and verified. The required 3–6 month preliminary
+run remains NOT TESTED because authenticated Vietcap requests returned zero FPT
+and VNINDEX daily bars. Phase 17 must not start yet.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
+
+### `backtest/engine.py`
+
+Purpose: replay chronological observations through the production SignalEngine,
+record ACTIVE-to-EXIT trades, and calculate deterministic performance metrics.
+
+Status: shared-engine lifecycle, win rate, average return, compounded max drawdown,
+profit factor, empty results, open positions, formatting, and ordering are covered
+by five focused tests.
+
+### `scripts/run_preliminary_backtest.py`
+
+Purpose: bounded authenticated 140-session FPT/VNINDEX preliminary backtest probe.
+
+Status: NOT TESTED to completion. Vietcap returned zero FPT and zero VNINDEX daily
+bars for both attempted request boundaries, so the script correctly emitted no
+performance claim.
+
+### `tests/test_backtest.py`
+
+Purpose: deterministic offline acceptance for the backtest and metric layer.
+
+Status: five focused tests pass; the full suite passes with 365 tests.
 
 ### `telegram_bot/commands.py`, `telegram_bot/app.py`, `telegram_bot/alerts.py`
 
@@ -1170,8 +1198,9 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Await explicit user authorization before opening Phase 16. Do not implement the
-backtest/performance layer automatically.
+Resolve the Phase 16 historical-data blocker and rerun
+`py -3.12 -m scripts.run_preliminary_backtest`. Do not open Phase 17 while the
+3–6 month preliminary checkbox remains unchecked.
 
 ## 12. How To Run
 
@@ -1817,3 +1846,20 @@ three observed values before request construction.
 - Passed eight focused tests and the complete 360-test suite.
 - Marked Phase 15 complete and stopped before Phase 16. Phases 3–7 remain pending
   live validation.
+
+### 2026-09-19 — Phase 16 backtest and performance (partial)
+
+- Opened Phase 16 after explicit user authorization.
+- Added a backtest adapter that reuses the production `SignalEngine` unchanged,
+  opens on ACTIVE, closes on EXIT, and reports unclosed positions explicitly.
+- Added win rate, average trade return, compounded-equity maximum drawdown, and
+  profit factor; a no-loss sample reports profit factor as unavailable.
+- Added formatted performance output and the Telegram `/performance` command.
+- Added a bounded 140-session FPT/VNINDEX preliminary runner with explicit daily
+  proxy limitations and no secret logging.
+- Ran the authenticated request twice. Both returned HTTP success but zero FPT and
+  zero VNINDEX `ONE_DAY` bars, including at the browser-confirmed timestamp
+  boundary `1790035200`.
+- Passed five focused tests and the complete 365-test suite.
+- Split Phase 16 due to the concrete external historical-data blocker. The 3–6
+  month preliminary backtest and Phase STOP remain unchecked and NOT TESTED.

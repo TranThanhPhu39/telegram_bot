@@ -327,6 +327,25 @@ Telegram accepts it, so a failed attempt remains retryable. `scripts/test_telegr
 performs a bounded `getMe` authentication check without printing the token;
 `scripts/run_telegram_bot` starts long polling.
 
+## Backtest and performance layer
+
+`backtest.engine.run_backtest` replays chronological `SignalInputs` through the
+same `strategy.signal_engine.SignalEngine` class used by live callers. It opens a
+simulated position only on `ACTIVE` and closes only on `EXIT`; it does not place
+orders or invent fills outside event prices. Open positions are reported rather
+than silently marked to market.
+
+Closed trades produce win rate, arithmetic average trade return, compounded-equity
+maximum drawdown, and profit factor. Profit factor is unavailable when there are
+no losing trades rather than reported as an artificial infinite number.
+`/performance` is exposed through the Telegram data-service boundary.
+
+`scripts/run_preliminary_backtest` is a bounded diagnostic for 140 aligned FPT and
+VNINDEX daily bars. Its daily volume ratio and trend-only index regime are clearly
+marked as preliminary proxies, not final live-strategy evidence. At the current
+runtime boundary Vietcap returned zero daily bars, so no 3–6 month performance
+claim has been produced.
+
 ## Planned V1 signal features
 - Market Regime
 - Trend

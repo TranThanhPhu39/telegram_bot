@@ -29,6 +29,9 @@ class FakeData:
     def signal_explanation(self, symbol: str) -> str | None:
         return self.explanations.get(symbol)
 
+    def performance_overview(self) -> str:
+        return "Win rate: 50%"
+
 
 class FakeBot:
     def __init__(self, fail_chat: int | None = None) -> None:
@@ -56,6 +59,7 @@ def test_start_help_and_all_data_commands() -> None:
     assert commands.scan() == "Watchlist: FPT, ACB"
     assert commands.market() == "VNINDEX: BULL"
     assert commands.why(["fpt"]) == "RVOL tốt"
+    assert commands.performance() == "Win rate: 50%"
 
 
 def test_commands_handle_missing_data_and_usage() -> None:
@@ -74,12 +78,13 @@ def test_safe_runtime_fallback_never_fabricates_market_data() -> None:
     assert commands.scan() == "Chưa có mã đạt bộ lọc."
     assert "chưa sẵn sàng" in commands.market()
     assert commands.why(["FPT"]) == "Chưa có giải thích tín hiệu cho FPT."
+    assert "chưa sẵn sàng" in commands.performance()
 
 
 def test_application_registers_all_required_commands() -> None:
     application = build_application("123456:TEST_TOKEN", TelegramCommandService(FakeData()))
     commands = {command for handler in application.handlers[0] for command in handler.commands}
-    assert commands == {"start", "help", "soi", "scan", "market", "why"}
+    assert commands == {"start", "help", "soi", "scan", "market", "why", "performance"}
 
 
 def test_alert_format_contains_transition_and_reason() -> None:

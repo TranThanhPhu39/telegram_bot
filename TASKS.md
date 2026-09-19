@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 15 — Telegram Bot (COMPLETE; stopped before Phase 16)**
+**Phase 16 — Backtest & performance (IN PROGRESS; historical-data blocker)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -268,14 +268,19 @@ Acceptance:
 ---
 
 ## Phase 16 — Backtest & performance
-- [ ] Shared live/backtest strategy code
+- [x] Shared live/backtest strategy code
 - [ ] 3–6 month preliminary backtest
-- [ ] Win rate
-- [ ] Average return
-- [ ] Max drawdown
-- [ ] Profit factor
-- [ ] `/performance`
+- [x] Win rate
+- [x] Average return
+- [x] Max drawdown
+- [x] Profit factor
+- [x] `/performance`
 - [ ] STOP and report
+
+Blocker: authenticated Vietcap `ONE_DAY` requests for 140 FPT + VNINDEX bars
+returned HTTP success with zero bars on 2026-09-19, both with the runtime clock
+and the previously browser-confirmed `to=1790035200` boundary. The preliminary
+3–6 month result remains NOT TESTED; no synthetic performance is reported.
 
 ---
 

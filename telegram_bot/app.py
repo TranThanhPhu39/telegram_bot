@@ -50,6 +50,9 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
     async def why(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _reply_with_usage(update, lambda: commands.why(context.args))
 
+    async def performance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await reply(update, commands.performance())
+
     async def _reply_with_usage(update: Update, render: object) -> None:
         try:
             text = render()  # type: ignore[operator]
@@ -65,6 +68,7 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
             CommandHandler("scan", scan),
             CommandHandler("market", market),
             CommandHandler("why", why),
+            CommandHandler("performance", performance),
         ]
     )
     return application

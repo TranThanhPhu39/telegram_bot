@@ -10,6 +10,7 @@ class BotDataService(Protocol):
     def scan_results(self) -> Sequence[str]: ...
     def market_overview(self) -> str: ...
     def signal_explanation(self, symbol: str) -> str | None: ...
+    def performance_overview(self) -> str: ...
 
 
 HELP_TEXT = (
@@ -17,7 +18,8 @@ HELP_TEXT = (
     "/soi FPT - xem trạng thái một mã\n"
     "/scan - xem danh sách quét\n"
     "/market - xem trạng thái thị trường\n"
-    "/why FPT - xem lý do tín hiệu"
+    "/why FPT - xem lý do tín hiệu\n"
+    "/performance - xem kết quả backtest"
 )
 
 
@@ -35,6 +37,9 @@ class UnavailableBotDataService:
 
     def signal_explanation(self, symbol: str) -> None:
         return None
+
+    def performance_overview(self) -> str:
+        return "Kết quả backtest hiện chưa sẵn sàng."
 
 
 class TelegramCommandService:
@@ -63,6 +68,9 @@ class TelegramCommandService:
         symbol = _one_symbol(arguments, "/why FPT")
         result = self.data.signal_explanation(symbol)
         return result if result is not None else f"Chưa có giải thích tín hiệu cho {symbol}."
+
+    def performance(self) -> str:
+        return self.data.performance_overview()
 
 
 def _one_symbol(arguments: Sequence[str], usage: str) -> str:
