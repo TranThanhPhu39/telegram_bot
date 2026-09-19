@@ -45,9 +45,10 @@ library's reconnect handling after an established connection is lost. Explicit
 parameters are `reconnection_attempts=0`, `reconnection_delay=1`,
 `reconnection_delay_max=30`, and `randomization_factor=0.5`. In the pinned
 library, zero attempts means no attempt limit; delay doubles up to the cap and
-includes jitter. Subscription state is cleared on disconnect and is not yet
-automatically restored, so this is not evidence that market streams resume after
-interruption.
+includes jitter. Active subscription markers are cleared on disconnect, while
+normalized desired symbol lists are retained. After reconnect the client restores
+match-price, index, and bid-ask subscriptions independently. This behavior is
+unit-tested but is not yet evidence that streams resume after a real interruption.
 
 ## Proto
 

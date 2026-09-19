@@ -75,12 +75,15 @@ class VietcapRealtimeClient:
             logger=engineio_logger,
             engineio_logger=engineio_logger,
         )
-        self._socket.on("connect", self._on_connect)
-        self._socket.on("disconnect", self._on_disconnect)
-        self._socket.on("connect_error", self._on_connect_error)
         self._match_price_subscription: frozenset[str] | None = None
         self._index_subscription: frozenset[str] | None = None
         self._bid_ask_subscription: frozenset[str] | None = None
+        self._desired_match_price_symbols: tuple[str, ...] | None = None
+        self._desired_index_symbols: tuple[str, ...] | None = None
+        self._desired_bid_ask_symbols: tuple[str, ...] | None = None
+        self._socket.on("connect", self._on_connect)
+        self._socket.on("disconnect", self._on_disconnect)
+        self._socket.on("connect_error", self._on_connect_error)
 
     @property
     def connected(self) -> bool:
@@ -151,6 +154,7 @@ class VietcapRealtimeClient:
         if not self.connected:
             raise ConnectionError("Connect before subscribing to match prices")
         normalized_symbols = normalize_symbols(symbols)
+        self._desired_match_price_symbols = normalized_symbols
         subscription = frozenset(normalized_symbols)
         if subscription == self._match_price_subscription:
             logger.info(
@@ -194,6 +198,7 @@ class VietcapRealtimeClient:
         if not self.connected:
             raise ConnectionError("Connect before subscribing to indices")
         normalized_symbols = normalize_index_symbols(symbols)
+        self._desired_index_symbols = normalized_symbols
         subscription = frozenset(
             symbol.upper() for symbol in normalized_symbols
         )
@@ -236,6 +241,7 @@ class VietcapRealtimeClient:
         if not self.connected:
             raise ConnectionError("Connect before subscribing to bid-ask data")
         normalized_symbols = normalize_symbols(symbols)
+        self._desired_bid_ask_symbols = normalized_symbols
         subscription = frozenset(normalized_symbols)
         if subscription == self._bid_ask_subscription:
             logger.info(
@@ -267,6 +273,7 @@ class VietcapRealtimeClient:
 
     def _on_connect(self) -> None:
         logger.info("Socket.IO namespace connected")
+        self._restore_subscriptions()
 
     def _on_disconnect(self, reason: object | None = None) -> None:
         self._match_price_subscription = None
@@ -276,3 +283,36 @@ class VietcapRealtimeClient:
 
     def _on_connect_error(self, data: object) -> None:
         logger.error("Socket.IO connection error", extra={"error_data": data})
+
+    def _restore_subscriptions(self) -> None:
+        self._restore_subscription(
+            MATCH_PRICE_EVENT,
+            self._desired_match_price_symbols,
+            self.subscribe_match_price,
+        )
+        self._restore_subscription(
+            INDEX_EVENT,
+            self._desired_index_symbols,
+            self.subscribe_index,
+        )
+        self._restore_subscription(
+            BID_ASK_EVENT,
+            self._desired_bid_ask_symbols,
+            self.subscribe_bid_ask,
+        )
+
+    def _restore_subscription(
+        self,
+        event: str,
+        symbols: tuple[str, ...] | None,
+        subscriber: Callable[[tuple[str, ...]], None],
+    ) -> None:
+        if symbols is None:
+            return
+        try:
+            subscriber(symbols)
+        except Exception:
+            logger.exception(
+                "Failed to restore Vietcap subscription after reconnect",
+                extra={"event": event, "symbols": list(symbols)},
+            )

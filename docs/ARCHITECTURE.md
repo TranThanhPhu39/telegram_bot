@@ -114,8 +114,10 @@ update in that order.
 `VietcapRealtimeClient` enables the reconnect mechanism provided by
 `python-socketio`. Retry delay starts at one second, doubles after each failed
 attempt, caps at 30 seconds, and applies a 0.5 jitter factor. Attempts continue
-until success or an explicit client stop. Stream subscriptions are not yet
-restored after reconnect; that remains a separate Phase 7 task.
+until success or an explicit client stop. Desired match-price, index, and bid-ask
+subscriptions persist separately from active connection state and are restored in
+that order after reconnect. Failure to restore one stream is logged and does not
+prevent restoration attempts for the remaining streams.
 
 ## Universe
 

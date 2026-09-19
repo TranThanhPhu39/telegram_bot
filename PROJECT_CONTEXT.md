@@ -77,13 +77,14 @@ Phase 7 — Reliability — authorized for offline implementation by explicit us
 - [x] FPT + ACB decode-to-cache pipeline and bounded acceptance harness implemented
 - [x] Socket.IO automatic reconnect handling enabled and unit-tested
 - [x] Explicit exponential reconnect backoff configured and unit-tested
+- [x] Desired subscriptions restored automatically after reconnect in unit tests
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 7 reliability work is active. Automatic reconnect uses explicit exponential backoff parameters; resubscription, listener deduplication, raw debug mode, and forced-interruption acceptance remain pending. Phases 3–6 retain their pending live-validation status.
+Phase 7 reliability work is active. Automatic reconnect uses explicit exponential backoff and restores desired subscriptions; listener deduplication, raw debug mode, and forced-interruption acceptance remain pending. Phases 3–6 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -153,7 +154,7 @@ Main classes/functions: `VietcapRealtimeClient`, `ConnectionInfo`, `normalize_so
 
 Dependencies: `python-socketio` and its synchronous client transport stack.
 
-Status: automatic reconnect and explicit backoff configuration are unit-tested. Subscription state is still cleared on disconnect and is not yet restored automatically after reconnect.
+Status: automatic reconnect, explicit backoff, and restoration of all desired subscriptions are unit-tested. Forced-interruption recovery remains NOT TESTED.
 
 ### `scripts/inspect_connection.py`
 
@@ -171,7 +172,7 @@ Status: created.
 
 Purpose: verifies path normalization, WebSocket-only connection arguments, reconnect configuration, lifecycle handlers, idempotent disconnect, all stream registrations/subscriptions, duplicate suppression, and reset after disconnect without network access.
 
-Status: all client tests pass as part of the 126-test suite.
+Status: all client tests pass as part of the 128-test suite.
 
 ### `data/vietcap/subscriptions.py`
 
@@ -751,6 +752,21 @@ suite returned `126 passed in 0.45s`.
 Result: PASS for offline retry/backoff configuration. Actual reconnect timing
 under a forced network interruption remains NOT TESTED.
 
+### 2026-09-19 — Phase 7 automatic resubscription
+
+Command: `.\.venv\Scripts\python.exe -m pytest -q`.
+
+Expected: preserve desired symbols across disconnect, clear only active connection
+markers, and restore match-price, index, and bid-ask subscriptions after reconnect.
+Failure in one restoration must not prevent attempts for the other streams.
+
+Actual: deterministic disconnect/connect simulation restored all three exact
+payloads. A simulated match-price emit failure was logged while index and bid-ask
+restoration continued. The full suite returned `128 passed in 0.42s`.
+
+Result: PASS for offline automatic resubscription. Recovery after an actual
+transport interruption remains NOT TESTED.
+
 ## 10. Known Problems
 
 - The upstream schema is not directly compilable by standard `protoc` without reordering its first two declarations.
@@ -758,8 +774,8 @@ under a forced network interruption remains NOT TESTED.
 - The generated binding validates against protobuf generated-code version 7.35.0, while the installed runtime is 7.36.2; runtime validation and all tests pass.
 - No real binary market frame has been decoded; tests currently use valid locally constructed protobuf messages.
 - Only one 35-second live connection has been observed; extended uptime and forced interruption are deferred to Phase 7 reliability work.
-- Automatic transport reconnect has explicit backoff parameters, but subscriptions
-  are not yet restored after reconnect.
+- Automatic transport reconnect, backoff, and resubscription pass offline tests,
+  but have not been observed after a real transport interruption.
 - No FPT event arrived during the Saturday Phase 3 test, so the exact server event delivery and live protobuf mapping remain unverified.
 - Phase 3 cannot be marked complete until at least two distinct valid FPT ticks are observed during an active session.
 - The current frontend contract matches the implementation, but static bundle evidence cannot prove that this Python connection will receive data during the next active session.
@@ -770,8 +786,8 @@ under a forced network interruption remains NOT TESTED.
 
 ## 11. Next Steps
 
-Continue Phase 7 with one small task: retain desired subscriptions across a
-disconnect and restore them after reconnect. Do not address listener deduplication
+Continue Phase 7 with one small task: prove event listeners are registered once
+and are not duplicated across repeated reconnect cycles. Do not add raw debug mode
 in the same task group.
 
 ## 12. How To Run
@@ -910,7 +926,15 @@ Reason: the mature Socket.IO client already implements reconnection after an
 established transport is interrupted. Phase 7 enables that mechanism instead of
 adding a handwritten loop. Explicit parameters use unlimited attempts with a
 one-second initial delay, exponential doubling, a 30-second cap, and jitter to
-avoid synchronized retry bursts. Subscription restoration remains a separate task.
+avoid synchronized retry bursts.
+
+### Decision: separate desired subscriptions from active connection state
+
+Reason: active subscription markers are scoped to one connection and are cleared
+on disconnect, while the desired normalized symbol tuples persist. After reconnect,
+each stream is restored independently so one failed subscription does not prevent
+the remaining streams from being restored. This keeps desired configuration
+separate from connection-scoped state.
 
 ## 14. Change Log
 
@@ -1069,3 +1093,12 @@ avoid synchronized retry bursts. Subscription restoration remains a separate tas
 - Extended deterministic constructor-option coverage.
 - Passed the full 126-test suite.
 - Did not implement automatic resubscription or forced-interruption acceptance.
+
+### 2026-09-19 — Phase 7 automatic-resubscription task group
+
+- Preserved desired normalized symbols separately from active subscription markers.
+- Restored match-price, index, and bid-ask subscriptions in order after reconnect.
+- Isolated restoration failures per stream so one error does not block the others.
+- Added deterministic reconnect simulation tests.
+- Passed the full 128-test suite.
+- Did not address listener deduplication or forced-interruption acceptance.

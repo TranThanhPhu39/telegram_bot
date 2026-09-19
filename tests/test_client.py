@@ -281,3 +281,52 @@ def test_all_three_stream_subscriptions_are_independent() -> None:
         ("index", '{"symbols":["VNINDEX"]}'),
         ("w-bid-ask", '{"symbols":["FPT","ACB"]}'),
     ]
+
+
+def test_all_three_stream_subscriptions_restore_after_reconnect() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+    client.connect()
+    client.subscribe_match_price(("FPT", "ACB"))
+    client.subscribe_index(("VNINDEX",))
+    client.subscribe_bid_ask(("FPT", "ACB"))
+    socket_client.emit_calls.clear()
+
+    socket_client.connected = False
+    socket_client.handlers["disconnect"]("transport error")
+    socket_client.connected = True
+    socket_client.handlers["connect"]()
+
+    assert socket_client.emit_calls == [
+        ("w-match-price", '{"symbols":["FPT","ACB"]}'),
+        ("index", '{"symbols":["VNINDEX"]}'),
+        ("w-bid-ask", '{"symbols":["FPT","ACB"]}'),
+    ]
+
+
+def test_subscription_restore_continues_after_one_stream_fails() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+    client.connect()
+    client.subscribe_match_price(("FPT", "ACB"))
+    client.subscribe_index(("VNINDEX",))
+    client.subscribe_bid_ask(("FPT", "ACB"))
+    socket_client.emit_calls.clear()
+    original_emit = socket_client.emit
+
+    def fail_match_price(event: str, data: object) -> None:
+        if event == "w-match-price":
+            raise RuntimeError("simulated emit failure")
+        original_emit(event, data)
+
+    socket_client.emit = fail_match_price  # type: ignore[method-assign]
+    socket_client.connected = False
+    socket_client.handlers["disconnect"]("transport error")
+    socket_client.connected = True
+
+    socket_client.handlers["connect"]()
+
+    assert socket_client.emit_calls == [
+        ("index", '{"symbols":["VNINDEX"]}'),
+        ("w-bid-ask", '{"symbols":["FPT","ACB"]}'),
+    ]
