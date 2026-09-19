@@ -1,11 +1,19 @@
 # TASKS.md
 
-> Rule: Codex must only work inside the ACTIVE PHASE.
-> Move to the next phase only after explicit user instruction.
+> Rule: Codex must work inside the ACTIVE IMPLEMENTATION PHASE.
+> A previous phase may remain under PENDING LIVE VALIDATION when its only blocker
+> is an unavailable external runtime condition and the user explicitly authorizes
+> offline development of the next phase.
+> Pending live checks must remain unchecked and must not be reported as PASS.
 
-## ACTIVE PHASE
+## PENDING LIVE VALIDATION
 **Phase 3 — Realtime Match Price: FPT only**
 
+Reason: market closed on Saturday 2026-09-19. Live receive/decode/validation
+must be rerun during an active Vietnamese market session.
+
+## ACTIVE IMPLEMENTATION PHASE
+**Phase 4 — Realtime ACB + Market State**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -68,8 +76,8 @@ Acceptance:
 ---
 
 ## Phase 4 — Realtime ACB + Market State
-- [ ] Add ACB subscription
-- [ ] Prevent duplicate symbol subscriptions
+- [x] Add ACB subscription
+- [x] Prevent duplicate symbol subscriptions
 - [ ] Create normalized `TradeTick`
 - [ ] Create latest market-state cache
 - [ ] Test FPT + ACB simultaneously

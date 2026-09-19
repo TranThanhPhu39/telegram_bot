@@ -19,6 +19,11 @@ Before coding:
 1. Work on ONE phase at a time.
 2. Work on ONE small task group at a time.
 3. Do not start later phases until the active phase passes its acceptance criteria.
+   Exception: if acceptance is blocked solely by an unavailable external runtime
+   condition, such as a closed market, the user may explicitly authorize offline
+   development of the next phase. The blocked live acceptance must remain
+   NOT TESTED, must not be marked complete, and must be rerun at the earliest
+   suitable runtime window.
 4. Every meaningful change must be tested.
 5. Never fabricate successful tests.
 6. If a test cannot run, write `NOT TESTED` and explain why.

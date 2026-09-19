@@ -9,7 +9,9 @@ Codex phải:
 2. Đọc `TASKS.md`.
 3. Đọc `PROJECT_CONTEXT.md`.
 4. Chỉ làm đúng phase/task đang được mở.
-5. Không tự nhảy sang phase tiếp theo nếu phase hiện tại chưa PASS.
+5. Không tự chuyển sang phase tiếp theo nếu phase hiện tại chưa PASS, trừ khi
+   phase đó chỉ bị chặn bởi điều kiện runtime bên ngoài như thị trường đóng cửa
+   và người dùng đã cho phép rõ ràng. Không được đánh dấu PASS khi chưa có bằng chứng.
 6. Sau mỗi bước có ý nghĩa:
    - chạy test,
    - ghi PASS/FAIL,
@@ -33,4 +35,8 @@ Dán prompt trong `CODEX_INITIAL_PROMPT.md`.
 
 Sau mỗi phiên Codex mới, dùng prompt:
 
-> Read `AGENTS.md`, `TASKS.md`, and `PROJECT_CONTEXT.md` first. Verify the repository against the recorded context. Continue ONLY from the first unchecked task in the currently active phase. Do not work on later phases. Run tests, update `PROJECT_CONTEXT.md`, and update `TASKS.md` before stopping.
+> Read `AGENTS.md`, `TASKS.md`, and `PROJECT_CONTEXT.md` first. Verify the
+> repository against the recorded context. Continue from the active implementation
+> phase. A phase awaiting external live validation may remain pending while the next
+> phase is developed only with explicit user authorization. Never fabricate live
+> acceptance evidence. Run tests and update both context files before stopping.

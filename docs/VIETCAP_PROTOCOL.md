@@ -189,6 +189,46 @@ but the server sent no `w-match-price` event during the 40-second observation.
 The test was run on Saturday, outside the normal trading week, so binary payload
 shape and live protobuf mapping are still NOT TESTED. Phase 3 remains open.
 
+### Current frontend contract verification — 2026-09-19
+
+The public price-board bundle was fetched successfully from the import map:
+
+`/trading/main.js?v=49266848e71be948c3ac9a4a547e9ef01717248b`
+
+Observed bundle metadata:
+
+- response size: `1,524,144` bytes
+- `CI_COMMIT_SHA`: `49266848e71be948c3ac9a4a547e9ef01717248b`
+- `APP_VERSION`: `1789116678129`
+
+The current bundle confirms all Phase 3 client assumptions:
+
+- `MATCH_PRICE` resolves to `w-match-price`
+- `subscribeMatchPrice` emits `JSON.stringify({symbols: symbols})`
+- the event maps to `matchPriceMessageProto`
+- that key maps to `pricePackage.MatchPriceMessage`
+- the event listener passes the received payload to the decoder
+- the decoder uses `decode(new Uint8Array(payload))`
+- the current socket path is `/ws/price/socket.io`
+- the frontend requests `transports: ["websocket"]`
+
+This verifies the current frontend contract, but it does not replace the Phase 3
+acceptance requirement to receive and decode changing FPT frames in Python.
+
+### Phase 4 offline subscription coverage — 2026-09-19
+
+The client now supports the exact combined payload:
+
+```json
+{"symbols":["FPT","ACB"]}
+```
+
+Symbols are trimmed, uppercased, and deduplicated while preserving first-seen
+order. The client also suppresses a repeated subscription when the normalized
+symbol set has not changed, regardless of input order, and clears that local
+state after disconnect. These behaviors are unit-tested only; simultaneous live
+FPT + ACB delivery remains NOT TESTED while the market is closed.
+
 ## Historical REST
 
 Endpoint:

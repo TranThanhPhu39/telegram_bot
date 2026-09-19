@@ -14,8 +14,8 @@ data.vietcap
     -> proto/price_pb2.py         generated Python protobuf binding
     -> tests/test_proto.py        protobuf contract and round-trip tests
     -> constants.py               Vietcap connection defaults
-    -> client.py                  Socket.IO lifecycle and scoped FPT subscription
-    -> subscriptions.py           JSON-string symbol payload construction
+    -> client.py                  Socket.IO lifecycle and deduplicated subscriptions
+    -> subscriptions.py           normalized FPT + ACB payload construction
     -> decoder.py                 binary MatchPrice protobuf decoding
     -> validation.py              decoded match-price quality checks
 scripts/inspect_connection.py     live connection smoke test, no subscriptions
@@ -40,7 +40,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 3 — Realtime Match Price: FPT only — active and incomplete. The FPT-only subscription was emitted successfully on Saturday 2026-09-19, but no live event arrived, so the phase acceptance criterion has not been met.
+Phase 4 — Realtime ACB + Market State — active for offline implementation with explicit user authorization. Phase 3 remains pending live validation because the Saturday market closure prevented delivery of changing FPT events.
 
 ## 4. Completed
 
@@ -64,13 +64,15 @@ Phase 3 — Realtime Match Price: FPT only — active and incomplete. The FPT-on
 - [x] `w-match-price` handler and FPT-only JSON-string subscription implemented
 - [x] Live client emission confirmed as `{"symbols":["FPT"]}`
 - [x] MatchPrice decoder and field validation unit-tested
+- [x] FPT + ACB subscription payload implemented and unit-tested
+- [x] Duplicate symbols and unchanged subscription sets suppressed
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Waiting to rerun the Phase 3 FPT-only live test during an active Vietnamese market session. Do not advance to Phase 4 until at least two distinct valid FPT ticks are received, decoded, printed, and validated.
+Phase 4 offline implementation. The FPT + ACB subscription and duplicate prevention are complete. The next small task is a provider-independent normalized `TradeTick`. Phase 3 live receive/decode/validation remains pending and must be rerun during an active Vietnamese market session.
 
 ## 6. Files Created / Modified
 
@@ -134,13 +136,13 @@ Status: created and covered by client tests.
 
 ### `data/vietcap/client.py`
 
-Purpose: manages connection, disconnect, heartbeat-friendly sleep, and lifecycle logging without exposing subscription behavior.
+Purpose: manages connection, disconnect, heartbeat-friendly sleep, lifecycle logging, and match-price subscriptions for normalized symbol sets.
 
 Main classes/functions: `VietcapRealtimeClient`, `ConnectionInfo`, `normalize_socketio_path`.
 
 Dependencies: `python-socketio` and its synchronous client transport stack.
 
-Status: unit-tested and verified against the live endpoint.
+Status: unit-tested for FPT + ACB, unchanged-subscription suppression, and reset after disconnect. The endpoint connection is live-verified; dual-symbol event delivery is not yet live-tested.
 
 ### `scripts/inspect_connection.py`
 
@@ -156,17 +158,17 @@ Status: created.
 
 ### `tests/test_client.py`
 
-Purpose: verifies path normalization, WebSocket-only connection arguments, lifecycle handlers, idempotent disconnect, match-price handler registration, and the exact FPT subscription emit without network access.
+Purpose: verifies path normalization, WebSocket-only connection arguments, lifecycle handlers, idempotent disconnect, match-price handler registration, FPT + ACB emission, duplicate suppression, and reset after disconnect without network access.
 
-Status: eight tests pass.
+Status: ten tests pass.
 
 ### `data/vietcap/subscriptions.py`
 
-Purpose: constructs compact JSON-string symbol subscription payloads without network behavior.
+Purpose: normalizes symbols, removes duplicates while preserving order, and constructs compact JSON-string subscription payloads without network behavior.
 
-Main function: `build_symbol_subscription`.
+Main functions: `normalize_symbols`, `build_symbol_subscription`.
 
-Status: created and unit-tested with the exact FPT payload.
+Status: unit-tested with exact FPT and FPT + ACB payloads, including case/whitespace normalization and duplicate removal.
 
 ### `data/vietcap/decoder.py`
 
@@ -198,9 +200,9 @@ Status: five tests pass.
 
 ### `tests/test_subscriptions.py`
 
-Purpose: verifies the exact FPT JSON-string payload and rejects empty symbol lists.
+Purpose: verifies exact FPT and FPT + ACB JSON-string payloads, ordered deduplication, and rejection of empty symbol lists.
 
-Status: four tests pass.
+Status: five tests pass.
 
 ### `tests/test_validation.py`
 
@@ -304,6 +306,27 @@ Confirmed outgoing Socket.IO packet:
 
 This confirms the client emitted event `w-match-price` with a JSON string containing only `FPT`. The connection remained healthy through one Engine.IO PING/PONG cycle. No `w-match-price` event arrived during 40 seconds, so incoming payload type, payload size, protobuf mapping, and live field values remain unconfirmed. The script correctly returned an incomplete result instead of treating connection/subscription success as market-data success.
 
+### Current frontend contract verification
+
+The public price-board bundle referenced by the 2026-09-19 import map was fetched from:
+
+`https://trading.vietcap.com.vn/trading/main.js?v=49266848e71be948c3ac9a4a547e9ef01717248b`
+
+Observed:
+
+- HTTP 200 and 1,524,144 response bytes
+- `CI_COMMIT_SHA=49266848e71be948c3ac9a4a547e9ef01717248b`
+- `APP_VERSION=1789116678129`
+- current `MATCH_PRICE` constant equals `w-match-price`
+- `subscribeMatchPrice` emits `JSON.stringify({symbols: t})`
+- current event mapping is `w-match-price` -> `matchPriceMessageProto`
+- current proto lookup is `pricePackage.MatchPriceMessage`
+- current decoder calls `decode(new Uint8Array(payload))`
+- current socket path is `/ws/price/socket.io`
+- current frontend transport list is `["websocket"]`
+
+Therefore the implemented Phase 3 event name, JSON-string payload, transport, path, and target protobuf type match the current public frontend bundle. This evidence narrows the Saturday no-event result to runtime delivery/market inactivity rather than a known client contract mismatch.
+
 ### Previously observed realtime protocol information
 
 - Socket.IO endpoint: `wss://trading.vietcap.com.vn/ws/price/socket.io/?EIO=4&transport=websocket`.
@@ -330,12 +353,13 @@ The endpoint, Engine.IO version, path, direct WebSocket transport, heartbeat beh
 - No account credentials, cookies, auth payload, or market subscription events were supplied during the Phase 2 smoke test.
 - The Python client emits `w-match-price` with the JSON string `{"symbols":["FPT"]}` and no other symbol.
 - The Phase 3 acceptance script requires at least two distinct valid ticks and will not pass on connection or subscription evidence alone.
+- The current public frontend bundle uses the same `w-match-price` event, JSON-string symbol payload, WebSocket transport, socket path, and `MatchPriceMessage` decoder mapping as the Python implementation.
 - Vietcap interfaces are unofficial/internal frontend details and remain isolated.
 
 ### Assumptions
 
-- The server recognizes `w-match-price` and will deliver binary events for it during an active session.
-- The server expects subscription payloads as JSON strings rather than Socket.IO object payloads; the frontend evidence supports this, but the server did not acknowledge the Saturday emit.
+- The server will deliver `w-match-price` events to this unauthenticated Python connection during an active session.
+- Incoming Python payloads will be bytes-like in the same way the browser payload is accepted by `new Uint8Array(payload)`.
 - Realtime market data remains accessible without an authenticated session.
 - The observed event-to-message mappings match actual incoming binary frames.
 
@@ -477,7 +501,7 @@ Command: `.\.venv\Scripts\python.exe -m pytest -q`.
 
 Expected: preserve existing behavior and verify exact FPT subscription payload, event registration, binary decoding, decode errors, and price/volume validation.
 
-Actual: initial run `23 passed in 0.35s`; final rerun `23 passed in 0.36s`.
+Actual: initial run `23 passed in 0.35s`; subsequent reruns passed in `0.36s` and `0.28s`.
 
 Result: PASS.
 
@@ -501,6 +525,46 @@ Actual: `Phase 3 partial gate audit: PASS`; only the FPT subscription item is ch
 
 Result: PASS.
 
+### 2026-09-19 13:22 +07:00 — Current frontend contract verification
+
+Command: fetch the current public price-board bundle and assert the expected event name, subscription implementation, message-key mapping, binary decoder call, socket path, and WebSocket transport strings.
+
+Expected: determine whether the zero-event Saturday result was caused by stale Phase 3 protocol assumptions.
+
+Actual: HTTP 200; all six contract assertions passed against bundle commit `49266848e71be948c3ac9a4a547e9ef01717248b`.
+
+Result: PASS. No current frontend contract mismatch was found; live Python event delivery remains NOT TESTED.
+
+### 2026-09-19 13:23 +07:00 — Phase 3 continuation audit
+
+Command: verify only the evidence-backed subscription item is checked, Phase 4+ remains untouched, and frontend contract findings are recorded without claiming live delivery.
+
+Expected: Phase 3 stays open and accurately documented.
+
+Actual: `Phase 3 continuation audit: PASS`; later-phase checked items: zero.
+
+Result: PASS.
+
+### 2026-09-19 — Phase 4 FPT + ACB subscription unit tests
+
+Commands:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pip check
+```
+
+Expected: preserve all earlier behavior; produce the exact combined FPT + ACB
+payload; remove repeated symbols; suppress an unchanged symbol set; and permit
+the same subscription again after disconnect.
+
+Actual: `26 passed in 0.24s`; `No broken requirements found.` The project
+`.venv` required execution outside the restricted sandbox because its Python
+Store base interpreter path is not accessible inside that sandbox.
+
+Result: PASS for the offline Phase 4 subscription task group. Simultaneous live
+FPT + ACB event delivery remains NOT TESTED because the market is closed.
+
 ## 10. Known Problems
 
 - The upstream schema is not directly compilable by standard `protoc` without reordering its first two declarations.
@@ -511,18 +575,18 @@ Result: PASS.
 - Automatic reconnection is intentionally disabled in the Phase 2 client.
 - No FPT event arrived during the Saturday Phase 3 test, so the exact server event delivery and live protobuf mapping remain unverified.
 - Phase 3 cannot be marked complete until at least two distinct valid FPT ticks are observed during an active session.
+- The current frontend contract matches the implementation, but static bundle evidence cannot prove that this Python connection will receive data during the next active session.
+- FPT + ACB subscription behavior is covered offline, but simultaneous live delivery remains unverified.
 
 ## 11. Next Steps
 
-Continue Phase 3 only during an active Vietnamese market session:
+Continue Phase 4 with one small offline task: create a provider-independent,
+immutable `TradeTick` model and unit-test conversion from `MatchPriceMessage`.
+Do not create the market-state cache in the same task group.
 
-1. Rerun `scripts/test_realtime.py` with only FPT.
-2. Confirm the first incoming event is bytes-like and record its bounded metadata.
-3. Decode it with `MatchPriceMessage` and verify the symbol is FPT.
-4. Observe at least two distinct valid ticks and validate live price/volume fields.
-5. Mark the remaining Phase 3 checklist items only from that runtime evidence, update this file, and stop.
-
-Do not add ACB, VNINDEX, bid/ask, reconnect, strategy, or Telegram work until Phase 3 passes.
+During the next active Vietnamese market session, separately rerun Phase 3 live
+validation and later test simultaneous FPT + ACB delivery. Keep those live items
+unchecked until runtime evidence exists.
 
 ## 12. How To Run
 
@@ -615,6 +679,13 @@ Reason: a single cached/static snapshot would not prove the required changing re
 
 Reason: normalization and market-state code must eventually consume generic models, not Vietcap protobuf field names. Live signals and backtests must eventually share strategy logic without coupling to acquisition.
 
+### Decision: deduplicate subscriptions without assuming server replacement semantics
+
+Reason: repeated symbols are removed from each outgoing payload and an identical
+normalized symbol set is not emitted twice on the same connection. A changed set
+is still emitted in full because the unofficial server's append-versus-replace
+behavior has not been established. Disconnect clears the local suppression state.
+
 ## 14. Change Log
 
 ### 2026-09-19 12:29 +07:00 — Phase 0
@@ -664,3 +735,21 @@ Reason: normalization and market-state code must eventually consume generic mode
 - Left receive/decode/print/validation checklist items unchecked and Phase 3 incomplete.
 - Passed the partial phase-gate audit without claiming live data success.
 - Did not add ACB or VNINDEX.
+
+### 2026-09-19 13:22 +07:00 — Phase 3 contract follow-up
+
+- Inspected the current public Vietcap price-board bundle referenced by the live import map.
+- Confirmed the active bundle's event name, JSON-string subscription, message mapping, protobuf lookup, binary decode path, socket path, and WebSocket transport all match the implementation.
+- Updated protocol and project context documentation with bundle provenance and bounded findings.
+- Passed the full 23-test regression suite and continuation phase-gate audit.
+- Kept Phase 3 open because current frontend code is not a substitute for receiving changing live FPT frames.
+
+### 2026-09-19 — Phase 4 subscription task group
+
+- Began Phase 4 offline implementation under the user-authorized closed-market exception.
+- Added normalization and ordered duplicate removal for stock symbols.
+- Added exact combined `{"symbols":["FPT","ACB"]}` subscription coverage.
+- Suppressed repeated emissions for an unchanged normalized symbol set.
+- Reset duplicate-suppression state on disconnect so a later connection can subscribe again.
+- Passed all 26 unit tests and the project-local dependency consistency check.
+- Kept Phase 3 live checks and Phase 4 simultaneous live delivery unchecked.

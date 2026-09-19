@@ -119,3 +119,32 @@ def test_register_and_subscribe_fpt_match_price() -> None:
     assert socket_client.emit_calls == [
         ("w-match-price", '{"symbols":["FPT"]}')
     ]
+
+
+def test_subscribe_fpt_acb_once_when_symbol_set_is_unchanged() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+
+    client.connect()
+    client.subscribe_match_price(("FPT", "ACB", "fpt"))
+    client.subscribe_match_price(("acb", "fpt"))
+
+    assert socket_client.emit_calls == [
+        ("w-match-price", '{"symbols":["FPT","ACB"]}')
+    ]
+
+
+def test_match_price_subscription_can_emit_again_after_disconnect() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+
+    client.connect()
+    client.subscribe_match_price(("FPT", "ACB"))
+    client.disconnect()
+    client.connect()
+    client.subscribe_match_price(("FPT", "ACB"))
+
+    assert socket_client.emit_calls == [
+        ("w-match-price", '{"symbols":["FPT","ACB"]}'),
+        ("w-match-price", '{"symbols":["FPT","ACB"]}'),
+    ]

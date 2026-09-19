@@ -16,7 +16,7 @@ from data.vietcap.constants import (
     MATCH_PRICE_EVENT,
     SOCKET_TRANSPORTS,
 )
-from data.vietcap.subscriptions import build_symbol_subscription
+from data.vietcap.subscriptions import build_symbol_subscription, normalize_symbols
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ class VietcapRealtimeClient:
         self._socket.on("connect", self._on_connect)
         self._socket.on("disconnect", self._on_disconnect)
         self._socket.on("connect_error", self._on_connect_error)
+        self._match_price_subscription: frozenset[str] | None = None
 
     @property
     def connected(self) -> bool:
@@ -131,24 +132,44 @@ class VietcapRealtimeClient:
         """Subscribe connected clients to the requested match-price symbols."""
         if not self.connected:
             raise ConnectionError("Connect before subscribing to match prices")
-        payload = build_symbol_subscription(symbols)
+        normalized_symbols = normalize_symbols(symbols)
+        subscription = frozenset(normalized_symbols)
+        if subscription == self._match_price_subscription:
+            logger.info(
+                "Skipping unchanged Vietcap match-price subscription",
+                extra={
+                    "event": MATCH_PRICE_EVENT,
+                    "symbols": list(normalized_symbols),
+                },
+            )
+            return
+
+        payload = build_symbol_subscription(normalized_symbols)
         logger.info(
             "Subscribing to Vietcap match-price stream",
-            extra={"event": MATCH_PRICE_EVENT, "symbols": list(symbols)},
+            extra={
+                "event": MATCH_PRICE_EVENT,
+                "symbols": list(normalized_symbols),
+            },
         )
         try:
             self._socket.emit(MATCH_PRICE_EVENT, payload)
         except Exception:
             logger.exception(
                 "Failed to subscribe to Vietcap match-price stream",
-                extra={"event": MATCH_PRICE_EVENT, "symbols": list(symbols)},
+                extra={
+                    "event": MATCH_PRICE_EVENT,
+                    "symbols": list(normalized_symbols),
+                },
             )
             raise
+        self._match_price_subscription = subscription
 
     def _on_connect(self) -> None:
         logger.info("Socket.IO namespace connected")
 
     def _on_disconnect(self, reason: object | None = None) -> None:
+        self._match_price_subscription = None
         logger.info("Socket.IO namespace disconnected", extra={"reason": reason})
 
     def _on_connect_error(self, data: object) -> None:
