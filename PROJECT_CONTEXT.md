@@ -10,6 +10,7 @@ Implemented foundation:
 
 ```text
 data.models.TradeTick              provider-independent immutable trade model
+data.models.OHLCVBar               provider-independent immutable historical bar
 data.market_state.LatestMarketState thread-safe latest-tick cache by symbol
 data.vietcap
     -> proto/price.proto          vendored, minimally normalized schema
@@ -83,6 +84,8 @@ Phase 8 — Historical REST — explicitly authorized while Phases 3–7 remain 
 - [x] Bounded metadata-only raw debug mode implemented and unit-tested
 - [x] Vietcap quote REST acquisition implemented and unit-tested
 - [x] Vietcap OHLC gap-chart request contract implemented and unit-tested
+- [x] ONE_MINUTE, ONE_HOUR, and ONE_DAY request semantics implemented and unit-tested
+- [x] Evidence-backed gap-chart OHLCV normalization and fixture tests implemented
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
@@ -90,9 +93,12 @@ Phase 8 — Historical REST — explicitly authorized while Phases 3–7 remain 
 ## 5. Currently Working On
 
 Phase 8 is active by explicit user authorization. Quote and OHLC `gap-chart`
-request boundaries are implemented offline with input validation, timeouts,
-JSON-object enforcement, and network/HTTP/JSON error wrapping. The next task is
-explicit supported-timeframe semantics. Phases 3–7 retain pending live validation.
+request boundaries plus the three observed timeframes are implemented offline.
+An authenticated browser returned a real ACB `ONE_DAY` response with 170 aligned
+column values. Its `t/o/h/l/c/v` schema is now normalized and fixture-tested.
+The next Phase 8 task is to establish the minimum user-supplied authentication
+configuration required for a direct Python HTTP 200 response. Phases 3–7 retain
+their pending live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -220,19 +226,22 @@ Purpose: performs bounded, unauthenticated Vietcap REST acquisition without
 leaking provider response fields into normalized models.
 
 Main classes/functions: `VietcapRestClient`, `VietcapRestError`,
-`normalize_stock_symbol`, `get_quote`, `get_gap_chart`.
+`VietcapTimeFrame`, `normalize_stock_symbol`, `normalize_time_frame`, `get_quote`,
+`get_gap_chart`.
 
 Status: quote GET behavior, symbol safety, timeout, response-shape enforcement,
 gap-chart POST body construction, and error wrapping are unit-tested. Both live
 REST probes returned HTTP 400 during 2026-09-19, so successful live quote and
-historical retrieval remain NOT TESTED.
+direct Python historical retrieval remain NOT TESTED. A later authenticated
+browser request returned a gap-chart array with HTTP 200. Only `ONE_MINUTE`,
+`ONE_HOUR`, and `ONE_DAY` are accepted before network I/O.
 
 ### `tests/test_rest.py`
 
 Purpose: deterministic tests for Vietcap REST request construction and failure
 handling without network access.
 
-Status: 32 tests pass as part of the 172-test suite.
+Status: 40 tests pass as part of the 180-test suite.
 
 ### `data/vietcap/validation.py`
 
@@ -246,9 +255,11 @@ Status: created and unit-tested; live FPT fields are not yet verified.
 
 Purpose: defines provider-independent normalized market-data models.
 
-Main class: immutable, slotted `TradeTick`.
+Main classes include immutable, slotted `TradeTick`, `IndexSnapshot`,
+`OrderBook`, and `OHLCVBar`.
 
-Status: unit-tested for exact normalized values and immutability.
+Status: unit-tested for exact values and immutability. `OHLCVBar.timestamp` is
+an integer normalized from the observed Unix-seconds decimal string.
 
 ### `data/vietcap/normalizer.py`
 
@@ -924,8 +935,30 @@ A direct `ACB`/`ONE_DAY`/two-bar unauthenticated probe returned HTTP 400 with an
 empty HTML body.
 
 Result: PASS for the offline gap-chart acquisition contract. Successful live
-historical retrieval, supported timeframe semantics, and response columns remain
-NOT TESTED.
+historical retrieval, live timeframe behavior, and response columns remain NOT
+TESTED.
+
+### 2026-09-19 — Phase 8 supported timeframes
+
+Commands:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests\test_rest.py
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pip check
+```
+
+Expected: represent the three observed timeframe identifiers as a closed enum,
+accept either enum members or normalized strings, emit the exact provider value,
+and reject every unsupported value before performing network I/O.
+
+Actual: REST tests returned `40 passed in 0.17s`; all three exact timeframe
+values were emitted in deterministic POST tests; the full suite returned
+`180 passed in 0.52s`; dependency validation reported no broken requirements.
+
+Result: PASS for offline request semantics of `ONE_MINUTE`, `ONE_HOUR`, and
+`ONE_DAY`. Live retrieval for all three timeframes remains NOT TESTED because the
+endpoint probe returned HTTP 400.
 
 ## 10. Known Problems
 
@@ -951,8 +984,9 @@ NOT TESTED.
 
 ## 11. Next Steps
 
-Continue Phase 8 with one small task: define and validate the three supported
-timeframes (`ONE_MINUTE`, `ONE_HOUR`, `ONE_DAY`) without normalizing OHLCV bars.
+Continue Phase 8 with one small task: identify the minimum authentication header
+or cookie names used by the successful browser request, document a safe local
+configuration path, and attempt a direct Python fetch without storing secrets.
 
 ## 12. How To Run
 
@@ -1134,6 +1168,13 @@ Reason: the request boundary can safely enforce ticker collections, positive
 integer `countBack`/`to`, and top-level JSON shape without claiming that any
 specific timeframe works live. Explicit supported-timeframe semantics remain a
 separate task because the current endpoint probe returned HTTP 400.
+
+### Decision: represent supported timeframes as a closed string enum
+
+Reason: an enum preserves the exact provider wire values while preventing typos
+and undocumented intervals from reaching the endpoint. String inputs remain
+accepted at the public boundary for convenience but normalize to one of exactly
+three observed values before request construction.
 
 ## 14. Change Log
 
@@ -1348,3 +1389,37 @@ separate task because the current endpoint probe returned HTTP 400.
 - Added 16 tests, bringing REST coverage to 32 and the full suite to 172 tests.
 - Recorded the live HTTP 400 probe without claiming historical retrieval success.
 - Did not mark any timeframe or OHLCV normalization checklist item complete.
+
+### 2026-09-19 — Phase 8 supported-timeframes task group
+
+- Added `VietcapTimeFrame` as a closed `StrEnum` for the three observed values.
+- Added case/whitespace normalization for string inputs.
+- Rejected unsupported timeframe values before any HTTP request.
+- Verified exact POST emission for `ONE_MINUTE`, `ONE_HOUR`, and `ONE_DAY`.
+- Added eight tests, bringing REST coverage to 40 and the full suite to 180 tests.
+- Did not implement OHLCV normalization or fixtures.
+
+### 2026-09-19 — Phase 8 OHLCV model task group
+
+- Added immutable, slotted, provider-independent `OHLCVBar`.
+- Kept timestamp data as an integer because epoch unit and timezone semantics
+  have not been established by a successful Vietcap response.
+- Added exact-value, immutability, and slots tests.
+- Passed the focused 2-test model suite and the full 182-test regression suite.
+- Could not inspect the normal frontend because no browser surface was available;
+  direct frontend and bundle requests still returned HTTP 400.
+- Left OHLCV normalization unchecked because Vietcap column names remain
+  unconfirmed and must not be guessed.
+
+### 2026-09-19 — Phase 8 historical normalization task group
+
+- Recorded the user's authenticated-browser HTTP 200 evidence for ACB daily
+  history: a top-level array with 170 aligned column values.
+- Corrected REST acquisition to accept and deeply detach an array of symbol
+  objects instead of the previously assumed top-level object.
+- Added evidence-backed normalization for `t/o/h/l/c/v` into immutable
+  `OHLCVBar` values, including shape, numeric, OHLC, and volume validation.
+- Added a credential-free three-bar fixture excerpted from the observed response.
+- Passed 58 focused Phase 8 tests and the full 198-test regression suite.
+- Marked normalization and fixtures/tests complete. Direct authenticated Python
+  acquisition remains NOT TESTED, so Phase 8 STOP remains unchecked.

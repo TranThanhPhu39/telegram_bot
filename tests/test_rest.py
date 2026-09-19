@@ -10,7 +10,9 @@ import requests
 from data.vietcap.rest import (
     VietcapRestClient,
     VietcapRestError,
+    VietcapTimeFrame,
     normalize_stock_symbol,
+    normalize_time_frame,
 )
 
 
@@ -127,7 +129,8 @@ def test_rest_client_rejects_non_positive_timeout(timeout: float) -> None:
 
 
 def test_get_gap_chart_uses_exact_post_contract() -> None:
-    session = FakeSession(FakeResponse({"t": [1, 2], "o": [25.0, 25.2]}))
+    response_payload = [{"symbol": "ACB", "t": ["1", "2"]}]
+    session = FakeSession(FakeResponse(response_payload))
     client = VietcapRestClient(
         base_url="https://example.test/",
         timeout=8.0,
@@ -141,7 +144,7 @@ def test_get_gap_chart_uses_exact_post_contract() -> None:
         to_timestamp=1_789_787_719,
     )
 
-    assert result == {"t": [1, 2], "o": [25.0, 25.2]}
+    assert result == response_payload
     assert session.post_calls == [
         (
             "https://example.test/api/chart/OHLCChart/gap-chart",
@@ -172,7 +175,7 @@ def test_get_gap_chart_rejects_invalid_symbol_collections(symbols: object) -> No
         )
 
 
-@pytest.mark.parametrize("time_frame", ["", "ONE-DAY", "ONE DAY"])
+@pytest.mark.parametrize("time_frame", ["", "ONE-DAY", "ONE DAY", "FIVE_MINUTE"])
 def test_get_gap_chart_rejects_invalid_time_frame(time_frame: str) -> None:
     client = VietcapRestClient(session=FakeSession(FakeResponse({})))
 
@@ -183,6 +186,39 @@ def test_get_gap_chart_rejects_invalid_time_frame(time_frame: str) -> None:
             count_back=2,
             to_timestamp=1,
         )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (" one_minute ", VietcapTimeFrame.ONE_MINUTE),
+        ("one_hour", VietcapTimeFrame.ONE_HOUR),
+        ("ONE_DAY", VietcapTimeFrame.ONE_DAY),
+        (VietcapTimeFrame.ONE_DAY, VietcapTimeFrame.ONE_DAY),
+    ],
+)
+def test_normalize_time_frame_accepts_only_supported_values(
+    raw: VietcapTimeFrame | str,
+    expected: VietcapTimeFrame,
+) -> None:
+    assert normalize_time_frame(raw) is expected
+
+
+@pytest.mark.parametrize("time_frame", list(VietcapTimeFrame))
+def test_get_gap_chart_emits_each_supported_time_frame(
+    time_frame: VietcapTimeFrame,
+) -> None:
+    session = FakeSession(FakeResponse([]))
+    client = VietcapRestClient(session=session)
+
+    client.get_gap_chart(
+        ("ACB",),
+        time_frame=time_frame,
+        count_back=1,
+        to_timestamp=1,
+    )
+
+    assert session.post_calls[0][1]["json"]["timeFrame"] == time_frame.value
 
 
 @pytest.mark.parametrize(
@@ -239,8 +275,8 @@ def test_get_gap_chart_wraps_invalid_json() -> None:
         )
 
 
-@pytest.mark.parametrize("payload", [None, [], "not-an-object"])
-def test_get_gap_chart_rejects_non_object_json(payload: object) -> None:
+@pytest.mark.parametrize("payload", [None, {}, "not-an-array", [None]])
+def test_get_gap_chart_rejects_non_array_or_non_object_rows(payload: object) -> None:
     client = VietcapRestClient(session=FakeSession(FakeResponse(payload)))
 
     with pytest.raises(VietcapRestError, match="Invalid Vietcap gap-chart response"):
@@ -250,3 +286,18 @@ def test_get_gap_chart_rejects_non_object_json(payload: object) -> None:
             count_back=2,
             to_timestamp=1,
         )
+
+
+def test_get_gap_chart_returns_deeply_detached_rows() -> None:
+    source = [{"symbol": "ACB", "t": ["1"]}]
+    client = VietcapRestClient(session=FakeSession(FakeResponse(source)))
+
+    result = client.get_gap_chart(
+        ("ACB",),
+        time_frame="ONE_DAY",
+        count_back=1,
+        to_timestamp=1,
+    )
+    result[0]["t"][0] = "2"
+
+    assert source == [{"symbol": "ACB", "t": ["1"]}]

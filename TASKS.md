@@ -169,15 +169,19 @@ Acceptance:
 ## Phase 8 — Historical REST
 - [x] Implement quote endpoint
 - [x] Implement OHLC `gap-chart`
-- [ ] Support ONE_MINUTE
-- [ ] Support ONE_HOUR
-- [ ] Support ONE_DAY
-- [ ] Normalize OHLCV
-- [ ] Add fixtures/tests
+- [x] Support ONE_MINUTE
+- [x] Support ONE_HOUR
+- [x] Support ONE_DAY
+- [x] Normalize OHLCV
+  - Verified from an authenticated-browser HTTP 200 response: `t/o/h/l/c/v`
+    arrays normalize to immutable `OHLCVBar` values.
+- [x] Add fixtures/tests
 - [ ] STOP and report
 
 Acceptance:
 - Historical bars can be fetched and normalized
+  - Browser fetch and offline normalization PASS. Direct Python fetch with the
+    required authenticated session remains NOT TESTED.
 
 ---
 

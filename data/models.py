@@ -71,3 +71,21 @@ class OrderBook:
     bids: tuple[OrderBookLevel, ...]
     asks: tuple[OrderBookLevel, ...]
     session: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class OHLCVBar:
+    """One provider-independent historical price bar.
+
+    ``timestamp`` is the Unix-seconds value observed in Vietcap's historical
+    response, normalized from the provider's decimal string.
+    """
+
+    symbol: str
+    timeframe: str
+    timestamp: int
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
+from enum import StrEnum
 from typing import Any, Protocol
 import logging
 import re
@@ -23,6 +25,14 @@ _STOCK_SYMBOL_PATTERN = re.compile(r"[A-Z0-9]+\Z")
 
 class VietcapRestError(RuntimeError):
     """Raised when Vietcap REST data cannot be acquired safely."""
+
+
+class VietcapTimeFrame(StrEnum):
+    """Observed timeframe identifiers accepted by the gap-chart contract."""
+
+    ONE_MINUTE = "ONE_MINUTE"
+    ONE_HOUR = "ONE_HOUR"
+    ONE_DAY = "ONE_DAY"
 
 
 class _HttpResponse(Protocol):
@@ -62,13 +72,18 @@ def _normalize_stock_symbols(symbols: Iterable[str]) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _normalize_time_frame(time_frame: str) -> str:
+def normalize_time_frame(time_frame: VietcapTimeFrame | str) -> VietcapTimeFrame:
+    """Normalize one supported provider timeframe or reject it before I/O."""
+    if isinstance(time_frame, VietcapTimeFrame):
+        return time_frame
     if not isinstance(time_frame, str):
         raise TypeError("time_frame must be a string")
     normalized = time_frame.strip().upper()
-    if not normalized or re.fullmatch(r"[A-Z_]+", normalized) is None:
-        raise ValueError("time_frame must contain only ASCII letters and underscores")
-    return normalized
+    try:
+        return VietcapTimeFrame(normalized)
+    except ValueError as exc:
+        supported = ", ".join(timeframe.value for timeframe in VietcapTimeFrame)
+        raise ValueError(f"Unsupported time_frame; expected one of: {supported}") from exc
 
 
 def _positive_integer(value: int, name: str) -> int:
@@ -150,18 +165,18 @@ class VietcapRestClient:
         self,
         symbols: Iterable[str],
         *,
-        time_frame: str,
+        time_frame: VietcapTimeFrame | str,
         count_back: int,
         to_timestamp: int,
-    ) -> dict[str, Any]:
-        """Return one provider-native OHLC gap-chart JSON object."""
+    ) -> list[dict[str, Any]]:
+        """Return detached provider-native OHLC gap-chart rows."""
         normalized_symbols = _normalize_stock_symbols(symbols)
-        normalized_time_frame = _normalize_time_frame(time_frame)
+        normalized_time_frame = normalize_time_frame(time_frame)
         normalized_count_back = _positive_integer(count_back, "count_back")
         normalized_to = _positive_integer(to_timestamp, "to_timestamp")
         url = f"{self._base_url}{GAP_CHART_PATH}"
         request_body = {
-            "timeFrame": normalized_time_frame,
+            "timeFrame": normalized_time_frame.value,
             "symbols": list(normalized_symbols),
             "countBack": normalized_count_back,
             "to": normalized_to,
@@ -170,7 +185,7 @@ class VietcapRestClient:
             "Fetching Vietcap OHLC gap chart",
             extra={
                 "symbols": list(normalized_symbols),
-                "time_frame": normalized_time_frame,
+                "time_frame": normalized_time_frame.value,
                 "count_back": normalized_count_back,
                 "to_timestamp": normalized_to,
                 "url": url,
@@ -198,10 +213,12 @@ class VietcapRestClient:
             )
             raise VietcapRestError("Failed to fetch Vietcap gap chart") from exc
 
-        if not isinstance(payload, Mapping):
+        if not isinstance(payload, list) or not all(
+            isinstance(row, Mapping) for row in payload
+        ):
             logger.error(
-                "Vietcap gap-chart response must be a JSON object",
+                "Vietcap gap-chart response must be an array of JSON objects",
                 extra={"url": url, "payload_type": type(payload).__name__},
             )
             raise VietcapRestError("Invalid Vietcap gap-chart response")
-        return dict(payload)
+        return deepcopy([dict(row) for row in payload])

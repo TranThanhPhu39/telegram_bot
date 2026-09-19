@@ -387,7 +387,34 @@ Observed timeframes:
 - `ONE_HOUR`
 - `ONE_DAY`
 
+The Python boundary exposes these exact values through `VietcapTimeFrame` and
+rejects other identifiers before network I/O. This is offline request-contract
+support, not evidence that the endpoint currently returns data for each interval.
+
 Response is columnar arrays and must be normalized to bars.
+
+### Authenticated-browser response evidence — 2026-09-19
+
+The user observed HTTP 200 for an authenticated browser request with
+`ONE_DAY`, `ACB`, `countBack: 170`, and `to: 1790035200`. The top level was an
+array containing one object per symbol. The ACB object contained 170 entries in
+each of `o`, `h`, `l`, `c`, `v`, `t`, `accumulatedVolume`, and
+`accumulatedValue`. Observed normalized fields are:
+
+| Response key | Meaning |
+|---|---|
+| `symbol` | stock symbol |
+| `t` | Unix timestamp in seconds, encoded as a decimal string |
+| `o` | open price |
+| `h` | high price |
+| `l` | low price |
+| `c` | close price |
+| `v` | volume |
+
+`accumulatedVolume`, `accumulatedValue`, and `minBatchTruncTime` are preserved
+in the provider response but are not part of the minimal `OHLCVBar` model.
+The response contained no credential material. Direct Python acquisition with
+the browser's authentication context remains NOT TESTED.
 
 ### Python gap-chart probe — 2026-09-19
 

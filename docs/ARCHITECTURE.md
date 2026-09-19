@@ -138,8 +138,17 @@ provider-native mappings until successful runtime evidence defines their fields;
 downstream strategy code must not consume these mappings directly.
 The same client constructs the provider-native `gap-chart` POST body and validates
 transport-level inputs and failures. Timeframe support and conversion from
-columnar arrays to normalized bars remain separate layers and are not inferred
-from request construction alone.
+columnar arrays to normalized bars remain separate layers. Supported request
+timeframes are represented by a closed string enum containing only `ONE_MINUTE`,
+`ONE_HOUR`, and `ONE_DAY`; arbitrary interval strings are rejected before I/O.
+
+`data.models.OHLCVBar` defines the immutable provider-independent destination
+for historical bars. `data.vietcap.historical.normalize_gap_chart` validates the
+observed columnar `t/o/h/l/c/v` arrays and converts them to these bars. Provider
+timestamps arrive as decimal Unix-seconds strings and normalize to integers.
+Acquisition remains separate: the REST client returns deeply detached provider
+rows, while malformed columns, non-finite values, invalid OHLC relationships,
+and negative volume are rejected at the normalization boundary.
 
 ## Universe
 
