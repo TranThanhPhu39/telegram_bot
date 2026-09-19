@@ -173,6 +173,22 @@ Index stream observed symbols:
 Important:
 Frontend sends the payload as a JSON string in Socket.IO emit.
 
+### Python FPT subscription attempt — 2026-09-19
+
+Confirmed client emission over the live connection:
+
+```text
+event: w-match-price
+payload type: JSON string
+payload: {"symbols":["FPT"]}
+Socket.IO packet: 2["w-match-price","{\"symbols\":[\"FPT\"]}"]
+```
+
+Only `FPT` was included. The connection remained healthy through a heartbeat,
+but the server sent no `w-match-price` event during the 40-second observation.
+The test was run on Saturday, outside the normal trading week, so binary payload
+shape and live protobuf mapping are still NOT TESTED. Phase 3 remains open.
+
 ## Historical REST
 
 Endpoint:

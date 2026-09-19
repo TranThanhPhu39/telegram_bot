@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import logging
 import os
@@ -12,8 +13,10 @@ from data.vietcap.constants import (
     DEFAULT_CONNECT_TIMEOUT_SECONDS,
     DEFAULT_SOCKET_PATH,
     DEFAULT_SOCKET_URL,
+    MATCH_PRICE_EVENT,
     SOCKET_TRANSPORTS,
 )
+from data.vietcap.subscriptions import build_symbol_subscription
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +38,7 @@ class ConnectionInfo:
 
 
 class VietcapRealtimeClient:
-    """Manage a connection without subscribing to market events."""
+    """Manage Vietcap Socket.IO connection and scoped market subscriptions."""
 
     def __init__(
         self,
@@ -117,6 +120,30 @@ class VietcapRealtimeClient:
     def sleep(self, seconds: float) -> None:
         """Wait while allowing the Socket.IO client to service heartbeats."""
         self._socket.sleep(seconds)
+
+    def on_match_price(self, handler: Callable[[object], None]) -> None:
+        """Register the callback for binary match-price events."""
+        if not callable(handler):
+            raise TypeError("Match-price handler must be callable")
+        self._socket.on(MATCH_PRICE_EVENT, handler)
+
+    def subscribe_match_price(self, symbols: tuple[str, ...]) -> None:
+        """Subscribe connected clients to the requested match-price symbols."""
+        if not self.connected:
+            raise ConnectionError("Connect before subscribing to match prices")
+        payload = build_symbol_subscription(symbols)
+        logger.info(
+            "Subscribing to Vietcap match-price stream",
+            extra={"event": MATCH_PRICE_EVENT, "symbols": list(symbols)},
+        )
+        try:
+            self._socket.emit(MATCH_PRICE_EVENT, payload)
+        except Exception:
+            logger.exception(
+                "Failed to subscribe to Vietcap match-price stream",
+                extra={"event": MATCH_PRICE_EVENT, "symbols": list(symbols)},
+            )
+            raise
 
     def _on_connect(self) -> None:
         logger.info("Socket.IO namespace connected")

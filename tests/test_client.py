@@ -16,6 +16,7 @@ class FakeSocketClient:
         self.sid = "test-sid"
         self.handlers: dict[str, Callable[..., None]] = {}
         self.connect_calls: list[tuple[str, dict[str, Any]]] = []
+        self.emit_calls: list[tuple[str, object]] = []
         self.disconnect_calls = 0
 
     def on(self, event: str, handler: Callable[..., None]) -> None:
@@ -30,6 +31,9 @@ class FakeSocketClient:
         self.disconnect_calls += 1
         self.connected = False
         self.handlers["disconnect"]("client disconnect")
+
+    def emit(self, event: str, data: object) -> None:
+        self.emit_calls.append((event, data))
 
     def transport(self) -> str:
         return "websocket"
@@ -91,3 +95,27 @@ def test_disconnect_is_idempotent() -> None:
     client.disconnect()
 
     assert socket_client.disconnect_calls == 1
+
+
+def test_match_price_subscription_requires_connection() -> None:
+    client = VietcapRealtimeClient(  # type: ignore[arg-type]
+        socket_client=FakeSocketClient()
+    )
+
+    with pytest.raises(ConnectionError, match="Connect before subscribing"):
+        client.subscribe_match_price(("FPT",))
+
+
+def test_register_and_subscribe_fpt_match_price() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+    handler = lambda payload: None
+
+    client.on_match_price(handler)
+    client.connect()
+    client.subscribe_match_price(("FPT",))
+
+    assert socket_client.handlers["w-match-price"] is handler
+    assert socket_client.emit_calls == [
+        ("w-match-price", '{"symbols":["FPT"]}')
+    ]

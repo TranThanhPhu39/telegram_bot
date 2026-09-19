@@ -4,7 +4,7 @@
 > Move to the next phase only after explicit user instruction.
 
 ## ACTIVE PHASE
-**Phase 2 — Vietcap Socket.IO connection only**
+**Phase 3 — Realtime Match Price: FPT only**
 
 ---
 
@@ -55,7 +55,7 @@ Acceptance:
 ---
 
 ## Phase 3 — Realtime Match Price: FPT only
-- [ ] Subscribe only FPT to `w-match-price`
+- [x] Subscribe only FPT to `w-match-price`
 - [ ] Receive binary event
 - [ ] Decode using MatchPrice protobuf
 - [ ] Print normalized FPT tick
