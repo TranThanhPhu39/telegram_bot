@@ -229,6 +229,14 @@ symbol set has not changed, regardless of input order, and clears that local
 state after disconnect. These behaviors are unit-tested only; simultaneous live
 FPT + ACB delivery remains NOT TESTED while the market is closed.
 
+### Match-price normalization
+
+Validated `MatchPriceMessage` objects are converted to the provider-independent
+immutable `TradeTick` model. The mapping preserves the provider's numeric units;
+no price scaling is applied. Empty time/session strings and zero-valued optional
+snapshot prices are represented as `None`. Exchange time is deliberately not
+parsed until its live format and timezone are observed.
+
 ## Historical REST
 
 Endpoint:

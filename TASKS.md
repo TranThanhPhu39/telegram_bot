@@ -78,7 +78,7 @@ Acceptance:
 ## Phase 4 — Realtime ACB + Market State
 - [x] Add ACB subscription
 - [x] Prevent duplicate symbol subscriptions
-- [ ] Create normalized `TradeTick`
+- [x] Create normalized `TradeTick`
 - [ ] Create latest market-state cache
 - [ ] Test FPT + ACB simultaneously
 - [ ] STOP and report

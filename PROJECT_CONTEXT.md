@@ -9,6 +9,7 @@ Build a modular realtime Vietnamese stock signal bot for HOSE, HNX, and UPCoM, e
 Implemented foundation:
 
 ```text
+data.models.TradeTick              provider-independent immutable trade model
 data.vietcap
     -> proto/price.proto          vendored, minimally normalized schema
     -> proto/price_pb2.py         generated Python protobuf binding
@@ -18,6 +19,7 @@ data.vietcap
     -> subscriptions.py           normalized FPT + ACB payload construction
     -> decoder.py                 binary MatchPrice protobuf decoding
     -> validation.py              decoded match-price quality checks
+    -> normalizer.py              MatchPriceMessage -> TradeTick conversion
 scripts/inspect_connection.py     live connection smoke test, no subscriptions
 scripts/test_realtime.py          Phase 3 live FPT-only acceptance test
 tests/test_client.py              deterministic connection configuration tests
@@ -66,13 +68,15 @@ Phase 4 — Realtime ACB + Market State — active for offline implementation wi
 - [x] MatchPrice decoder and field validation unit-tested
 - [x] FPT + ACB subscription payload implemented and unit-tested
 - [x] Duplicate symbols and unchanged subscription sets suppressed
+- [x] Provider-independent immutable `TradeTick` model implemented
+- [x] Validated `MatchPriceMessage` to `TradeTick` conversion unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 4 offline implementation. The FPT + ACB subscription and duplicate prevention are complete. The next small task is a provider-independent normalized `TradeTick`. Phase 3 live receive/decode/validation remains pending and must be rerun during an active Vietnamese market session.
+Phase 4 offline implementation. Subscription deduplication and normalized `TradeTick` conversion are complete. The next small task is a latest market-state cache keyed by symbol. Phase 3 live receive/decode/validation remains pending and must be rerun during an active Vietnamese market session.
 
 ## 6. Files Created / Modified
 
@@ -186,6 +190,24 @@ Main function: `validate_match_price`.
 
 Status: created and unit-tested; live FPT fields are not yet verified.
 
+### `data/models.py`
+
+Purpose: defines provider-independent normalized market-data models.
+
+Main class: immutable, slotted `TradeTick`.
+
+Status: unit-tested for exact normalized values and immutability.
+
+### `data/vietcap/normalizer.py`
+
+Purpose: validates `MatchPriceMessage` and converts it to `TradeTick` without
+leaking protobuf types downstream.
+
+Main function: `normalize_match_price`.
+
+Status: unit-tested for complete field mapping, proto3 defaults, symbol
+normalization, and invalid-message rejection; live frames remain NOT TESTED.
+
 ### `scripts/test_realtime.py`
 
 Purpose: subscribes only FPT to `w-match-price`, records first-event metadata, decodes and validates messages, prints normalized field labels, and requires two distinct valid ticks for success.
@@ -210,23 +232,40 @@ Purpose: verifies valid and invalid MatchPrice field relationships.
 
 Status: two tests pass.
 
+### `tests/test_normalizer.py`
+
+Purpose: verifies provider-independent MatchPrice normalization, optional-field
+handling, immutability, and rejection of invalid messages.
+
+Status: four tests pass.
+
 ### `docs/VIETCAP_PROTOCOL.md`
 
 Purpose: protocol notes and confirmed runtime evidence.
 
-Status: updated with Engine.IO v4 evidence and the incomplete Saturday FPT subscription attempt.
+Status: updated with Engine.IO v4 evidence, pending live validation, Phase 4
+subscription behavior, and the confirmed offline normalization policy.
+
+### `docs/ARCHITECTURE.md`
+
+Purpose: records the provider boundary and downstream layering.
+
+Status: updated to require downstream consumers to use immutable `TradeTick`
+objects rather than Vietcap protobuf messages.
 
 ### `TASKS.md`
 
 Purpose: phase gate and acceptance checklist.
 
-Status: active phase advanced to Phase 3 after explicit user authorization. Only the evidence-backed FPT subscription item is checked; live receive/decode/validation items remain unchecked.
+Status: Phase 4 is the active offline implementation phase. Its subscription,
+deduplication, and `TradeTick` items are checked; Phase 3 live items remain pending.
 
 ### `PROJECT_CONTEXT.md`
 
 Purpose: persistent development record.
 
-Status: updated with Phase 3 implementation, Saturday runtime evidence, and the unresolved acceptance blocker.
+Status: updated with the Phase 4 `TradeTick` implementation and tests while
+retaining the unresolved live-validation blockers.
 
 ## 7. Important Technical Discoveries
 
@@ -565,6 +604,19 @@ Store base interpreter path is not accessible inside that sandbox.
 Result: PASS for the offline Phase 4 subscription task group. Simultaneous live
 FPT + ACB event delivery remains NOT TESTED because the market is closed.
 
+### 2026-09-19 — Phase 4 TradeTick normalization unit tests
+
+Command: `.\.venv\Scripts\python.exe -m pytest -q`.
+
+Expected: preserve existing behavior and verify exact MatchPrice-to-TradeTick
+mapping, immutable normalized ticks, optional proto3 default handling, and
+rejection of invalid trade messages.
+
+Actual: `30 passed in 0.33s`.
+
+Result: PASS for the offline `TradeTick` task. Conversion from an actual live
+binary message remains NOT TESTED because no live frame has arrived.
+
 ## 10. Known Problems
 
 - The upstream schema is not directly compilable by standard `protoc` without reordering its first two declarations.
@@ -580,9 +632,9 @@ FPT + ACB event delivery remains NOT TESTED because the market is closed.
 
 ## 11. Next Steps
 
-Continue Phase 4 with one small offline task: create a provider-independent,
-immutable `TradeTick` model and unit-test conversion from `MatchPriceMessage`.
-Do not create the market-state cache in the same task group.
+Continue Phase 4 with one small offline task: create a latest market-state cache
+keyed by symbol that accepts only normalized `TradeTick` values. Do not add live
+Socket.IO orchestration in the same task group.
 
 During the next active Vietnamese market session, separately rerun Phase 3 live
 validation and later test simultaneous FPT + ACB delivery. Keep those live items
@@ -686,6 +738,14 @@ normalized symbol set is not emitted twice on the same connection. A changed set
 is still emitted in full because the unofficial server's append-versus-replace
 behavior has not been established. Disconnect clears the local suppression state.
 
+### Decision: keep TradeTick immutable and provider-independent
+
+Reason: downstream market state, indicators, and strategy must not depend on
+Vietcap protobuf classes. Immutability prevents an already-cached observation
+from being mutated in place. The provider time stays as an optional string until
+live evidence establishes its exact format and timezone; no price-unit conversion
+is guessed.
+
 ## 14. Change Log
 
 ### 2026-09-19 12:29 +07:00 — Phase 0
@@ -753,3 +813,12 @@ behavior has not been established. Disconnect clears the local suppression state
 - Reset duplicate-suppression state on disconnect so a later connection can subscribe again.
 - Passed all 26 unit tests and the project-local dependency consistency check.
 - Kept Phase 3 live checks and Phase 4 simultaneous live delivery unchecked.
+
+### 2026-09-19 — Phase 4 TradeTick task group
+
+- Added the immutable, slotted, provider-independent `TradeTick` model.
+- Added validated conversion from Vietcap `MatchPriceMessage`.
+- Normalized symbol casing and represented unset optional snapshot fields as `None`.
+- Preserved raw provider numeric units and exchange-time text without guessing transformations.
+- Added four normalization tests; the full suite passed with 30 tests.
+- Left the market-state cache and all live-delivery checklist items unchecked.

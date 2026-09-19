@@ -46,6 +46,16 @@ class MarketDataProvider:
 Implement `VietcapProvider` first.
 DNSE can be added later without changing strategy.
 
+## Normalized trade data
+
+`data.models.TradeTick` is the provider-independent boundary for decoded trades.
+It is immutable so cached market state cannot be changed accidentally. Vietcap
+protobuf objects are converted in `data.vietcap.normalizer`; downstream modules
+must consume `TradeTick`, not `MatchPriceMessage`.
+
+The provider's exchange time remains an optional string until live frames confirm
+its format and timezone. Unset proto3 snapshot fields are normalized to `None`.
+
 ## Universe
 
 Data universe:
