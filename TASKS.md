@@ -168,7 +168,7 @@ Acceptance:
 
 ## Phase 8 — Historical REST
 - [x] Implement quote endpoint
-- [ ] Implement OHLC `gap-chart`
+- [x] Implement OHLC `gap-chart`
 - [ ] Support ONE_MINUTE
 - [ ] Support ONE_HOUR
 - [ ] Support ONE_DAY

@@ -389,6 +389,13 @@ Observed timeframes:
 
 Response is columnar arrays and must be normalized to bars.
 
+### Python gap-chart probe — 2026-09-19
+
+An unauthenticated POST for two `ACB` `ONE_DAY` bars, using the documented four
+JSON keys, returned HTTP 400 with an empty HTML body. Request construction and
+error handling are covered offline, but successful historical retrieval,
+timeframe behavior, and response-column semantics remain NOT TESTED.
+
 ## Quote REST
 
 Observed:

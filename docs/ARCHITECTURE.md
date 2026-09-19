@@ -136,6 +136,10 @@ failures to `VietcapRestError`. Stock symbols are restricted to normalized ASCII
 letters and digits before URL construction. Quote responses remain detached,
 provider-native mappings until successful runtime evidence defines their fields;
 downstream strategy code must not consume these mappings directly.
+The same client constructs the provider-native `gap-chart` POST body and validates
+transport-level inputs and failures. Timeframe support and conversion from
+columnar arrays to normalized bars remain separate layers and are not inferred
+from request construction alone.
 
 ## Universe
 

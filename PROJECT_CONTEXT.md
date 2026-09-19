@@ -82,16 +82,17 @@ Phase 8 — Historical REST — explicitly authorized while Phases 3–7 remain 
 - [x] Decode failures are isolated and all three realtime pipelines recover in unit tests
 - [x] Bounded metadata-only raw debug mode implemented and unit-tested
 - [x] Vietcap quote REST acquisition implemented and unit-tested
+- [x] Vietcap OHLC gap-chart request contract implemented and unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 8 is active by explicit user authorization. The quote endpoint client is
-implemented offline with symbol validation, timeout, JSON-object enforcement,
-and network/HTTP/JSON error wrapping. The next task is the OHLC `gap-chart`
-acquisition contract. Phases 3–7 retain their pending live-validation status.
+Phase 8 is active by explicit user authorization. Quote and OHLC `gap-chart`
+request boundaries are implemented offline with input validation, timeouts,
+JSON-object enforcement, and network/HTTP/JSON error wrapping. The next task is
+explicit supported-timeframe semantics. Phases 3–7 retain pending live validation.
 
 ## 6. Files Created / Modified
 
@@ -219,18 +220,19 @@ Purpose: performs bounded, unauthenticated Vietcap REST acquisition without
 leaking provider response fields into normalized models.
 
 Main classes/functions: `VietcapRestClient`, `VietcapRestError`,
-`normalize_stock_symbol`, `get_quote`.
+`normalize_stock_symbol`, `get_quote`, `get_gap_chart`.
 
 Status: quote GET behavior, symbol safety, timeout, response-shape enforcement,
-and error wrapping are unit-tested. The live endpoint returned HTTP 400 during
-the 2026-09-19 probe, so successful live quote retrieval is NOT TESTED.
+gap-chart POST body construction, and error wrapping are unit-tested. Both live
+REST probes returned HTTP 400 during 2026-09-19, so successful live quote and
+historical retrieval remain NOT TESTED.
 
 ### `tests/test_rest.py`
 
 Purpose: deterministic tests for Vietcap REST request construction and failure
 handling without network access.
 
-Status: 16 tests pass as part of the 156-test suite.
+Status: 32 tests pass as part of the 172-test suite.
 
 ### `data/vietcap/validation.py`
 
@@ -901,6 +903,30 @@ A direct unauthenticated FPT probe returned HTTP 400 with an empty HTML body.
 Result: PASS for offline quote acquisition. Successful live response and its
 field contract remain NOT TESTED; no response fields were guessed.
 
+### 2026-09-19 — Phase 8 OHLC gap-chart request contract
+
+Commands:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests\test_rest.py
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pip check
+```
+
+Expected: send the documented POST path and exact `timeFrame`, `symbols`,
+`countBack`, and `to` JSON keys; normalize and deduplicate ticker inputs; require
+positive integer bounds; enforce timeout and JSON-object response; and wrap
+network, HTTP, and JSON failures.
+
+Actual: REST tests returned `32 passed in 0.14s`; the full suite returned
+`172 passed in 0.49s`; dependency validation reported no broken requirements.
+A direct `ACB`/`ONE_DAY`/two-bar unauthenticated probe returned HTTP 400 with an
+empty HTML body.
+
+Result: PASS for the offline gap-chart acquisition contract. Successful live
+historical retrieval, supported timeframe semantics, and response columns remain
+NOT TESTED.
+
 ## 10. Known Problems
 
 - The upstream schema is not directly compilable by standard `protoc` without reordering its first two declarations.
@@ -919,12 +945,14 @@ field contract remain NOT TESTED; no response fields were guessed.
   successful Phase 2 connection and may be transient endpoint unavailability.
 - The documented FPT quote URL returned HTTP 400 with an empty HTML body on
   2026-09-19. Successful unauthenticated quote retrieval remains NOT TESTED.
+- The documented gap-chart POST also returned HTTP 400 with an empty HTML body
+  for an ACB `ONE_DAY` two-bar request on 2026-09-19. Historical retrieval and
+  response-column semantics remain NOT TESTED.
 
 ## 11. Next Steps
 
-Continue Phase 8 with one small task: implement the OHLC `gap-chart` request
-contract and deterministic acquisition/error tests. Do not normalize bars or
-add multiple timeframe semantics in the same task group.
+Continue Phase 8 with one small task: define and validate the three supported
+timeframes (`ONE_MINUTE`, `ONE_HOUR`, `ONE_DAY`) without normalizing OHLCV bars.
 
 ## 12. How To Run
 
@@ -1099,6 +1127,13 @@ Reason: the live quote endpoint did not return a successful body during this
 task, so response field semantics cannot be confirmed. The REST client validates
 transport and top-level JSON shape but returns a detached provider-native mapping;
 normalized quote or OHLC models must be added only with evidence-backed fields.
+
+### Decision: validate gap-chart transport fields before timeframe semantics
+
+Reason: the request boundary can safely enforce ticker collections, positive
+integer `countBack`/`to`, and top-level JSON shape without claiming that any
+specific timeframe works live. Explicit supported-timeframe semantics remain a
+separate task because the current endpoint probe returned HTTP 400.
 
 ## 14. Change Log
 
@@ -1303,3 +1338,13 @@ normalized quote or OHLC models must be added only with evidence-backed fields.
 - Added 16 deterministic tests; the full 156-test suite passed.
 - Recorded the live HTTP 400 result without guessing response fields.
 - Did not implement `gap-chart`, timeframes, or OHLCV normalization.
+
+### 2026-09-19 — Phase 8 gap-chart-contract task group
+
+- Added the documented gap-chart POST path and provider-native response method.
+- Added exact request-body construction with normalized, deduplicated symbols.
+- Added validation for non-empty timeframe token and positive integer bounds.
+- Added HTTP, JSON, and top-level response-shape error handling.
+- Added 16 tests, bringing REST coverage to 32 and the full suite to 172 tests.
+- Recorded the live HTTP 400 probe without claiming historical retrieval success.
+- Did not mark any timeframe or OHLCV normalization checklist item complete.

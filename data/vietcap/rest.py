@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, Protocol
 import logging
 import re
@@ -12,6 +12,7 @@ import requests
 from data.vietcap.constants import (
     DEFAULT_REST_BASE_URL,
     DEFAULT_REST_TIMEOUT_SECONDS,
+    GAP_CHART_PATH,
     QUOTE_PATH_TEMPLATE,
 )
 
@@ -33,6 +34,8 @@ class _HttpResponse(Protocol):
 class _HttpSession(Protocol):
     def get(self, url: str, **kwargs: Any) -> _HttpResponse: ...
 
+    def post(self, url: str, **kwargs: Any) -> _HttpResponse: ...
+
 
 def normalize_stock_symbol(symbol: str) -> str:
     """Normalize and validate one stock ticker for safe URL construction."""
@@ -42,6 +45,38 @@ def normalize_stock_symbol(symbol: str) -> str:
     if not normalized or _STOCK_SYMBOL_PATTERN.fullmatch(normalized) is None:
         raise ValueError("symbol must contain only ASCII letters and digits")
     return normalized
+
+
+def _normalize_stock_symbols(symbols: Iterable[str]) -> tuple[str, ...]:
+    if isinstance(symbols, str):
+        raise TypeError("symbols must be an iterable of ticker strings")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for symbol in symbols:
+        ticker = normalize_stock_symbol(symbol)
+        if ticker not in seen:
+            normalized.append(ticker)
+            seen.add(ticker)
+    if not normalized:
+        raise ValueError("at least one symbol is required")
+    return tuple(normalized)
+
+
+def _normalize_time_frame(time_frame: str) -> str:
+    if not isinstance(time_frame, str):
+        raise TypeError("time_frame must be a string")
+    normalized = time_frame.strip().upper()
+    if not normalized or re.fullmatch(r"[A-Z_]+", normalized) is None:
+        raise ValueError("time_frame must contain only ASCII letters and underscores")
+    return normalized
+
+
+def _positive_integer(value: int, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    if value < 1:
+        raise ValueError(f"{name} must be positive")
+    return value
 
 
 class VietcapRestClient:
@@ -109,4 +144,64 @@ class VietcapRestClient:
             raise VietcapRestError(
                 f"Invalid Vietcap quote response for {normalized_symbol}"
             )
+        return dict(payload)
+
+    def get_gap_chart(
+        self,
+        symbols: Iterable[str],
+        *,
+        time_frame: str,
+        count_back: int,
+        to_timestamp: int,
+    ) -> dict[str, Any]:
+        """Return one provider-native OHLC gap-chart JSON object."""
+        normalized_symbols = _normalize_stock_symbols(symbols)
+        normalized_time_frame = _normalize_time_frame(time_frame)
+        normalized_count_back = _positive_integer(count_back, "count_back")
+        normalized_to = _positive_integer(to_timestamp, "to_timestamp")
+        url = f"{self._base_url}{GAP_CHART_PATH}"
+        request_body = {
+            "timeFrame": normalized_time_frame,
+            "symbols": list(normalized_symbols),
+            "countBack": normalized_count_back,
+            "to": normalized_to,
+        }
+        logger.info(
+            "Fetching Vietcap OHLC gap chart",
+            extra={
+                "symbols": list(normalized_symbols),
+                "time_frame": normalized_time_frame,
+                "count_back": normalized_count_back,
+                "to_timestamp": normalized_to,
+                "url": url,
+            },
+        )
+        try:
+            response = self._session.post(
+                url,
+                json=request_body,
+                headers={"Accept": "application/json"},
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except ValueError as exc:
+            logger.exception(
+                "Vietcap gap-chart response was not valid JSON",
+                extra={"url": url},
+            )
+            raise VietcapRestError("Invalid Vietcap gap-chart JSON") from exc
+        except requests.RequestException as exc:
+            logger.exception(
+                "Vietcap gap-chart request failed",
+                extra={"url": url},
+            )
+            raise VietcapRestError("Failed to fetch Vietcap gap chart") from exc
+
+        if not isinstance(payload, Mapping):
+            logger.error(
+                "Vietcap gap-chart response must be a JSON object",
+                extra={"url": url, "payload_type": type(payload).__name__},
+            )
+            raise VietcapRestError("Invalid Vietcap gap-chart response")
         return dict(payload)
