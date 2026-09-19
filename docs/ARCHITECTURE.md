@@ -149,6 +149,10 @@ timestamps arrive as decimal Unix-seconds strings and normalize to integers.
 Acquisition remains separate: the REST client returns deeply detached provider
 rows, while malformed columns, non-finite values, invalid OHLC relationships,
 and negative volume are rejected at the normalization boundary.
+Authenticated acquisition accepts authorization, device ID, and cookie only as
+runtime inputs. The provider also required the observed same-origin browser
+request headers during live verification; no credential value is logged or
+stored in tracked files.
 
 ## Universe
 

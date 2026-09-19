@@ -46,7 +46,8 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 8 — Historical REST — explicitly authorized while Phases 3–7 remain pending live validation. None of the pending realtime acceptance criteria may be reported as PASS until observed.
+Phase 8 — Historical REST — COMPLETE. Development is stopped before Phase 9.
+Phases 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
 
@@ -86,19 +87,18 @@ Phase 8 — Historical REST — explicitly authorized while Phases 3–7 remain 
 - [x] Vietcap OHLC gap-chart request contract implemented and unit-tested
 - [x] ONE_MINUTE, ONE_HOUR, and ONE_DAY request semantics implemented and unit-tested
 - [x] Evidence-backed gap-chart OHLCV normalization and fixture tests implemented
+- [x] Authenticated Python historical fetch and normalization verified live
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 8 is active by explicit user authorization. Quote and OHLC `gap-chart`
-request boundaries plus the three observed timeframes are implemented offline.
-An authenticated browser returned a real ACB `ONE_DAY` response with 170 aligned
-column values. Its `t/o/h/l/c/v` schema is now normalized and fixture-tested.
-The next Phase 8 task is to establish the minimum user-supplied authentication
-configuration required for a direct Python HTTP 200 response. Phases 3–7 retain
-their pending live-validation status.
+Phase 8 is complete. Python received HTTP 200 and normalized 121 ACB
+`ONE_MINUTE` bars after reproducing the observed request headers and using
+user-managed authorization, device ID, and cookie from ignored local `.env`.
+Development stops here until the user explicitly opens Phase 9. Phases 3–7
+retain their pending live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -984,9 +984,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Continue Phase 8 with one small task: identify the minimum authentication header
-or cookie names used by the successful browser request, document a safe local
-configuration path, and attempt a direct Python fetch without storing secrets.
+Await explicit user authorization before opening Phase 9. Do not implement the
+database automatically.
 
 ## 12. How To Run
 
@@ -1423,3 +1422,42 @@ three observed values before request construction.
 - Passed 58 focused Phase 8 tests and the full 198-test regression suite.
 - Marked normalization and fixtures/tests complete. Direct authenticated Python
   acquisition remains NOT TESTED, so Phase 8 STOP remains unchecked.
+
+### 2026-09-19 — Phase 8 authorization probe task group
+
+- Added optional authorization and device-ID headers without logging secrets.
+- Added a bounded live historical probe that loads ignored local `.env` values
+  and prints only bar metadata on success.
+- Confirmed `.env` is ignored and inspected only variable names, never values.
+- Passed 59 focused REST/historical tests and the full 201-test suite.
+- Live Python request returned HTTP 400, so authorization and device ID alone
+  are not proven sufficient; Phase 8 remains open.
+
+### 2026-09-19 — Phase 8 cookie configuration task group
+
+- Added optional `Cookie` header support without logging or persisting its value.
+- Added the blank `VIETCAP_COOKIE` placeholder to `.env.example`; real values
+  remain only in the ignored local `.env`.
+- Updated the bounded live probe to require authorization, device ID, and cookie
+  from the same user-managed browser session.
+- Cookie-backed authentication support was ready for the subsequent live probe.
+
+### 2026-09-19 — Phase 8 cookie live probe
+
+- Confirmed local authorization, device ID, and cookie were present and
+  structurally intact without printing their values.
+- Replayed the exact browser-success request boundary (`countBack: 170`,
+  `to: 1790035200`) with all three user-supplied values.
+- Vietcap still returned HTTP 400; direct Python acquisition remains FAIL.
+- Did not guess or add further browser headers. A controlled Copy-as-cURL test is
+  the next diagnostic boundary.
+
+### 2026-09-19 — Phase 8 successful historical acceptance
+
+- Reproduced the observed safe browser headers and current ACB `ONE_MINUTE`
+  request boundary without embedding credentials in source code.
+- Received HTTP 200 directly in Python and normalized 121 historical bars.
+- Observed normalized timestamp range `1789703880..1789717500`.
+- Kept authorization, device ID, and cookie only in ignored local `.env` and
+  never printed their values.
+- Marked Phase 8 acceptance and STOP complete; did not start Phase 9.

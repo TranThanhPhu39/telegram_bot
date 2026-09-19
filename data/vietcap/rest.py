@@ -21,6 +21,23 @@ from data.vietcap.constants import (
 logger = logging.getLogger(__name__)
 
 _STOCK_SYMBOL_PATTERN = re.compile(r"[A-Z0-9]+\Z")
+_OBSERVED_BROWSER_HEADERS = {
+    "Accept": "application/json",
+    "Accept-Language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+    "Content-Type": "application/json",
+    "Priority": "u=1, i",
+    "Sec-CH-UA": '"Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"',
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/153.0.0.0 Safari/537.36"
+    ),
+}
 
 
 class VietcapRestError(RuntimeError):
@@ -103,6 +120,9 @@ class VietcapRestClient:
         base_url: str = DEFAULT_REST_BASE_URL,
         timeout: float = DEFAULT_REST_TIMEOUT_SECONDS,
         session: _HttpSession | None = None,
+        authorization: str | None = None,
+        device_id: str | None = None,
+        cookie: str | None = None,
     ) -> None:
         normalized_base_url = base_url.strip().rstrip("/")
         if not normalized_base_url:
@@ -112,6 +132,37 @@ class VietcapRestClient:
         self._base_url = normalized_base_url
         self._timeout = timeout
         self._session = session or requests.Session()
+        self._authorization = self._optional_secret(authorization, "authorization")
+        self._device_id = self._optional_secret(device_id, "device_id")
+        self._cookie = self._optional_secret(cookie, "cookie")
+
+    @staticmethod
+    def _optional_secret(value: str | None, name: str) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise TypeError(f"{name} must be a string")
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError(f"{name} must not be empty")
+        return normalized
+
+    def _headers(self) -> dict[str, str]:
+        headers = {
+            **_OBSERVED_BROWSER_HEADERS,
+            "Origin": self._base_url,
+            "Referer": (
+                f"{self._base_url}/priceboard?type=stock"
+                "&filter-group=HOSE&filter-value=HOSE"
+            ),
+        }
+        if self._authorization is not None:
+            headers["Authorization"] = self._authorization
+        if self._device_id is not None:
+            headers["device-id"] = self._device_id
+        if self._cookie is not None:
+            headers["Cookie"] = self._cookie
+        return headers
 
     def get_quote(self, symbol: str) -> dict[str, Any]:
         """Return one provider-native quote JSON object."""
@@ -125,7 +176,7 @@ class VietcapRestClient:
         try:
             response = self._session.get(
                 url,
-                headers={"Accept": "application/json"},
+                headers=self._headers(),
                 timeout=self._timeout,
             )
             response.raise_for_status()
@@ -195,7 +246,7 @@ class VietcapRestClient:
             response = self._session.post(
                 url,
                 json=request_body,
-                headers={"Accept": "application/json"},
+                headers=self._headers(),
                 timeout=self._timeout,
             )
             response.raise_for_status()

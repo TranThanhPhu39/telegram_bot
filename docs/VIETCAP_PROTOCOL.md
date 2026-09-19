@@ -416,6 +416,33 @@ in the provider response but are not part of the minimal `OHLCVBar` model.
 The response contained no credential material. Direct Python acquisition with
 the browser's authentication context remains NOT TESTED.
 
+### Authenticated Python probe — 2026-09-19
+
+The client sent the user-configured `Authorization` and `device-id` values plus
+the observed `Origin` and `Referer`, without logging any secret value. Vietcap
+still returned HTTP 400. Therefore authorization plus device ID alone is not
+proven sufficient. The browser's `Cookie` header, token freshness, or another
+session-bound condition may be required. No cookie was captured automatically.
+
+The client now accepts an optional user-supplied `Cookie` header through local
+runtime configuration. It never reads browser storage, logs cookie contents, or
+persists them in tracked files. A live replay used authorization, device ID,
+cookie, and the exact observed `countBack: 170` / `to: 1790035200` payload, but
+still received HTTP 400. Secret-shape checks confirmed a Bearer authorization and
+an intact multi-pair cookie without revealing their values. Another browser
+header, TLS/browser fingerprint, or session-bound condition remains possible.
+
+### Successful authenticated Python probe — 2026-09-19
+
+After reproducing the observed non-secret browser headers and current request
+payload (`ONE_MINUTE`, ACB, `countBack: 121`, `to: 1789830754`), Python received
+HTTP 200 and normalized 121 bars. The observed timestamp range was
+`1789703880..1789717500`. Authorization, device ID, and cookie came exclusively
+from ignored local `.env` values and were not printed. This is runtime evidence
+that historical bars can be fetched and normalized outside the browser, while
+the internal endpoint and session credentials remain unstable implementation
+details.
+
 ### Python gap-chart probe — 2026-09-19
 
 An unauthenticated POST for two `ACB` `ONE_DAY` bars, using the documented four
@@ -457,5 +484,6 @@ Skip initially:
 - advertise
 
 ## Security
-No account credentials are required in project config unless later proven necessary.
-Do not persist cookies/tokens captured from the browser.
+Historical REST currently requires user-supplied browser-session credentials.
+Keep them only in ignored local configuration; never commit, log, or place them
+in fixtures. Do not automate username/password login or persist refresh tokens.

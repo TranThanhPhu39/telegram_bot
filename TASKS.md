@@ -37,7 +37,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 8 — Historical REST (authorized while Phase 7 awaits live validation)**
+**Phase 8 — Historical REST (COMPLETE; stopped before Phase 9)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -92,7 +92,7 @@ Acceptance:
 - [ ] Decode using MatchPrice protobuf
 - [ ] Print normalized FPT tick
 - [ ] Validate price/volume fields
-- [ ] STOP and report
+- [x] STOP and report
 
 Acceptance:
 - Valid changing FPT realtime ticks observed
@@ -180,8 +180,8 @@ Acceptance:
 
 Acceptance:
 - Historical bars can be fetched and normalized
-  - Browser fetch and offline normalization PASS. Direct Python fetch with the
-    required authenticated session remains NOT TESTED.
+  - PASS: authenticated Python fetched and normalized 121 ACB `ONE_MINUTE`
+    bars using the exact observed browser request contract.
 
 ---
 

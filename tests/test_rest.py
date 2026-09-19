@@ -81,7 +81,24 @@ def test_get_quote_uses_normalized_symbol_timeout_and_json_accept_header() -> No
     assert session.get_calls == [
         (
             "https://example.test/api/price/v1/w/priceboard/ticker/price/FPT",
-            {"headers": {"Accept": "application/json"}, "timeout": 7.5},
+            {
+                "headers": {
+                    "Accept": "application/json",
+                    "Accept-Language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+                    "Content-Type": "application/json",
+                    "Priority": "u=1, i",
+                    "Sec-CH-UA": '"Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"',
+                    "Sec-CH-UA-Mobile": "?0",
+                    "Sec-CH-UA-Platform": '"Windows"',
+                    "Sec-Fetch-Dest": "empty",
+                    "Sec-Fetch-Mode": "cors",
+                    "Sec-Fetch-Site": "same-origin",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+                    "Origin": "https://example.test",
+                    "Referer": "https://example.test/priceboard?type=stock&filter-group=HOSE&filter-value=HOSE",
+                },
+                "timeout": 7.5,
+            },
         )
     ]
 
@@ -155,7 +172,21 @@ def test_get_gap_chart_uses_exact_post_contract() -> None:
                     "countBack": 2,
                     "to": 1_789_787_719,
                 },
-                "headers": {"Accept": "application/json"},
+                "headers": {
+                    "Accept": "application/json",
+                    "Accept-Language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+                    "Content-Type": "application/json",
+                    "Priority": "u=1, i",
+                    "Sec-CH-UA": '"Google Chrome";v="153", "Not_A Brand";v="8", "Chromium";v="153"',
+                    "Sec-CH-UA-Mobile": "?0",
+                    "Sec-CH-UA-Platform": '"Windows"',
+                    "Sec-Fetch-Dest": "empty",
+                    "Sec-Fetch-Mode": "cors",
+                    "Sec-Fetch-Site": "same-origin",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+                    "Origin": "https://example.test",
+                    "Referer": "https://example.test/priceboard?type=stock&filter-group=HOSE&filter-value=HOSE",
+                },
                 "timeout": 8.0,
             },
         )
@@ -301,3 +332,31 @@ def test_get_gap_chart_returns_deeply_detached_rows() -> None:
     result[0]["t"][0] = "2"
 
     assert source == [{"symbol": "ACB", "t": ["1"]}]
+
+
+def test_authenticated_headers_are_sent_without_mutation() -> None:
+    session = FakeSession(FakeResponse([]))
+    client = VietcapRestClient(
+        session=session,
+        authorization="Bearer local-secret",
+        device_id="local-device",
+        cookie="session=local-cookie",
+    )
+
+    client.get_gap_chart(
+        ("ACB",),
+        time_frame="ONE_DAY",
+        count_back=1,
+        to_timestamp=1,
+    )
+
+    headers = session.post_calls[0][1]["headers"]
+    assert headers["Authorization"] == "Bearer local-secret"
+    assert headers["device-id"] == "local-device"
+    assert headers["Cookie"] == "session=local-cookie"
+
+
+@pytest.mark.parametrize("field", ["authorization", "device_id", "cookie"])
+def test_rejects_blank_authentication_values(field: str) -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        VietcapRestClient(**{field: " "})
