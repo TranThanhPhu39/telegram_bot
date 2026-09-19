@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 17 — Fundamental filter (COMPLETE; stopped before Phase 18)**
+**Phase 18 — Runtime bot integration (COMPLETE; stopped before optional Phase 19)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -300,7 +300,23 @@ provenance and as-of date. No unstable or unlicensed fundamentals API is assumed
 
 ---
 
-## Phase 18 — News V1 (optional / bonus)
+## Phase 18 — Runtime bot integration
+- [x] Connect Telegram commands to Vietcap historical REST
+- [x] Persist and read normalized daily bars through SQLite
+- [x] Use latest completed session when market is closed
+- [x] Connect indicators and scanner to command responses
+- [x] Preserve honest unavailable/partial-data messages
+- [x] Live Sunday smoke test for `/soi` and `/market`
+- [x] STOP and report
+
+Acceptance evidence: on Sunday 2026-09-20, the runtime returned ACB and VNINDEX
+data for the latest completed session, Friday 2026-09-18. ACB included close,
+volume, EMA20, EMA50, and RSI14; VNINDEX included close and EMA trend. Breadth
+was explicitly reported unavailable rather than inferred.
+
+---
+
+## Phase 19 — News V1 (optional / bonus)
 - [ ] News collector
 - [ ] Deduplication
 - [ ] ticker/entity mapping

@@ -46,9 +46,9 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 17 — Fundamental filter — COMPLETE. Development is stopped before optional
-Phase 18. V1 uses controlled CSV snapshots with required provenance and keeps
-fundamentals outside direct signal generation. Phases
+Phase 18 — Runtime bot integration — COMPLETE. Development is stopped before
+optional Phase 19 News. Telegram commands now use historical Vietcap data and
+SQLite fallback outside market hours. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -109,19 +109,37 @@ fundamentals outside direct signal generation. Phases
 - [x] Shared SignalEngine backtest adapter and performance metrics implemented and unit-tested
 - [x] Preliminary 120-session ACB/VNINDEX backtest executed with explicit proxy limitations
 - [x] Provider-independent fundamental CSV source and explainable scanner context implemented
+- [x] Telegram runtime connected to Vietcap history, SQLite, indicators, and scanner
+- [x] Sunday fallback verified against Friday 2026-09-18 ACB and VNINDEX data
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 17 is complete. EPS, P/E, P/B, ROE, revenue growth, and profit growth are
-normalized from provenance-bearing CSV snapshots and assessed as pass, fail, or
-insufficient context. Fundamental results can filter the scanner but do not enter
-SignalEngine. Development stops until the user explicitly opens optional Phase 18.
+Phase 18 is complete. `scripts/run_telegram_bot` now starts with the concrete
+historical-first runtime service rather than the unavailable-data fallback. On
+Sunday 2026-09-20, live smoke tests returned the latest Friday 2026-09-18 ACB and
+VNINDEX sessions. Development stops before optional Phase 19 News.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
+
+### `runtime/bot_service.py`
+
+Purpose: concrete Telegram data service joining Vietcap daily history, SQLite
+cache, indicators, scanner configuration, and closed-market responses.
+
+Status: provider success, empty response, network failure, SQLite fallback, command
+rendering, indicator context, scanning, and performance output are covered offline;
+Sunday live fallback also passed.
+
+### `scripts/test_runtime_bot_live.py`
+
+Purpose: bounded live acceptance for `/soi ACB` and `/market` equivalent runtime
+responses without starting indefinite Telegram polling.
+
+Status: PASS on 2026-09-20; both responses used session 2026-09-18.
 
 ### `fundamentals/models.py`, `fundamentals/csv_source.py`, `fundamentals/filter.py`
 
@@ -1213,8 +1231,9 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Await explicit user authorization before opening optional Phase 18. Do not
-implement the news collector automatically.
+Core implementation phases are complete. Optional Phase 19 News must not start
+without explicit user authorization. Pending Phase 3–7 live checks should still
+be rerun during an active Vietnamese market session.
 
 ## 12. How To Run
 
@@ -1906,4 +1925,23 @@ three observed values before request construction.
 - Kept fundamentals out of `SignalInputs` and `SignalEngine`, preventing any
   uncontrolled direct Buy/Sell transition.
 - Passed thirteen focused tests and the complete 378-test suite.
-- Marked Phase 17 complete and stopped before optional Phase 18.
+- Marked Phase 17 complete and stopped before runtime integration.
+
+### 2026-09-20 — Phase 18 runtime bot integration
+
+- Added a concrete historical-first Telegram data service joining authenticated
+  Vietcap daily REST, normalization, SQLite schema/cache, indicators, scanner, and
+  the existing command layer.
+- Replaced the unavailable-data fallback in `scripts/run_telegram_bot` with the
+  real runtime service built from ignored `.env` configuration.
+- Added `BOT_WATCH_SYMBOLS` configuration with FPT/ACB defaults.
+- Made closed-market behavior explicit: refresh from Vietcap when possible, then
+  fall back to the latest persisted daily bars on provider failure or empty data.
+- Added real `/soi`, `/market`, `/why`, `/scan`, and `/performance` data paths while
+  keeping missing breadth and intraday evidence clearly labeled.
+- Passed the Sunday live smoke test: ACB and VNINDEX both returned the latest
+  completed session dated Friday 2026-09-18. ACB close was 21,900 with EMA20,
+  EMA50, and RSI14; VNINDEX close was 1,815.66 with increasing EMA trend.
+- Kept breadth unavailable outside the live index stream instead of fabricating a
+  full Market Regime.
+- Marked runtime integration complete and moved optional News to Phase 19.

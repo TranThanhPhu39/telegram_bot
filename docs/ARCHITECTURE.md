@@ -361,6 +361,25 @@ not silently pass or fail. The result can be applied after the Phase 14 liquidit
 screen, with configurable treatment of insufficient data, or exposed purely as
 context. It is not imported by `SignalEngine` and cannot directly create a signal.
 
+## Runtime bot orchestration
+
+`runtime.bot_service.RuntimeBotDataService` is the concrete `BotDataService` used
+by `scripts/run_telegram_bot`. Telegram commands now connect to authenticated
+Vietcap `ONE_DAY` history, normalized OHLCV bars, SQLite persistence, indicators,
+and the configured scanner watchlist.
+
+The runtime is historical-first outside trading hours. It requests the latest
+completed bars with the current Unix boundary, upserts them into SQLite, and falls
+back to cached bars if Vietcap later fails or returns an empty response. It does
+not require a Sunday realtime socket event to answer commands. `/soi` exposes the
+last close, change, volume, EMA20, EMA50, and RSI14; `/market` exposes the latest
+VNINDEX close and EMA trend while explicitly withholding unavailable breadth;
+`/why` provides historical technical context without presenting a recommendation;
+`/scan` ranks configured symbols after a completed-history liquidity screen.
+
+The live Sunday acceptance on 2026-09-20 returned ACB and VNINDEX data dated
+Friday 2026-09-18, confirming closed-market fallback behavior.
+
 ## Planned V1 signal features
 - Market Regime
 - Trend
