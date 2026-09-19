@@ -37,7 +37,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 9 — Database**
+**Phase 9 — Database (COMPLETE; stopped before Phase 10)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -191,8 +191,8 @@ Acceptance:
 - [x] Create candles table
 - [x] Create signals table
 - [x] Create signal_events table
-- [ ] Add migrations/schema bootstrap
-- [ ] STOP and report
+- [x] Add migrations/schema bootstrap
+- [x] STOP and report
 
 ---
 

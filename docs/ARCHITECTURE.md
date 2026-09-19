@@ -191,6 +191,12 @@ payload. The first event may have no source state. Signal deletion is restricted
 while events exist so lifecycle history cannot disappear accidentally. State
 transition rules remain the responsibility of the Phase 13 strategy engine.
 
+`data.migrations.bootstrap_schema` owns ordered, atomic schema startup. Version 1
+creates all four application tables and their indexes in dependency order, then
+records the migration in `schema_migrations`. Repeated startup is idempotent and
+preserves data. A database containing an unknown newer version or a changed
+migration identity is rejected instead of being modified blindly.
+
 ## Universe
 
 Data universe:

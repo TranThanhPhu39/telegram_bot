@@ -46,9 +46,8 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 9 — Database — active by explicit user instruction. The SQLite connection
-foundation plus all four planned application tables are implemented. Phases 3–7
-remain pending live validation and may not be reported as PASS.
+Phase 9 — Database — COMPLETE. Development is stopped before Phase 10. Phases
+3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
 
@@ -94,18 +93,17 @@ remain pending live validation and may not be reported as PASS.
 - [x] Provider-independent SQLite `candles` table implemented and unit-tested
 - [x] High-level SQLite `signals` table implemented and unit-tested
 - [x] Ordered SQLite `signal_events` audit table implemented and unit-tested
+- [x] Versioned SQLite schema bootstrap implemented and file-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 9 is active. SQLite is selected for the single-process V1 bot and a small
-stdlib connection boundary now validates `sqlite:///` URLs, enables foreign keys,
-sets a five-second busy timeout, and returns named rows. The normalized `symbols`,
-`candles`, `signals`, and `signal_events` tables are implemented idempotently.
-The migration/schema bootstrap does not exist yet. Phases 3–7 retain their
-pending live-validation status.
+Phase 9 is complete. SQLite connection configuration, all four planned tables,
+indexes, and version-1 schema bootstrap are implemented and verified on temporary
+file databases. Development stops until the user explicitly opens Phase 10.
+Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -159,6 +157,21 @@ signal foreign keys, audit deletion protection, normalized states, timestamps,
 optional price, JSON reasons, lookup index, and idempotent creation.
 
 Status: twenty focused tests pass.
+
+### `data/migrations.py`
+
+Purpose: applies ordered SQLite schema migrations atomically and records their
+version/name identity in `schema_migrations`.
+
+Status: version 1 creates the complete Phase 9 schema; repeat startup, file
+reopen, future-version rejection, and identity mismatch are unit-tested.
+
+### `tests/test_migrations.py`
+
+Purpose: verifies complete file bootstrap, migration persistence, idempotency,
+data preservation, and safe rejection of incompatible database versions.
+
+Status: six focused tests pass.
 
 ### `requirements.txt`
 
@@ -1042,8 +1055,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Continue Phase 9 with one small task: add the versioned schema bootstrap/migration
-runner for the four tested tables, then verify it on a temporary file database.
+Await explicit user authorization before opening Phase 10. Do not implement the
+candle builder or indicators automatically.
 
 ## 12. How To Run
 
@@ -1568,3 +1581,13 @@ three observed values before request construction.
 - Restricted deletion of signals that own event history.
 - Passed 77 focused database/schema tests.
 - Did not implement the migration/schema bootstrap runner.
+
+### 2026-09-19 — Phase 9 migration bootstrap and completion
+
+- Added a versioned, atomic schema bootstrap with migration identity tracking.
+- Version 1 creates `symbols`, `candles`, `signals`, `signal_events`, and indexes
+  in dependency order before recording success.
+- Verified fresh temporary-file creation, reopen persistence, repeat-startup data
+  preservation, and rejection of newer/changed migration metadata.
+- Passed 83 focused database/schema/migration tests.
+- Marked Phase 9 complete and stopped before Phase 10.
