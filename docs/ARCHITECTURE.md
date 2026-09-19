@@ -197,6 +197,33 @@ records the migration in `schema_migrations`. Repeated startup is idempotent and
 preserves data. A database containing an unknown newer version or a changed
 migration identity is rejected instead of being modified blindly.
 
+## Candle and indicator layer
+
+`data.candles.OneMinuteBarBuilder` aggregates normalized `TradeTick` values by
+symbol and Unix-minute bucket into immutable `OHLCVBar` values. The caller must
+supply the tick's Unix timestamp because Vietcap's exchange-time string remains
+unverified. A bar closes when a later minute for that symbol arrives or when the
+builder is explicitly flushed. Missing minutes are not synthesized, symbols are
+tracked independently, and an out-of-order tick older than the active bucket is
+rejected.
+
+`data.indicators` contains provider-independent functions over chronological
+`OHLCVBar` sequences:
+
+- EMA20 and EMA50 use an SMA seed followed by the standard EMA recurrence.
+- RSI14 and ATR14 use Wilder smoothing.
+- daily average volume uses only the preceding completed daily bars and excludes
+  the current bar.
+- relative strength is the stock percentage return minus VNINDEX percentage
+  return over an identical lookback; both series must have exactly aligned
+  timestamps.
+- breakout resistance/support are the highest high and lowest low of preceding
+  completed bars and exclude the current bar.
+
+Indicator series align one-to-one with their inputs and return `None` during
+warm-up. These boundaries prevent look-ahead and keep the layer usable by both
+future live and backtest paths.
+
 ## Universe
 
 Data universe:

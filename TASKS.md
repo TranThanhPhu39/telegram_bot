@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 9 — Database (COMPLETE; stopped before Phase 10)**
+**Phase 10 — Candle & indicators (COMPLETE; stopped before Phase 11)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -201,15 +201,15 @@ Acceptance:
 ---
 
 ## Phase 10 — Candle & indicators
-- [ ] 1-minute bar builder
-- [ ] EMA20
-- [ ] EMA50
-- [ ] RSI14
-- [ ] ATR14
-- [ ] daily average volume
-- [ ] Relative Strength vs VNINDEX
-- [ ] Breakout levels
-- [ ] STOP and report
+- [x] 1-minute bar builder
+- [x] EMA20
+- [x] EMA50
+- [x] RSI14
+- [x] ATR14
+- [x] daily average volume
+- [x] Relative Strength vs VNINDEX
+- [x] Breakout levels
+- [x] STOP and report
 
 ---
 

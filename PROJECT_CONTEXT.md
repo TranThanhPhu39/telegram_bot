@@ -46,7 +46,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 9 — Database — COMPLETE. Development is stopped before Phase 10. Phases
+Phase 10 — Candle & indicators — COMPLETE. Development is stopped before Phase 11. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -94,18 +94,46 @@ Phase 9 — Database — COMPLETE. Development is stopped before Phase 10. Phase
 - [x] High-level SQLite `signals` table implemented and unit-tested
 - [x] Ordered SQLite `signal_events` audit table implemented and unit-tested
 - [x] Versioned SQLite schema bootstrap implemented and file-tested
+- [x] Provider-independent one-minute candle builder implemented and unit-tested
+- [x] EMA20, EMA50, RSI14, and ATR14 implemented and unit-tested
+- [x] Prior-completed-bar daily average volume implemented and unit-tested
+- [x] Timestamp-aligned Relative Strength versus VNINDEX implemented and unit-tested
+- [x] Prior-period breakout resistance/support implemented and unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 9 is complete. SQLite connection configuration, all four planned tables,
-indexes, and version-1 schema bootstrap are implemented and verified on temporary
-file databases. Development stops until the user explicitly opens Phase 10.
+Phase 10 is complete. One-minute candle construction and all planned Phase 10
+indicators are implemented with deterministic warm-up and no-look-ahead rules.
+Development stops until the user explicitly opens Phase 11.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
+
+### `data/candles.py`
+
+Purpose: aggregates normalized trades into independent per-symbol one-minute
+OHLCV bars using explicit Unix timestamps.
+
+Status: minute rollover, OHLCV aggregation, gaps, multiple symbols, flush, and
+invalid/out-of-order input are covered by three focused tests.
+
+### `data/indicators.py`
+
+Purpose: provides provider-independent EMA, RSI, ATR, daily average volume,
+relative strength, and breakout-level calculations over normalized bars.
+
+Status: warm-up, Wilder/SMA-seeded formulas, input alignment, validation, and
+no-look-ahead boundaries are covered by nine focused tests.
+
+### `tests/test_candles.py` and `tests/test_indicators.py`
+
+Purpose: deterministic Phase 10 acceptance coverage without network or market
+session dependencies.
+
+Status: twelve focused tests pass; the full suite passes with 297 tests.
 
 ### `data/database.py`
 
@@ -1055,8 +1083,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Await explicit user authorization before opening Phase 10. Do not implement the
-candle builder or indicators automatically.
+Await explicit user authorization before opening Phase 11. Do not implement
+time-matched intraday RVOL automatically.
 
 ## 12. How To Run
 
@@ -1602,3 +1630,19 @@ three observed values before request construction.
 - Preserved phase gates, evidence-based checkboxes, mandatory testing, pending live
   validation, and the rule against automatically starting the next phase.
 - Made no feature-code changes, opened no new phase, and changed no phase checkbox.
+
+### 2026-09-19 — Phase 10 candle and indicators
+
+- Opened and completed Phase 10 after explicit user authorization.
+- Added a multi-symbol one-minute bar builder using caller-supplied Unix seconds;
+  it emits completed OHLCV bars without synthesizing missing minutes and rejects
+  ticks older than the active symbol bucket.
+- Added SMA-seeded EMA20/EMA50, Wilder RSI14/ATR14, preceding-day average volume,
+  timestamp-aligned excess return versus VNINDEX, and prior-period breakout
+  resistance/support.
+- All indicator outputs align with their input series and expose `None` during
+  warm-up. Daily average volume and breakout levels exclude the current bar.
+- Added deterministic validation and no-look-ahead tests. The complete suite
+  passed with 297 tests.
+- Marked Phase 10 complete and stopped before Phase 11. Phases 3–7 remain pending
+  live validation.

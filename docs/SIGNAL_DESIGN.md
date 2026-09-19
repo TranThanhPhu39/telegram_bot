@@ -1,6 +1,6 @@
 # Signal Design — Draft
 
-Status: NOT YET IMPLEMENTED.
+Status: Phase 10 indicators implemented; signal composition remains planned.
 
 ## Planned V1
 
@@ -16,14 +16,21 @@ Possible inputs:
 - totalStockFloor
 
 ### Trend
-Initial candidates:
+Implemented inputs:
 - Close > EMA20
 - EMA20 > EMA50
+
+EMA20 and EMA50 use a simple-moving-average seed and then the standard recursive
+EMA formula. Warm-up values are unavailable rather than backfilled.
 
 Thresholds must be backtested, not blindly hard-coded.
 
 ### Relative Strength
 Compare stock return to VNINDEX over the same lookback.
+
+Implemented as percentage-point excess return with exact timestamp alignment:
+
+`100 * (stock_return - VNINDEX_return)`
 
 ### Intraday RVOL
 Preferred:
@@ -38,14 +45,17 @@ This is time-matched RVOL.
 Do not replace with current volume / average full-day volume.
 
 ### Breakout
-Candidate:
+Implemented Phase 10 level:
 price > previous N-day high/resistance,
 confirmed by RVOL and market regime.
+
+Resistance and support exclude the current bar. RVOL and market-regime
+confirmation belong to later phases.
 
 ### Risk
 Later define:
 - stop logic
-- ATR
+- ATR-based use in risk logic (ATR14 itself is implemented with Wilder smoothing)
 - support
 - cooldown
 - duplicate alert prevention
