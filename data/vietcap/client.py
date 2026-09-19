@@ -11,7 +11,11 @@ import socketio
 
 from data.vietcap.constants import (
     DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    DEFAULT_RECONNECTION_ATTEMPTS,
+    DEFAULT_RECONNECTION_DELAY_MAX_SECONDS,
+    DEFAULT_RECONNECTION_DELAY_SECONDS,
     DEFAULT_RECONNECTION_ENABLED,
+    DEFAULT_RECONNECTION_RANDOMIZATION_FACTOR,
     DEFAULT_SOCKET_PATH,
     DEFAULT_SOCKET_URL,
     BID_ASK_EVENT,
@@ -64,6 +68,10 @@ class VietcapRealtimeClient:
         )
         self._socket = socket_client or socketio.Client(
             reconnection=DEFAULT_RECONNECTION_ENABLED,
+            reconnection_attempts=DEFAULT_RECONNECTION_ATTEMPTS,
+            reconnection_delay=DEFAULT_RECONNECTION_DELAY_SECONDS,
+            reconnection_delay_max=DEFAULT_RECONNECTION_DELAY_MAX_SECONDS,
+            randomization_factor=DEFAULT_RECONNECTION_RANDOMIZATION_FACTOR,
             logger=engineio_logger,
             engineio_logger=engineio_logger,
         )

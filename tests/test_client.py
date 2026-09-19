@@ -99,6 +99,10 @@ def test_default_socket_client_enables_reconnection(monkeypatch: pytest.MonkeyPa
 
     assert constructor_options == {
         "reconnection": True,
+        "reconnection_attempts": 0,
+        "reconnection_delay": 1.0,
+        "reconnection_delay_max": 30.0,
+        "randomization_factor": 0.5,
         "logger": False,
         "engineio_logger": False,
     }

@@ -41,10 +41,13 @@ disconnect packets.
 ### Phase 7 reconnect handling
 
 The Python client now creates `socketio.Client(reconnection=True)`, enabling the
-library's reconnect handling after an established connection is lost. Retry
-parameters remain at library defaults pending the next Phase 7 task. Subscription
-state is cleared on disconnect and is not yet automatically restored, so this is
-not evidence that market streams resume after interruption.
+library's reconnect handling after an established connection is lost. Explicit
+parameters are `reconnection_attempts=0`, `reconnection_delay=1`,
+`reconnection_delay_max=30`, and `randomization_factor=0.5`. In the pinned
+library, zero attempts means no attempt limit; delay doubles up to the cap and
+includes jitter. Subscription state is cleared on disconnect and is not yet
+automatically restored, so this is not evidence that market streams resume after
+interruption.
 
 ## Proto
 

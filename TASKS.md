@@ -148,7 +148,7 @@ Acceptance:
 
 ## Phase 7 — Reliability
 - [x] Reconnect handling
-- [ ] Exponential/reasonable retry
+- [x] Exponential/reasonable retry
 - [ ] Re-subscribe after reconnect
 - [ ] No duplicate listeners
 - [ ] Decode error handling

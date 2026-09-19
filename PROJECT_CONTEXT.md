@@ -76,13 +76,14 @@ Phase 7 — Reliability — authorized for offline implementation by explicit us
 - [x] Thread-safe latest market-state cache implemented and unit-tested
 - [x] FPT + ACB decode-to-cache pipeline and bounded acceptance harness implemented
 - [x] Socket.IO automatic reconnect handling enabled and unit-tested
+- [x] Explicit exponential reconnect backoff configured and unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 7 reliability work is active. Automatic reconnect handling is enabled through `python-socketio`; retry tuning, resubscription, listener deduplication, raw debug mode, and forced-interruption acceptance remain pending. Phases 3–6 retain their pending live-validation status.
+Phase 7 reliability work is active. Automatic reconnect uses explicit exponential backoff parameters; resubscription, listener deduplication, raw debug mode, and forced-interruption acceptance remain pending. Phases 3–6 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -140,9 +141,9 @@ Status: four tests pass.
 
 ### `data/vietcap/constants.py`
 
-Purpose: centralizes the default Socket.IO URL, path, timeout, automatic reconnect setting, and WebSocket-only transport selection.
+Purpose: centralizes the default Socket.IO URL, path, timeout, reconnect/backoff settings, and WebSocket-only transport selection.
 
-Status: reconnect is enabled by default and covered by client tests.
+Status: reconnect and explicit backoff defaults are covered by client tests.
 
 ### `data/vietcap/client.py`
 
@@ -152,7 +153,7 @@ Main classes/functions: `VietcapRealtimeClient`, `ConnectionInfo`, `normalize_so
 
 Dependencies: `python-socketio` and its synchronous client transport stack.
 
-Status: automatic reconnect configuration is unit-tested. Subscription state is still cleared on disconnect and is not yet restored automatically after reconnect.
+Status: automatic reconnect and explicit backoff configuration are unit-tested. Subscription state is still cleared on disconnect and is not yet restored automatically after reconnect.
 
 ### `scripts/inspect_connection.py`
 
@@ -730,6 +731,26 @@ related retry parameters; the full suite returned `126 passed in 1.80s`.
 Result: PASS for offline reconnect handling. Forced interruption and stream
 recovery remain NOT TESTED.
 
+### 2026-09-19 — Phase 7 retry/backoff configuration
+
+Commands:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import inspect, socketio; print(inspect.getsource(socketio.Client._handle_reconnect))"
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Expected: verify the pinned library's retry algorithm, pass explicit bounded-delay
+parameters to the production client, and preserve all existing behavior.
+
+Actual: source inspection confirmed delay doubling, maximum-delay capping, jitter,
+and zero meaning unlimited attempts. Constructor coverage verified attempts `0`,
+initial delay `1.0`, maximum delay `30.0`, and randomization factor `0.5`. The full
+suite returned `126 passed in 0.45s`.
+
+Result: PASS for offline retry/backoff configuration. Actual reconnect timing
+under a forced network interruption remains NOT TESTED.
+
 ## 10. Known Problems
 
 - The upstream schema is not directly compilable by standard `protoc` without reordering its first two declarations.
@@ -737,8 +758,8 @@ recovery remain NOT TESTED.
 - The generated binding validates against protobuf generated-code version 7.35.0, while the installed runtime is 7.36.2; runtime validation and all tests pass.
 - No real binary market frame has been decoded; tests currently use valid locally constructed protobuf messages.
 - Only one 35-second live connection has been observed; extended uptime and forced interruption are deferred to Phase 7 reliability work.
-- Automatic transport reconnect is enabled, but retry parameters are not yet
-  explicitly configured and subscriptions are not yet restored after reconnect.
+- Automatic transport reconnect has explicit backoff parameters, but subscriptions
+  are not yet restored after reconnect.
 - No FPT event arrived during the Saturday Phase 3 test, so the exact server event delivery and live protobuf mapping remain unverified.
 - Phase 3 cannot be marked complete until at least two distinct valid FPT ticks are observed during an active session.
 - The current frontend contract matches the implementation, but static bundle evidence cannot prove that this Python connection will receive data during the next active session.
@@ -749,9 +770,9 @@ recovery remain NOT TESTED.
 
 ## 11. Next Steps
 
-Continue Phase 7 with one small task: define and unit-test explicit reasonable
-retry/backoff parameters for the pinned `python-socketio` client. Do not add
-automatic resubscription in the same task group.
+Continue Phase 7 with one small task: retain desired subscriptions across a
+disconnect and restore them after reconnect. Do not address listener deduplication
+in the same task group.
 
 ## 12. How To Run
 
@@ -887,8 +908,9 @@ and accumulated value. Invalid and unexpected events never enter the cache.
 
 Reason: the mature Socket.IO client already implements reconnection after an
 established transport is interrupted. Phase 7 enables that mechanism instead of
-adding a handwritten loop. Backoff tuning and subscription restoration remain
-separate tasks and require their own tests.
+adding a handwritten loop. Explicit parameters use unlimited attempts with a
+one-second initial delay, exponential doubling, a 30-second cap, and jitter to
+avoid synchronized retry bursts. Subscription restoration remains a separate task.
 
 ## 14. Change Log
 
@@ -1038,3 +1060,12 @@ separate tasks and require their own tests.
 - Added deterministic coverage for the production client constructor setting.
 - Passed the full 126-test suite.
 - Did not tune retry parameters or implement automatic resubscription.
+
+### 2026-09-19 — Phase 7 retry/backoff task group
+
+- Inspected the pinned `python-socketio` reconnect algorithm from the installed package.
+- Configured unlimited reconnect attempts with a one-second initial delay.
+- Configured exponential doubling with a 30-second maximum and 0.5 jitter factor.
+- Extended deterministic constructor-option coverage.
+- Passed the full 126-test suite.
+- Did not implement automatic resubscription or forced-interruption acceptance.

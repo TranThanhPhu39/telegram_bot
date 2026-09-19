@@ -112,9 +112,10 @@ update in that order.
 ## Realtime reliability
 
 `VietcapRealtimeClient` enables the reconnect mechanism provided by
-`python-socketio`. This currently covers transport reconnection only. Retry
-parameters have not yet been tuned, and stream subscriptions are not yet restored
-after reconnect; those remain separate Phase 7 tasks.
+`python-socketio`. Retry delay starts at one second, doubles after each failed
+attempt, caps at 30 seconds, and applies a 0.5 jitter factor. Attempts continue
+until success or an explicit client stop. Stream subscriptions are not yet
+restored after reconnect; that remains a separate Phase 7 task.
 
 ## Universe
 
