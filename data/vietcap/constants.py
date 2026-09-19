@@ -2,6 +2,9 @@
 
 DEFAULT_SOCKET_URL = "https://trading.vietcap.com.vn"
 DEFAULT_SOCKET_PATH = "/ws/price/socket.io"
+DEFAULT_REST_BASE_URL = "https://trading.vietcap.com.vn"
+DEFAULT_REST_TIMEOUT_SECONDS = 20.0
+QUOTE_PATH_TEMPLATE = "/api/price/v1/w/priceboard/ticker/price/{symbol}"
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 20.0
 DEFAULT_RECONNECTION_ENABLED = True
 DEFAULT_RECONNECTION_ATTEMPTS = 0

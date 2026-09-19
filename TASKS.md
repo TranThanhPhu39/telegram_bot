@@ -30,8 +30,14 @@ Reason: offline implementation and tests are complete, but realtime order-book
 acceptance remains NOT TESTED. `scripts/test_realtime_bidask.py` must report
 `[PASS]` during an active Vietnamese market session.
 
+**Phase 7 — Reliability**
+
+Reason: offline implementation is complete, but acceptance requires a real
+market stream to resume after a forced transport interruption. This remains
+NOT TESTED until an active Vietnamese market session.
+
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 7 — Reliability (offline implementation authorized)**
+**Phase 8 — Historical REST (authorized while Phase 7 awaits live validation)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -161,7 +167,7 @@ Acceptance:
 ---
 
 ## Phase 8 — Historical REST
-- [ ] Implement quote endpoint
+- [x] Implement quote endpoint
 - [ ] Implement OHLC `gap-chart`
 - [ ] Support ONE_MINUTE
 - [ ] Support ONE_HOUR

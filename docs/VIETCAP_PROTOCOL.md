@@ -397,6 +397,13 @@ Observed:
 
 Use for snapshot/fallback/validation, not high-frequency polling.
 
+### Python quote probe — 2026-09-19
+
+An unauthenticated GET for `FPT` returned HTTP 400 with an empty HTML body. The
+client therefore implements the documented request boundary and error handling,
+but does not assume any quote response fields. Successful live quote retrieval
+and response-field semantics remain NOT TESTED.
+
 ## V1 required streams
 
 Implement first:

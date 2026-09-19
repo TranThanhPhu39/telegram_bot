@@ -128,6 +128,15 @@ length before handler dispatch. It is disabled by default, never logs payload
 content, and caps records per event with thread-safe counters while continuing to
 deliver every payload to the handler.
 
+## Historical REST acquisition
+
+`data.vietcap.rest.VietcapRestClient` owns provider-specific HTTP acquisition.
+Calls use explicit timeouts and convert network, HTTP, JSON, and top-level shape
+failures to `VietcapRestError`. Stock symbols are restricted to normalized ASCII
+letters and digits before URL construction. Quote responses remain detached,
+provider-native mappings until successful runtime evidence defines their fields;
+downstream strategy code must not consume these mappings directly.
+
 ## Universe
 
 Data universe:

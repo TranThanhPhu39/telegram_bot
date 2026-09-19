@@ -45,7 +45,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 7 — Reliability — authorized for offline implementation by explicit user instruction. Phases 3, 4, 5, and 6 remain pending live validation and must not be reported as PASS until their realtime acceptance criteria are observed.
+Phase 8 — Historical REST — explicitly authorized while Phases 3–7 remain pending live validation. None of the pending realtime acceptance criteria may be reported as PASS until observed.
 
 ## 4. Completed
 
@@ -81,13 +81,17 @@ Phase 7 — Reliability — authorized for offline implementation by explicit us
 - [x] Listener registration remains single across repeated reconnect cycles in unit tests
 - [x] Decode failures are isolated and all three realtime pipelines recover in unit tests
 - [x] Bounded metadata-only raw debug mode implemented and unit-tested
+- [x] Vietcap quote REST acquisition implemented and unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 7 offline reliability implementation is complete: reconnect/backoff, resubscription, listener stability, decode error isolation, and bounded raw debug metadata are covered by tests. Phase 7 acceptance still requires a real forced interruption followed by resumed market data, so `STOP and report` remains unchecked. Phases 3–6 retain their pending live-validation status.
+Phase 8 is active by explicit user authorization. The quote endpoint client is
+implemented offline with symbol validation, timeout, JSON-object enforcement,
+and network/HTTP/JSON error wrapping. The next task is the OHLC `gap-chart`
+acquisition contract. Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -95,7 +99,7 @@ Phase 7 offline reliability implementation is complete: reconnect/backoff, resub
 
 Purpose: reproducible protobuf, test, Socket.IO, and WebSocket dependencies.
 
-Direct dependencies: `protobuf==7.36.2`, `grpcio-tools==1.82.2`, `pytest==9.1.1`, `python-socketio[client]==5.17.0`, and `websocket-client==1.9.2`.
+Direct dependencies: `protobuf==7.36.2`, `grpcio-tools==1.82.2`, `pytest==9.1.1`, `python-socketio[client]==5.17.0`, `websocket-client==1.9.2`, and `requests==2.34.2`.
 
 Status: installed into the ignored project-local `.venv`; `pip check` passes.
 
@@ -208,6 +212,25 @@ the three realtime pipelines, and that the next valid frame is still normalized
 and stored.
 
 Status: three recovery tests pass as part of the 140-test suite.
+
+### `data/vietcap/rest.py`
+
+Purpose: performs bounded, unauthenticated Vietcap REST acquisition without
+leaking provider response fields into normalized models.
+
+Main classes/functions: `VietcapRestClient`, `VietcapRestError`,
+`normalize_stock_symbol`, `get_quote`.
+
+Status: quote GET behavior, symbol safety, timeout, response-shape enforcement,
+and error wrapping are unit-tested. The live endpoint returned HTTP 400 during
+the 2026-09-19 probe, so successful live quote retrieval is NOT TESTED.
+
+### `tests/test_rest.py`
+
+Purpose: deterministic tests for Vietcap REST request construction and failure
+handling without network access.
+
+Status: 16 tests pass as part of the 156-test suite.
 
 ### `data/vietcap/validation.py`
 
@@ -857,6 +880,27 @@ dependency validation reported `No broken requirements found.`
 Result: PASS for offline bounded raw debug mode. Live raw-event metadata remains
 NOT TESTED because no market event was received during this task.
 
+### 2026-09-19 — Phase 8 quote endpoint
+
+Commands:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests\test_rest.py
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m pip check
+```
+
+Expected: normalize and validate one ticker, issue the documented quote GET with
+an explicit timeout and JSON Accept header, accept only a JSON object, and convert
+network, HTTP, and invalid-JSON failures to a provider-specific exception.
+
+Actual: final focused tests returned `16 passed in 0.12s`; the final full suite
+returned `156 passed in 0.41s`; dependency validation reported no broken requirements.
+A direct unauthenticated FPT probe returned HTTP 400 with an empty HTML body.
+
+Result: PASS for offline quote acquisition. Successful live response and its
+field contract remain NOT TESTED; no response fields were guessed.
+
 ## 10. Known Problems
 
 - The upstream schema is not directly compilable by standard `protoc` without reordering its first two declarations.
@@ -873,12 +917,14 @@ NOT TESTED because no market event was received during this task.
 - The two Phase 4 live attempts at approximately 14:24 +07:00 received HTTP 503
   before Socket.IO connected; this is newer runtime evidence than the earlier
   successful Phase 2 connection and may be transient endpoint unavailability.
+- The documented FPT quote URL returned HTTP 400 with an empty HTML body on
+  2026-09-19. Successful unauthenticated quote retrieval remains NOT TESTED.
 
 ## 11. Next Steps
 
-Run the Phase 7 forced-interruption acceptance during an active market session:
-subscribe, receive changing data, interrupt the transport, and prove the same
-stream resumes after automatic reconnect without duplicate callbacks.
+Continue Phase 8 with one small task: implement the OHLC `gap-chart` request
+contract and deterministic acquisition/error tests. Do not normalize bars or
+add multiple timeframe semantics in the same task group.
 
 ## 12. How To Run
 
@@ -1046,6 +1092,13 @@ Reason: raw protobuf bytes may be large or unexpectedly sensitive. Debugging onl
 requires the event name, runtime type, and byte length at this stage. The mode is
 off by default, caps records independently per event, uses a lock for counters,
 and does not stop handler delivery after the logging limit is reached.
+
+### Decision: keep REST acquisition provider-native before normalization
+
+Reason: the live quote endpoint did not return a successful body during this
+task, so response field semantics cannot be confirmed. The REST client validates
+transport and top-level JSON shape but returns a detached provider-native mapping;
+normalized quote or OHLC models must be added only with evidence-backed fields.
 
 ## 14. Change Log
 
@@ -1240,3 +1293,13 @@ and does not stop handler delivery after the logging limit is reached.
 - Exposed validated raw-debug flags in all four realtime acceptance scripts.
 - Passed 30 client tests, all four CLI help audits, and 140 total tests.
 - Left Phase 7 acceptance open because forced-interruption stream recovery is NOT TESTED.
+
+### 2026-09-19 — Phase 8 quote-endpoint task group
+
+- Moved Phase 7 to pending live validation by explicit user authorization.
+- Added a pinned direct Requests dependency and bounded REST client.
+- Added safe ticker normalization and exact quote URL construction.
+- Added explicit timeout, HTTP/JSON error wrapping, and JSON-object enforcement.
+- Added 16 deterministic tests; the full 156-test suite passed.
+- Recorded the live HTTP 400 result without guessing response fields.
+- Did not implement `gap-chart`, timeframes, or OHLCV normalization.
