@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 10 — Candle & indicators (COMPLETE; stopped before Phase 11)**
+**Phase 11 — Intraday RVOL (COMPLETE; stopped before Phase 12)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -214,11 +214,11 @@ Acceptance:
 ---
 
 ## Phase 11 — Intraday RVOL
-- [ ] Define time-matched RVOL
-- [ ] Historical baseline by same intraday time
-- [ ] Validate no look-ahead
-- [ ] Unit tests
-- [ ] STOP and report
+- [x] Define time-matched RVOL
+- [x] Historical baseline by same intraday time
+- [x] Validate no look-ahead
+- [x] Unit tests
+- [x] STOP and report
 
 ---
 

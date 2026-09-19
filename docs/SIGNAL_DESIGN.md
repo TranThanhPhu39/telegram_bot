@@ -33,7 +33,7 @@ Implemented as percentage-point excess return with exact timestamp alignment:
 `100 * (stock_return - VNINDEX_return)`
 
 ### Intraday RVOL
-Preferred:
+Implemented in Phase 11:
 
 RVOL(t) =
 CumulativeVolumeToday(t)
@@ -43,6 +43,12 @@ Average[CumulativeVolumeHistoricalSessions(t)]
 This is time-matched RVOL.
 
 Do not replace with current volume / average full-day volume.
+
+The baseline uses prior sessions only, aligned by Vietnam-local clock minute.
+For a historical minute without a trade bar, its latest cumulative volume at or
+before that time is carried forward. Historical dates equal to or later than the
+current session are rejected, and later bars within any session cannot affect an
+earlier RVOL point. A zero baseline produces an unavailable ratio.
 
 ### Breakout
 Implemented Phase 10 level:

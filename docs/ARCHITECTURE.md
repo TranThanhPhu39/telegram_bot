@@ -224,6 +224,23 @@ Indicator series align one-to-one with their inputs and return `None` during
 warm-up. These boundaries prevent look-ahead and keep the layer usable by both
 future live and backtest paths.
 
+## Intraday RVOL layer
+
+`data.rvol.time_matched_rvol` compares the current session's cumulative volume
+at each one-minute bar with the mean cumulative volume of prior sessions at the
+same Vietnam-local clock minute:
+
+`RVOL(t) = cumulative_volume_today(t) / mean(prior_session_cumulative_volume(t))`
+
+Historical sessions must have unique local dates strictly earlier than the
+current session and must contain the same symbol. Each baseline uses only bars at
+or before the target clock minute; a missing historical minute carries forward
+that session's latest earlier cumulative value. Full-day volume and later
+intraday bars are never used for an earlier RVOL point. A zero historical
+baseline yields an unavailable (`None`) ratio rather than infinity. Inputs and
+outputs remain provider-independent, so live and backtest paths can share this
+implementation.
+
 ## Universe
 
 Data universe:

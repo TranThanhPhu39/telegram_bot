@@ -46,7 +46,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 10 — Candle & indicators — COMPLETE. Development is stopped before Phase 11. Phases
+Phase 11 — Intraday RVOL — COMPLETE. Development is stopped before Phase 12. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -99,18 +99,35 @@ Phase 10 — Candle & indicators — COMPLETE. Development is stopped before Pha
 - [x] Prior-completed-bar daily average volume implemented and unit-tested
 - [x] Timestamp-aligned Relative Strength versus VNINDEX implemented and unit-tested
 - [x] Prior-period breakout resistance/support implemented and unit-tested
+- [x] Time-matched intraday RVOL implemented and unit-tested without look-ahead
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 10 is complete. One-minute candle construction and all planned Phase 10
-indicators are implemented with deterministic warm-up and no-look-ahead rules.
-Development stops until the user explicitly opens Phase 11.
+Phase 11 is complete. Intraday RVOL compares current cumulative volume with the
+mean prior-session cumulative volume at the same Vietnam-local clock minute and
+rejects non-prior baseline dates. Development stops until the user explicitly
+opens Phase 12.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
+
+### `data/rvol.py`
+
+Purpose: calculates provider-independent time-matched intraday RVOL from one
+current one-minute session and one or more earlier historical sessions.
+
+Status: same-clock-time baselines, missing minutes, zero baselines, input
+validation, and no-look-ahead boundaries are covered by eight focused tests.
+
+### `tests/test_rvol.py`
+
+Purpose: deterministic Phase 11 acceptance coverage using explicit Vietnam-local
+session timestamps and synthetic normalized bars.
+
+Status: eight focused tests pass; the full suite passes with 305 tests.
 
 ### `data/candles.py`
 
@@ -1083,8 +1100,8 @@ endpoint probe returned HTTP 400.
 
 ## 11. Next Steps
 
-Await explicit user authorization before opening Phase 11. Do not implement
-time-matched intraday RVOL automatically.
+Await explicit user authorization before opening Phase 12. Do not implement the
+market-regime classifier automatically.
 
 ## 12. How To Run
 
@@ -1645,4 +1662,19 @@ three observed values before request construction.
 - Added deterministic validation and no-look-ahead tests. The complete suite
   passed with 297 tests.
 - Marked Phase 10 complete and stopped before Phase 11. Phases 3–7 remain pending
+  live validation.
+
+### 2026-09-19 — Phase 11 time-matched intraday RVOL
+
+- Opened and completed Phase 11 after explicit user authorization.
+- Added immutable RVOL observations containing current cumulative volume,
+  historical average cumulative volume, historical-session count, and ratio.
+- Matched every baseline by Vietnam-local clock minute across unique prior
+  sessions; missing historical minutes carry the latest earlier cumulative value.
+- Rejected same-day/future baselines, duplicate historical dates, mixed symbols,
+  mixed dates, non-minute bars, unaligned timestamps, and non-chronological data.
+- Verified that later current or historical bars cannot change an earlier RVOL
+  observation and that a zero historical baseline returns no ratio.
+- Passed eight focused tests and the complete 305-test suite.
+- Marked Phase 11 complete and stopped before Phase 12. Phases 3–7 remain pending
   live validation.
