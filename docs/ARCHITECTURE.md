@@ -56,6 +56,14 @@ must consume `TradeTick`, not `MatchPriceMessage`.
 The provider's exchange time remains an optional string until live frames confirm
 its format and timezone. Unset proto3 snapshot fields are normalized to `None`.
 
+## Latest market state
+
+`data.market_state.LatestMarketState` stores one immutable `TradeTick` per
+normalized symbol. Updates replace values by arrival order; the cache does not
+compare provider time strings until their live format is confirmed. Reads are
+thread-safe, and full snapshots are read-only point-in-time copies so callers
+cannot mutate shared state.
+
 ## Universe
 
 Data universe:

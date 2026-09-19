@@ -10,6 +10,7 @@ Implemented foundation:
 
 ```text
 data.models.TradeTick              provider-independent immutable trade model
+data.market_state.LatestMarketState thread-safe latest-tick cache by symbol
 data.vietcap
     -> proto/price.proto          vendored, minimally normalized schema
     -> proto/price_pb2.py         generated Python protobuf binding
@@ -70,13 +71,14 @@ Phase 4 — Realtime ACB + Market State — active for offline implementation wi
 - [x] Duplicate symbols and unchanged subscription sets suppressed
 - [x] Provider-independent immutable `TradeTick` model implemented
 - [x] Validated `MatchPriceMessage` to `TradeTick` conversion unit-tested
+- [x] Thread-safe latest market-state cache implemented and unit-tested
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 4 offline implementation. Subscription deduplication and normalized `TradeTick` conversion are complete. The next small task is a latest market-state cache keyed by symbol. Phase 3 live receive/decode/validation remains pending and must be rerun during an active Vietnamese market session.
+Phase 4 offline implementation is complete through the latest market-state cache. The remaining Phase 4 implementation task is a bounded live FPT + ACB test that decodes, normalizes, and updates both cached symbols. Phase 3 live receive/decode/validation also remains pending and must be rerun during an active Vietnamese market session.
 
 ## 6. Files Created / Modified
 
@@ -208,6 +210,17 @@ Main function: `normalize_match_price`.
 Status: unit-tested for complete field mapping, proto3 defaults, symbol
 normalization, and invalid-message rejection; live frames remain NOT TESTED.
 
+### `data/market_state.py`
+
+Purpose: stores the latest normalized trade tick for each symbol without provider
+dependencies.
+
+Main class: `LatestMarketState`.
+
+Status: unit-tested for FPT + ACB storage, replacement by arrival order,
+normalized lookups, runtime type/symbol checks, and read-only point-in-time
+snapshots. Live integration remains NOT TESTED.
+
 ### `scripts/test_realtime.py`
 
 Purpose: subscribes only FPT to `w-match-price`, records first-event metadata, decodes and validates messages, prints normalized field labels, and requires two distinct valid ticks for success.
@@ -239,6 +252,13 @@ handling, immutability, and rejection of invalid messages.
 
 Status: four tests pass.
 
+### `tests/test_market_state.py`
+
+Purpose: verifies per-symbol latest values, replacement behavior, immutable
+snapshots, normalized lookup, and rejection of invalid cache inputs.
+
+Status: nine tests pass.
+
 ### `docs/VIETCAP_PROTOCOL.md`
 
 Purpose: protocol notes and confirmed runtime evidence.
@@ -251,20 +271,20 @@ subscription behavior, and the confirmed offline normalization policy.
 Purpose: records the provider boundary and downstream layering.
 
 Status: updated to require downstream consumers to use immutable `TradeTick`
-objects rather than Vietcap protobuf messages.
+objects and to document the thread-safe latest-state boundary.
 
 ### `TASKS.md`
 
 Purpose: phase gate and acceptance checklist.
 
 Status: Phase 4 is the active offline implementation phase. Its subscription,
-deduplication, and `TradeTick` items are checked; Phase 3 live items remain pending.
+deduplication, `TradeTick`, and cache items are checked; live items remain pending.
 
 ### `PROJECT_CONTEXT.md`
 
 Purpose: persistent development record.
 
-Status: updated with the Phase 4 `TradeTick` implementation and tests while
+Status: updated with the Phase 4 latest market-state cache and tests while
 retaining the unresolved live-validation blockers.
 
 ## 7. Important Technical Discoveries
@@ -617,6 +637,19 @@ Actual: `30 passed in 0.33s`.
 Result: PASS for the offline `TradeTick` task. Conversion from an actual live
 binary message remains NOT TESTED because no live frame has arrived.
 
+### 2026-09-19 — Phase 4 latest market-state cache unit tests
+
+Command: `.\.venv\Scripts\python.exe -m pytest -q`.
+
+Expected: preserve existing behavior and verify independent FPT + ACB state,
+replacement by arrival order, normalized lookups, input enforcement, and
+read-only point-in-time snapshots.
+
+Actual: `39 passed in 0.32s`.
+
+Result: PASS for the offline latest-state cache task. Population from real
+Socket.IO events remains NOT TESTED because the market is closed.
+
 ## 10. Known Problems
 
 - The upstream schema is not directly compilable by standard `protoc` without reordering its first two declarations.
@@ -632,9 +665,10 @@ binary message remains NOT TESTED because no live frame has arrived.
 
 ## 11. Next Steps
 
-Continue Phase 4 with one small offline task: create a latest market-state cache
-keyed by symbol that accepts only normalized `TradeTick` values. Do not add live
-Socket.IO orchestration in the same task group.
+Continue Phase 4 with one small task: add a bounded FPT + ACB acceptance harness
+that routes payloads through decode, normalization, and `LatestMarketState`, with
+deterministic handler tests. Do not mark simultaneous live delivery complete
+until both symbols are observed from the actual Socket.IO stream.
 
 During the next active Vietnamese market session, separately rerun Phase 3 live
 validation and later test simultaneous FPT + ACB delivery. Keep those live items
@@ -746,6 +780,13 @@ from being mutated in place. The provider time stays as an optional string until
 live evidence establishes its exact format and timezone; no price-unit conversion
 is guessed.
 
+### Decision: define latest by arrival order until live time semantics are known
+
+Reason: `LatestMarketState` replaces the cached value for a symbol whenever a new
+normalized tick arrives. It does not compare `exchange_time`, because the live
+format, timezone, and ordering guarantees have not yet been observed. The cache
+uses a lock for callback/read concurrency and returns detached read-only snapshots.
+
 ## 14. Change Log
 
 ### 2026-09-19 12:29 +07:00 — Phase 0
@@ -822,3 +863,12 @@ is guessed.
 - Preserved raw provider numeric units and exchange-time text without guessing transformations.
 - Added four normalization tests; the full suite passed with 30 tests.
 - Left the market-state cache and all live-delivery checklist items unchecked.
+
+### 2026-09-19 — Phase 4 latest market-state task group
+
+- Added thread-safe `LatestMarketState`, keyed by normalized symbol.
+- Restricted updates to normalized `TradeTick` instances.
+- Added case-insensitive lookup and replacement-by-arrival behavior.
+- Added detached, read-only point-in-time snapshots.
+- Added nine cache tests; the full suite passed with 39 tests.
+- Left simultaneous live FPT + ACB delivery and Phase 3 live checks unchecked.
