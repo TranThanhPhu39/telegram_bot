@@ -69,6 +69,30 @@ Vietcap binary match-price events enter through
 validation/normalization, expected-symbol filtering, and cache update in that
 order. Malformed or unexpected events are logged and do not alter market state.
 
+## Normalized index data
+
+`data.models.IndexSnapshot` is the provider-independent boundary for decoded
+index updates. It is a separate immutable model from `TradeTick` because index
+semantics differ from stock trade semantics: an index carries breadth counters
+and no per-trade volume. The two models are deliberately not merged.
+
+`estimatedChange` and `estimatedFsp` exist in the Vietcap schema but are not
+normalized, because their meaning is undocumented.
+
+## Latest index state
+
+`data.market_state.LatestIndexState` stores one immutable `IndexSnapshot` per
+normalized index identifier, mirroring `LatestMarketState` for stocks but
+without sharing storage or accepting the other model's type. Index identifiers
+are case-sensitive on the Vietcap wire (`HNXIndex`), so subscription payloads
+preserve provider casing while normalized state keys are upper-cased.
+
+Vietcap binary `index` events enter through
+`data.vietcap.pipeline.IndexStatePipeline`, which performs decode,
+validation/normalization, expected-index filtering, and cache update in that
+order. Malformed, invalid, or unexpected index events are logged and do not
+alter index state.
+
 ## Universe
 
 Data universe:

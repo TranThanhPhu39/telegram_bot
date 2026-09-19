@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from threading import RLock
 from types import MappingProxyType
 
-from data.models import TradeTick
+from data.models import IndexSnapshot, TradeTick
 
 
 class LatestMarketState:
@@ -47,3 +47,48 @@ class LatestMarketState:
     def __len__(self) -> int:
         with self._lock:
             return len(self._ticks)
+
+
+class LatestIndexState:
+    """Thread-safe cache containing the latest snapshot for each index."""
+
+    def __init__(self) -> None:
+        self._snapshots: dict[str, IndexSnapshot] = {}
+        self._lock = RLock()
+
+    def update(self, snapshot: IndexSnapshot) -> IndexSnapshot | None:
+        """Store a normalized index snapshot and return the previous value."""
+        if not isinstance(snapshot, IndexSnapshot):
+            raise TypeError("LatestIndexState accepts only IndexSnapshot values")
+        if (
+            not snapshot.symbol
+            or snapshot.symbol != snapshot.symbol.strip().upper()
+        ):
+            raise ValueError(
+                "IndexSnapshot symbol must be non-empty and normalized"
+            )
+
+        with self._lock:
+            previous = self._snapshots.get(snapshot.symbol)
+            self._snapshots[snapshot.symbol] = snapshot
+            return previous
+
+    def get(self, symbol: str) -> IndexSnapshot | None:
+        """Return the latest snapshot for an index, if present."""
+        if not isinstance(symbol, str):
+            raise TypeError("Symbol must be a string")
+        normalized = symbol.strip().upper()
+        if not normalized:
+            raise ValueError("Symbol must not be empty")
+
+        with self._lock:
+            return self._snapshots.get(normalized)
+
+    def snapshot(self) -> Mapping[str, IndexSnapshot]:
+        """Return a read-only point-in-time copy of all cached indices."""
+        with self._lock:
+            return MappingProxyType(self._snapshots.copy())
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._snapshots)

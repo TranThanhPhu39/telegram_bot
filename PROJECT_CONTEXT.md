@@ -45,7 +45,7 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 4 — Realtime ACB + Market State — active for offline implementation with explicit user authorization. Phase 3 remains pending live validation because the Saturday market closure prevented delivery of changing FPT events.
+Phase 6 — Bid/Ask — authorized for offline implementation by explicit user instruction. Phases 3, 4, and 5 remain pending live validation and must not be reported as PASS until their realtime acceptance criteria are observed.
 
 ## 4. Completed
 
@@ -81,7 +81,7 @@ Phase 4 — Realtime ACB + Market State — active for offline implementation wi
 
 ## 5. Currently Working On
 
-Phase 4 offline implementation and its bounded FPT + ACB acceptance harness are complete. Two live attempts on Saturday 2026-09-19 were blocked by HTTP 503 during the WebSocket handshake, before subscription. Phase 4 simultaneous updates and Phase 3 live receive/decode/validation remain pending and must be rerun when the endpoint and market session are available.
+Phase 6 is open for offline implementation. No Phase 6 checkbox has been changed by this authorization-only update. The first permitted task is subscribing FPT + ACB to `w-bid-ask`; Phases 3–5 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -729,10 +729,8 @@ Result: FAIL for live connectivity; FPT + ACB simultaneous delivery remains NOT 
 
 ## 11. Next Steps
 
-Rerun the existing Phase 4 acceptance harness when Vietcap's WebSocket endpoint
-is available during an active Vietnamese market session. Keep the live item
-unchecked until the script observes two distinct normalized ticks for both FPT
-and ACB. Do not begin Phase 5 without a new explicit closed-market exception.
+Begin only the first Phase 6 offline task: subscribe FPT + ACB to `w-bid-ask`
+with deterministic tests. Do not change the pending live status of Phases 3–5.
 
 ## 12. How To Run
 
@@ -960,3 +958,25 @@ and accumulated value. Invalid and unexpected events never enter the cache.
 - Passed the full 46-test suite and verified the script entry point.
 - Attempted live execution twice; both WebSocket handshakes returned HTTP 503
   before subscription, so the Phase 4 live checkbox remains unchecked.
+
+### 2026-09-19 — Phase 5 index-stream offline task group
+
+- Began Phase 5 offline implementation under the user-authorized closed-market
+  exception; Phase 3 and Phase 4 live checks were left unchecked.
+- Added the `index` event constant and a case-preserving index subscription
+  builder, because Vietcap index identifiers are case-sensitive (`HNXIndex`).
+- Added `decode_index` for binary `IndexMessage` payloads with the same error
+  wrapping used by match-price decoding.
+- Added the immutable, provider-independent `IndexSnapshot` model as a separate
+  type from `TradeTick`, since index and stock semantics differ.
+- Added `validate_index` with breadth-counter validation limited to
+  schema-supported constraints; counter relationships were not asserted.
+- Left `code`, `estimatedChange`, and `estimatedFsp` unmapped as undocumented.
+- Added `LatestIndexState` and `IndexStatePipeline` mirroring the Phase 4
+  pipeline without sharing stock storage or accepting `TradeTick`.
+- Added `scripts/test_realtime_index.py`, a bounded VNINDEX acceptance harness
+  requiring two distinct valid snapshots.
+- Passed the full suite twice: 89 tests, up from 46.
+- Did not attempt live VNINDEX validation; Phase 5 acceptance stays NOT TESTED.
+- Did not implement Phase 6 bid/ask, reconnect, REST, database, indicators,
+  signals, or Telegram.

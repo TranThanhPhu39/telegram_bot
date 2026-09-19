@@ -249,6 +249,53 @@ connection/subscription because the WebSocket handshake returned HTTP 503. The
 response reported an upstream connection refusal. Consequently, combined event
 delivery, binary decoding, and live cache updates remain NOT TESTED.
 
+### Phase 5 index-stream offline coverage — 2026-09-19
+
+Implemented from the vendored `price.proto` and the event table above:
+
+- socket event: `index`
+- payload shape: JSON string, same `{"symbols":[...]}` envelope as stock streams
+- Phase 5 subscription: `{"symbols":["VNINDEX"]}`
+- decoded type: `pricePackage.IndexMessage`
+
+Index identifiers are case-sensitive in the observed frontend payload
+(`HNXIndex`, `HNXUpcomIndex`), so index subscription symbols are trimmed and
+de-duplicated case-insensitively but keep their first-seen provider casing.
+Stock symbols continue to be upper-cased. Normalized `IndexSnapshot` identifiers
+are upper-cased for state keying only.
+
+Mapped fields (schema-supported only):
+
+| Proto field | Normalized field |
+|---|---|
+| `symbol` | `symbol` (upper-cased) |
+| `price` | `value` |
+| `change` | `change` |
+| `changePercent` | `change_percent` |
+| `totalShares` | `total_volume` |
+| `totalValue` | `total_value` |
+| `totalStockIncrease` | `advances` |
+| `totalStockDecline` | `declines` |
+| `totalStockNoChange` | `unchanged` |
+| `totalStockCeiling` | `ceiling_count` |
+| `totalStockFloor` | `floor_count` |
+| `time` | `exchange_time` (empty string becomes `None`) |
+
+Not mapped: `code`, `estimatedChange`, `estimatedFsp`. Their semantics are not
+documented by the schema or by observed protocol evidence.
+
+Breadth validation enforces only schema-supported constraints: each breadth
+counter must be finite, non-negative, and a whole stock count. Relationships
+between counters — for example whether a ceiling stock is also counted as an
+advancing stock — are NOT asserted, because they are undocumented. `change` and
+`changePercent` may be negative or zero and are only checked for finiteness.
+Provider numeric units are preserved; no scaling is applied.
+
+`scripts/test_realtime_index.py` subscribes to VNINDEX, routes binary events
+through decode, normalization, and `LatestIndexState`, and requires two distinct
+valid snapshots before reporting PASS. Only its offline logic is tested. Live
+VNINDEX delivery, binary payload shape, and `time` format remain NOT TESTED.
+
 ## Historical REST
 
 Endpoint:

@@ -13,10 +13,16 @@ from data.vietcap.constants import (
     DEFAULT_CONNECT_TIMEOUT_SECONDS,
     DEFAULT_SOCKET_PATH,
     DEFAULT_SOCKET_URL,
+    INDEX_EVENT,
     MATCH_PRICE_EVENT,
     SOCKET_TRANSPORTS,
 )
-from data.vietcap.subscriptions import build_symbol_subscription, normalize_symbols
+from data.vietcap.subscriptions import (
+    build_index_subscription,
+    build_symbol_subscription,
+    normalize_index_symbols,
+    normalize_symbols,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +69,7 @@ class VietcapRealtimeClient:
         self._socket.on("disconnect", self._on_disconnect)
         self._socket.on("connect_error", self._on_connect_error)
         self._match_price_subscription: frozenset[str] | None = None
+        self._index_subscription: frozenset[str] | None = None
 
     @property
     def connected(self) -> bool:
@@ -165,11 +172,54 @@ class VietcapRealtimeClient:
             raise
         self._match_price_subscription = subscription
 
+    def on_index(self, handler: Callable[[object], None]) -> None:
+        """Register the callback for binary index events."""
+        if not callable(handler):
+            raise TypeError("Index handler must be callable")
+        self._socket.on(INDEX_EVENT, handler)
+
+    def subscribe_index(self, symbols: tuple[str, ...]) -> None:
+        """Subscribe connected clients to the requested index symbols."""
+        if not self.connected:
+            raise ConnectionError("Connect before subscribing to indices")
+        normalized_symbols = normalize_index_symbols(symbols)
+        subscription = frozenset(
+            symbol.upper() for symbol in normalized_symbols
+        )
+        if subscription == self._index_subscription:
+            logger.info(
+                "Skipping unchanged Vietcap index subscription",
+                extra={
+                    "event": INDEX_EVENT,
+                    "symbols": list(normalized_symbols),
+                },
+            )
+            return
+
+        payload = build_index_subscription(normalized_symbols)
+        logger.info(
+            "Subscribing to Vietcap index stream",
+            extra={"event": INDEX_EVENT, "symbols": list(normalized_symbols)},
+        )
+        try:
+            self._socket.emit(INDEX_EVENT, payload)
+        except Exception:
+            logger.exception(
+                "Failed to subscribe to Vietcap index stream",
+                extra={
+                    "event": INDEX_EVENT,
+                    "symbols": list(normalized_symbols),
+                },
+            )
+            raise
+        self._index_subscription = subscription
+
     def _on_connect(self) -> None:
         logger.info("Socket.IO namespace connected")
 
     def _on_disconnect(self, reason: object | None = None) -> None:
         self._match_price_subscription = None
+        self._index_subscription = None
         logger.info("Socket.IO namespace disconnected", extra={"reason": reason})
 
     def _on_connect_error(self, data: object) -> None:

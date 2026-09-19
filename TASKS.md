@@ -12,8 +12,20 @@
 Reason: market closed on Saturday 2026-09-19. Live receive/decode/validation
 must be rerun during an active Vietnamese market session.
 
-## ACTIVE IMPLEMENTATION PHASE
 **Phase 4 — Realtime ACB + Market State**
+
+Reason: live attempts on 2026-09-19 failed at the WebSocket handshake with
+HTTP 503 before subscription. Simultaneous live FPT + ACB delivery must be
+rerun during an active Vietnamese market session.
+
+**Phase 5 — Index stream**
+
+Reason: offline implementation and tests are complete, but VNINDEX realtime
+acceptance remains NOT TESTED. `scripts/test_realtime_index.py` must report
+`[PASS]` during an active Vietnamese market session.
+
+## ACTIVE IMPLEMENTATION PHASE
+**Phase 6 — Bid/Ask (offline implementation authorized)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -91,14 +103,21 @@ Acceptance:
 ---
 
 ## Phase 5 — Index stream
-- [ ] Subscribe VNINDEX
-- [ ] Decode `IndexMessage`
-- [ ] Normalize `IndexSnapshot`
-- [ ] Validate breadth fields
+- [x] Subscribe VNINDEX
+  - Offline only: `index` event registration and the exact
+    `{"symbols":["VNINDEX"]}` JSON-string emission are unit-tested. Live
+    emission over a real session is NOT TESTED.
+- [x] Decode `IndexMessage`
+  - Offline only: binary decode and malformed-payload rejection are
+    unit-tested against the vendored schema. Live frames are NOT TESTED.
+- [x] Normalize `IndexSnapshot`
+- [x] Validate breadth fields
 - [ ] STOP and report
 
 Acceptance:
 - VNINDEX realtime state available
+  - NOT TESTED. Requires `scripts/test_realtime_index.py` to report `[PASS]`
+    during an active Vietnamese market session.
 
 ---
 

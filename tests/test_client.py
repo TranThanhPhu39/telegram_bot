@@ -148,3 +148,56 @@ def test_match_price_subscription_can_emit_again_after_disconnect() -> None:
         ("w-match-price", '{"symbols":["FPT","ACB"]}'),
         ("w-match-price", '{"symbols":["FPT","ACB"]}'),
     ]
+
+
+def test_index_subscription_requires_connection() -> None:
+    client = VietcapRealtimeClient(  # type: ignore[arg-type]
+        socket_client=FakeSocketClient()
+    )
+
+    with pytest.raises(ConnectionError, match="Connect before subscribing"):
+        client.subscribe_index(("VNINDEX",))
+
+
+def test_register_and_subscribe_vnindex_index_event() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+    handler = lambda payload: None
+
+    client.on_index(handler)
+    client.connect()
+    client.subscribe_index(("VNINDEX",))
+    client.subscribe_index(("vnindex",))
+
+    assert socket_client.handlers["index"] is handler
+    assert socket_client.emit_calls == [("index", '{"symbols":["VNINDEX"]}')]
+
+
+def test_index_subscription_can_emit_again_after_disconnect() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+
+    client.connect()
+    client.subscribe_index(("VNINDEX",))
+    client.disconnect()
+    client.connect()
+    client.subscribe_index(("VNINDEX",))
+
+    assert socket_client.emit_calls == [
+        ("index", '{"symbols":["VNINDEX"]}'),
+        ("index", '{"symbols":["VNINDEX"]}'),
+    ]
+
+
+def test_match_price_and_index_subscriptions_are_independent() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+
+    client.connect()
+    client.subscribe_match_price(("FPT", "ACB"))
+    client.subscribe_index(("VNINDEX",))
+
+    assert socket_client.emit_calls == [
+        ("w-match-price", '{"symbols":["FPT","ACB"]}'),
+        ("index", '{"symbols":["VNINDEX"]}'),
+    ]

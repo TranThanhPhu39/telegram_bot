@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from data.models import TradeTick
+from data.models import IndexSnapshot, TradeTick
 from data.vietcap.proto import price_pb2
-from data.vietcap.validation import validate_match_price
+from data.vietcap.validation import validate_index, validate_match_price
 
 
 def _optional_positive(value: float) -> float | None:
@@ -39,4 +39,30 @@ def normalize_match_price(message: price_pb2.MatchPriceMessage) -> TradeTick:
         floor_price=_optional_positive(message.floorPrice),
         exchange_time=_optional_text(message.time),
         session=_optional_text(message.session),
+    )
+
+
+def normalize_index(message: price_pb2.IndexMessage) -> IndexSnapshot:
+    """Validate and normalize a Vietcap index message.
+
+    ``estimatedChange`` and ``estimatedFsp`` are not mapped because the schema
+    does not document their meaning. Provider numeric units are preserved.
+    """
+    errors = validate_index(message)
+    if errors:
+        raise ValueError(f"Invalid IndexMessage: {'; '.join(errors)}")
+
+    return IndexSnapshot(
+        symbol=message.symbol.strip().upper(),
+        value=float(message.price),
+        change=float(message.change),
+        change_percent=float(message.changePercent),
+        total_volume=float(message.totalShares),
+        total_value=float(message.totalValue),
+        advances=float(message.totalStockIncrease),
+        declines=float(message.totalStockDecline),
+        unchanged=float(message.totalStockNoChange),
+        ceiling_count=float(message.totalStockCeiling),
+        floor_count=float(message.totalStockFloor),
+        exchange_time=_optional_text(message.time),
     )

@@ -36,3 +36,26 @@ def decode_match_price(
         )
         raise VietcapDecodeError("Invalid MatchPriceMessage payload") from exc
     return message
+
+
+def decode_index(
+    payload: bytes | bytearray | memoryview,
+) -> price_pb2.IndexMessage:
+    """Decode one binary ``IndexMessage`` payload."""
+    if not isinstance(payload, (bytes, bytearray, memoryview)):
+        raise TypeError(
+            "Index payload must be bytes-like, "
+            f"received {type(payload).__name__}"
+        )
+
+    raw = bytes(payload)
+    message = price_pb2.IndexMessage()
+    try:
+        message.ParseFromString(raw)
+    except DecodeError as exc:
+        logger.exception(
+            "Failed to decode IndexMessage",
+            extra={"event": "index", "payload_size": len(raw)},
+        )
+        raise VietcapDecodeError("Invalid IndexMessage payload") from exc
+    return message
