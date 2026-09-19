@@ -81,6 +81,8 @@ Acceptance:
 - [x] Create normalized `TradeTick`
 - [x] Create latest market-state cache
 - [ ] Test FPT + ACB simultaneously
+  - Offline harness and handler tests PASS; live attempts on 2026-09-19 failed
+    at WebSocket handshake with HTTP 503 before subscription.
 - [ ] STOP and report
 
 Acceptance:

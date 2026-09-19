@@ -21,8 +21,10 @@ data.vietcap
     -> decoder.py                 binary MatchPrice protobuf decoding
     -> validation.py              decoded match-price quality checks
     -> normalizer.py              MatchPriceMessage -> TradeTick conversion
+    -> pipeline.py                binary event -> normalized latest state
 scripts/inspect_connection.py     live connection smoke test, no subscriptions
 scripts/test_realtime.py          Phase 3 live FPT-only acceptance test
+scripts/test_realtime_market_state.py Phase 4 FPT + ACB acceptance harness
 tests/test_client.py              deterministic connection configuration tests
 ```
 
@@ -72,13 +74,14 @@ Phase 4 — Realtime ACB + Market State — active for offline implementation wi
 - [x] Provider-independent immutable `TradeTick` model implemented
 - [x] Validated `MatchPriceMessage` to `TradeTick` conversion unit-tested
 - [x] Thread-safe latest market-state cache implemented and unit-tested
+- [x] FPT + ACB decode-to-cache pipeline and bounded acceptance harness implemented
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 4 offline implementation is complete through the latest market-state cache. The remaining Phase 4 implementation task is a bounded live FPT + ACB test that decodes, normalizes, and updates both cached symbols. Phase 3 live receive/decode/validation also remains pending and must be rerun during an active Vietnamese market session.
+Phase 4 offline implementation and its bounded FPT + ACB acceptance harness are complete. Two live attempts on Saturday 2026-09-19 were blocked by HTTP 503 during the WebSocket handshake, before subscription. Phase 4 simultaneous updates and Phase 3 live receive/decode/validation remain pending and must be rerun when the endpoint and market session are available.
 
 ## 6. Files Created / Modified
 
@@ -221,11 +224,29 @@ Status: unit-tested for FPT + ACB storage, replacement by arrival order,
 normalized lookups, runtime type/symbol checks, and read-only point-in-time
 snapshots. Live integration remains NOT TESTED.
 
+### `data/vietcap/pipeline.py`
+
+Purpose: routes one Vietcap match-price payload through decoding, validation,
+normalization, expected-symbol filtering, and latest-state update.
+
+Main class: `MatchPriceStatePipeline`.
+
+Status: deterministically unit-tested for FPT + ACB, replacement, malformed
+payloads, invalid trades, and unexpected symbols; live invocation remains NOT TESTED.
+
 ### `scripts/test_realtime.py`
 
 Purpose: subscribes only FPT to `w-match-price`, records first-event metadata, decodes and validates messages, prints normalized field labels, and requires two distinct valid ticks for success.
 
 Status: live subscription emission confirmed; Saturday test received zero events and exited incomplete.
+
+### `scripts/test_realtime_market_state.py`
+
+Purpose: bounded Phase 4 acceptance harness for FPT + ACB through the full
+decode-to-cache path. Requires two distinct valid ticks per symbol by default.
+
+Status: entry point and acceptance tracker unit-tested. Two live attempts failed
+at WebSocket handshake with HTTP 503 before subscription.
 
 ### `tests/test_decoder.py`
 
@@ -259,19 +280,26 @@ snapshots, normalized lookup, and rejection of invalid cache inputs.
 
 Status: nine tests pass.
 
+### `tests/test_pipeline.py`
+
+Purpose: verifies the decode-to-cache pipeline and ensures acceptance requires
+distinct updates for both FPT and ACB.
+
+Status: seven tests pass.
+
 ### `docs/VIETCAP_PROTOCOL.md`
 
 Purpose: protocol notes and confirmed runtime evidence.
 
-Status: updated with Engine.IO v4 evidence, pending live validation, Phase 4
-subscription behavior, and the confirmed offline normalization policy.
+Status: updated with Engine.IO v4 evidence, Phase 4 pipeline/harness behavior,
+and both failed HTTP 503 live attempts.
 
 ### `docs/ARCHITECTURE.md`
 
 Purpose: records the provider boundary and downstream layering.
 
-Status: updated to require downstream consumers to use immutable `TradeTick`
-objects and to document the thread-safe latest-state boundary.
+Status: updated to document the immutable tick, thread-safe latest-state, and
+Vietcap decode-to-cache pipeline boundaries.
 
 ### `TASKS.md`
 
@@ -284,8 +312,8 @@ deduplication, `TradeTick`, and cache items are checked; live items remain pendi
 
 Purpose: persistent development record.
 
-Status: updated with the Phase 4 latest market-state cache and tests while
-retaining the unresolved live-validation blockers.
+Status: updated with the Phase 4 acceptance harness, deterministic tests, and
+HTTP 503 live evidence while retaining unresolved live-validation blockers.
 
 ## 7. Important Technical Discoveries
 
@@ -650,6 +678,39 @@ Actual: `39 passed in 0.32s`.
 Result: PASS for the offline latest-state cache task. Population from real
 Socket.IO events remains NOT TESTED because the market is closed.
 
+### 2026-09-19 — Phase 4 FPT + ACB acceptance harness
+
+Offline commands:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe scripts\test_realtime_market_state.py --help
+```
+
+Expected: verify the full decode-to-cache handler, reject bad/unexpected events,
+and require two distinct normalized ticks for both FPT and ACB.
+
+Actual: `46 passed in 2.65s`; the script entry point displayed its bounded live
+test options successfully.
+
+Result: PASS for the offline pipeline and acceptance logic.
+
+Live commands attempted:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\test_realtime_market_state.py --hold-seconds 40 --min-updates-per-symbol 2 --engineio-logs
+.\.venv\Scripts\python.exe scripts\test_realtime_market_state.py --hold-seconds 15 --min-updates-per-symbol 2
+```
+
+Expected: connect, subscribe with `{"symbols":["FPT","ACB"]}`, then observe at
+least two distinct valid normalized ticks for each symbol.
+
+Actual: both attempts received HTTP 503 during the WebSocket handshake. Vietcap's
+response reported an upstream connection refusal. Neither attempt reached the
+subscription or event-receive stage.
+
+Result: FAIL for live connectivity; FPT + ACB simultaneous delivery remains NOT TESTED.
+
 ## 10. Known Problems
 
 - The upstream schema is not directly compilable by standard `protoc` without reordering its first two declarations.
@@ -662,17 +723,16 @@ Socket.IO events remains NOT TESTED because the market is closed.
 - Phase 3 cannot be marked complete until at least two distinct valid FPT ticks are observed during an active session.
 - The current frontend contract matches the implementation, but static bundle evidence cannot prove that this Python connection will receive data during the next active session.
 - FPT + ACB subscription behavior is covered offline, but simultaneous live delivery remains unverified.
+- The two Phase 4 live attempts at approximately 14:24 +07:00 received HTTP 503
+  before Socket.IO connected; this is newer runtime evidence than the earlier
+  successful Phase 2 connection and may be transient endpoint unavailability.
 
 ## 11. Next Steps
 
-Continue Phase 4 with one small task: add a bounded FPT + ACB acceptance harness
-that routes payloads through decode, normalization, and `LatestMarketState`, with
-deterministic handler tests. Do not mark simultaneous live delivery complete
-until both symbols are observed from the actual Socket.IO stream.
-
-During the next active Vietnamese market session, separately rerun Phase 3 live
-validation and later test simultaneous FPT + ACB delivery. Keep those live items
-unchecked until runtime evidence exists.
+Rerun the existing Phase 4 acceptance harness when Vietcap's WebSocket endpoint
+is available during an active Vietnamese market session. Keep the live item
+unchecked until the script observes two distinct normalized ticks for both FPT
+and ACB. Do not begin Phase 5 without a new explicit closed-market exception.
 
 ## 12. How To Run
 
@@ -710,6 +770,16 @@ Run the Phase 3 FPT-only acceptance test during market hours:
 ```
 
 Exit status `0` means at least two distinct valid FPT ticks were decoded. Exit status `2` means the test completed without enough valid changing ticks and Phase 3 remains incomplete.
+
+Run the Phase 4 FPT + ACB normalized-state acceptance test during market hours:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\test_realtime_market_state.py --hold-seconds 60 --min-updates-per-symbol 2
+```
+
+Exit status `0` requires both symbols to have at least two distinct normalized
+ticks in the latest-state pipeline. Exit status `2` means the connection ran but
+insufficient updates arrived; exit status `1` means connection or runtime failure.
 
 ## 13. Architecture Decisions
 
@@ -786,6 +856,13 @@ Reason: `LatestMarketState` replaces the cached value for a symbol whenever a ne
 normalized tick arrives. It does not compare `exchange_time`, because the live
 format, timezone, and ordering guarantees have not yet been observed. The cache
 uses a lock for callback/read concurrency and returns detached read-only snapshots.
+
+### Decision: require changing updates from both symbols for Phase 4 acceptance
+
+Reason: one cached snapshot per symbol would not demonstrate an updating realtime
+market state. The acceptance harness requires at least two distinct identities for
+both FPT and ACB, based on normalized time, price, last volume, accumulated volume,
+and accumulated value. Invalid and unexpected events never enter the cache.
 
 ## 14. Change Log
 
@@ -872,3 +949,14 @@ uses a lock for callback/read concurrency and returns detached read-only snapsho
 - Added detached, read-only point-in-time snapshots.
 - Added nine cache tests; the full suite passed with 39 tests.
 - Left simultaneous live FPT + ACB delivery and Phase 3 live checks unchecked.
+
+### 2026-09-19 — Phase 4 acceptance-harness task group
+
+- Added `MatchPriceStatePipeline` for decode, validation/normalization, filtering,
+  and latest-state update.
+- Added a bounded FPT + ACB script requiring two distinct ticks per symbol.
+- Added deterministic tests for valid dual-symbol flow, replacement, malformed
+  payloads, invalid trades, unexpected symbols, and distinct-update acceptance.
+- Passed the full 46-test suite and verified the script entry point.
+- Attempted live execution twice; both WebSocket handshakes returned HTTP 503
+  before subscription, so the Phase 4 live checkbox remains unchecked.

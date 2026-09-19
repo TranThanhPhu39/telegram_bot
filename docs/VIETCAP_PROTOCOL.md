@@ -237,6 +237,18 @@ no price scaling is applied. Empty time/session strings and zero-valued optional
 snapshot prices are represented as `None`. Exchange time is deliberately not
 parsed until its live format and timezone are observed.
 
+### Phase 4 FPT + ACB acceptance harness — 2026-09-19
+
+`scripts/test_realtime_market_state.py` subscribes to FPT and ACB, routes binary
+events through decode, normalization, and `LatestMarketState`, and requires two
+distinct valid ticks for each symbol before reporting PASS. The handler pipeline
+and acceptance counter are covered by deterministic unit tests.
+
+Two live attempts at approximately 14:24 +07:00 failed before Socket.IO
+connection/subscription because the WebSocket handshake returned HTTP 503. The
+response reported an upstream connection refusal. Consequently, combined event
+delivery, binary decoding, and live cache updates remain NOT TESTED.
+
 ## Historical REST
 
 Endpoint:

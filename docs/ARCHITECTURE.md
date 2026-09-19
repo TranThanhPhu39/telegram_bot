@@ -64,6 +64,11 @@ compare provider time strings until their live format is confirmed. Reads are
 thread-safe, and full snapshots are read-only point-in-time copies so callers
 cannot mutate shared state.
 
+Vietcap binary match-price events enter through
+`data.vietcap.pipeline.MatchPriceStatePipeline`, which performs decode,
+validation/normalization, expected-symbol filtering, and cache update in that
+order. Malformed or unexpected events are logged and do not alter market state.
+
 ## Universe
 
 Data universe:
