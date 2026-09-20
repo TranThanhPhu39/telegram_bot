@@ -133,6 +133,68 @@ CREATE INDEX IF NOT EXISTS idx_signal_events_signal_time
 ON signal_events(signal_id, occurred_at, sequence)
 """
 
+SECTOR_MEMBERSHIPS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS sector_memberships (
+    symbol TEXT NOT NULL,
+    sector_code TEXT NOT NULL,
+    sector_name TEXT NOT NULL,
+    effective_from TEXT NOT NULL,
+    effective_to TEXT,
+    source TEXT NOT NULL,
+    PRIMARY KEY (symbol, sector_code, effective_from),
+    FOREIGN KEY (symbol) REFERENCES symbols(symbol) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CHECK (symbol = upper(trim(symbol))),
+    CHECK (sector_code = upper(trim(sector_code))),
+    CHECK (length(trim(sector_name)) > 0),
+    CHECK (date(effective_from) = effective_from),
+    CHECK (effective_to IS NULL OR date(effective_to) = effective_to),
+    CHECK (effective_to IS NULL OR effective_to >= effective_from),
+    CHECK (length(trim(source)) > 0)
+) WITHOUT ROWID
+"""
+
+FINANCIAL_REPORTS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS financial_reports (
+    symbol TEXT NOT NULL,
+    report_period TEXT NOT NULL,
+    public_date TEXT NOT NULL,
+    consolidated INTEGER NOT NULL,
+    revenue REAL NOT NULL,
+    net_profit REAL NOT NULL,
+    equity REAL NOT NULL,
+    total_debt REAL NOT NULL,
+    source TEXT NOT NULL,
+    PRIMARY KEY (symbol, report_period, consolidated),
+    FOREIGN KEY (symbol) REFERENCES symbols(symbol) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CHECK (symbol = upper(trim(symbol))),
+    CHECK (date(public_date) = public_date),
+    CHECK (consolidated IN (0, 1)),
+    CHECK (revenue >= 0 AND equity > 0 AND total_debt >= 0),
+    CHECK (length(trim(source)) > 0)
+) WITHOUT ROWID
+"""
+
+INSTITUTIONAL_FLOWS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS institutional_flows (
+    symbol TEXT NOT NULL,
+    trading_date TEXT NOT NULL,
+    foreign_buy_value REAL,
+    foreign_sell_value REAL,
+    proprietary_buy_value REAL,
+    proprietary_sell_value REAL,
+    source TEXT NOT NULL,
+    PRIMARY KEY (symbol, trading_date),
+    FOREIGN KEY (symbol) REFERENCES symbols(symbol) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CHECK (symbol = upper(trim(symbol))),
+    CHECK (date(trading_date) = trading_date),
+    CHECK (foreign_buy_value IS NULL OR foreign_buy_value >= 0),
+    CHECK (foreign_sell_value IS NULL OR foreign_sell_value >= 0),
+    CHECK (proprietary_buy_value IS NULL OR proprietary_buy_value >= 0),
+    CHECK (proprietary_sell_value IS NULL OR proprietary_sell_value >= 0),
+    CHECK (length(trim(source)) > 0)
+) WITHOUT ROWID
+"""
+
 
 def create_symbols_table(connection: sqlite3.Connection) -> None:
     """Create the normalized symbol catalog without altering existing rows."""

@@ -12,6 +12,9 @@ from data.schema import (
     SIGNALS_INDEX_SQL,
     SIGNALS_TABLE_SQL,
     SYMBOLS_TABLE_SQL,
+    SECTOR_MEMBERSHIPS_TABLE_SQL,
+    FINANCIAL_REPORTS_TABLE_SQL,
+    INSTITUTIONAL_FLOWS_TABLE_SQL,
 )
 
 SCHEMA_MIGRATIONS_TABLE_SQL = """
@@ -50,6 +53,15 @@ MIGRATIONS = (
             SIGNALS_INDEX_SQL,
             SIGNAL_EVENTS_TABLE_SQL,
             SIGNAL_EVENTS_INDEX_SQL,
+        ),
+    ),
+    Migration(
+        version=2,
+        name="asmf_eod_inputs",
+        statements=(
+            SECTOR_MEMBERSHIPS_TABLE_SQL,
+            FINANCIAL_REPORTS_TABLE_SQL,
+            INSTITUTIONAL_FLOWS_TABLE_SQL,
         ),
     ),
 )

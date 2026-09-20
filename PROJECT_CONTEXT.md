@@ -46,9 +46,10 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 19 — Selectable CL1 + ASMF strategies — COMPLETE. Development is stopped
-before optional Phase 20 News. Telegram commands now allow explicit CL1 or ASMF
-analysis over historical Vietcap data and SQLite fallback. Phases
+Phase 20 — ASMF EOD data integration — PARTIAL. Provider-independent models,
+SQLite persistence, CSV ingestion, point-in-time scoring, and runtime wiring are
+implemented. Automatic CafeF/Vietstock acquisition and real-data acceptance are
+blocked until exact export or Network response samples are supplied. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -112,17 +113,18 @@ analysis over historical Vietcap data and SQLite fallback. Phases
 - [x] Telegram runtime connected to Vietcap history, SQLite, indicators, and scanner
 - [x] Sunday fallback verified against Friday 2026-09-18 ACB and VNINDEX data
 - [x] Selectable CL1 and honest partial-data ASMF strategy runtime implemented
+- [x] Point-in-time ASMF sector/BCTC/institutional-flow foundation implemented
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 19 is complete. `/soi <MÃ> [CL1|ASMF]` selects an independent strategy and
-`/chienluoc` documents both choices. Live historical tests returned an explainable
-CL1 result and an ASMF result that explicitly blocks BUY while required sector,
-fundamental, and institutional-flow inputs are absent. Development stops before
-optional Phase 20 News.
+Phase 20 is split at a safe boundary because CafeF/Vietstock acquisition formats
+are an unresolved external dependency. Normalized CSV data can already be loaded
+and consumed by ASMF without look-ahead. Automatic acquisition and real-data
+acceptance remain NOT TESTED and must not be marked complete until representative
+source exports or Network JSON responses are available.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
@@ -1964,3 +1966,19 @@ three observed values before request construction.
 - Passed 385 offline tests plus live CL1 and ASMF evaluation using ACB/VNINDEX
   history for the completed 2026-09-18 session.
 - Marked Phase 19 complete and moved optional News to Phase 20.
+
+### 2026-09-20 — Phase 20 ASMF EOD foundation (partial)
+
+- Added schema migration v2 for effective-dated sector membership, consolidated
+  quarterly financial reports with actual publication dates, and daily foreign/
+  proprietary trading values.
+- Added validated provider-independent records, idempotent SQLite upserts, strict
+  UTF-8 CSV loaders, templates, and a command-line import script.
+- Added point-in-time fundamental scoring including ROE, TTM growth, earnings
+  acceleration, and debt/equity; institutional net-flow scoring; and sector RS/
+  breadth scoring requiring at least five members.
+- Connected available persisted scores to the existing shared ASMF evaluator.
+- Confirmed that foreign-only flow remains usable when proprietary data is absent.
+- Split Phase 20 because automatic CafeF/Vietstock acquisition cannot be safely
+  implemented without observed source export schemas or Network JSON contracts.
+  Automatic acquisition and real-data acceptance remain NOT TESTED.

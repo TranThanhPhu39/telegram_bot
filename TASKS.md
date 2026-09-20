@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 19 — Selectable CL1 + ASMF strategies (COMPLETE; stopped before optional Phase 20)**
+**Phase 20 — ASMF EOD data integration (PARTIAL; provider samples required)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -334,7 +334,23 @@ was fabricated from incomplete inputs.
 
 ---
 
-## Phase 20 — News V1 (optional / bonus)
+## Phase 20 — ASMF EOD data integration
+- [x] Add point-in-time sector membership storage
+- [x] Add consolidated quarterly financial-report storage with `public_date`
+- [x] Add foreign/proprietary daily-flow storage
+- [x] Add strict normalized CSV import boundary
+- [x] Add sector, fundamental, and institutional-flow scoring
+- [x] Connect stored scores to the shared ASMF runtime
+- [x] Add schema migration and no-look-ahead tests
+- [ ] Add automatic CafeF/Vietstock acquisition adapters
+  - BLOCKED: exact public request/response or export formats have not been
+    observed. Do not guess unstable endpoints or HTML fields.
+- [ ] Validate a real imported dataset
+- [ ] STOP and report
+
+---
+
+## Phase 21 — News V1 (optional / bonus)
 - [ ] News collector
 - [ ] Deduplication
 - [ ] ticker/entity mapping

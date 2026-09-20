@@ -11,6 +11,8 @@ from typing import Protocol
 
 from dotenv import load_dotenv
 
+from asmf_data.scoring import fundamental_score, institutional_flow_score, sector_strength_score
+from asmf_data.store import active_sector, sector_members
 from data.database import connect_database
 from data.indicators import breakout_levels, ema20, ema50, rsi14
 from data.migrations import bootstrap_schema
@@ -77,7 +79,24 @@ class RuntimeBotDataService:
         self, strategy: str, bars: tuple[OHLCVBar, ...], benchmark: tuple[OHLCVBar, ...]
     ) -> str:
         try:
-            result = evaluate_cl1(bars) if strategy.upper() == "CL1" else evaluate_asmf(bars, benchmark)
+            if strategy.upper() == "CL1":
+                result = evaluate_cl1(bars)
+            else:
+                as_of = datetime.fromtimestamp(bars[-1].timestamp, VIETNAM_TIMEZONE).date()
+                fundamental = fundamental_score(self.connection, bars[-1].symbol, as_of)
+                flow = institutional_flow_score(self.connection, bars[-1].symbol, as_of)
+                membership = active_sector(self.connection, bars[-1].symbol, as_of)
+                histories = {bars[-1].symbol: bars}
+                if membership is not None:
+                    for member in sector_members(self.connection, membership["sector_code"], as_of):
+                        histories.setdefault(member, self._load(member))
+                sector = sector_strength_score(
+                    self.connection, bars[-1].symbol, as_of, histories, benchmark
+                )
+                result = evaluate_asmf(
+                    bars, benchmark, sector_score=sector,
+                    fundamental_score=fundamental, institutional_flow_score=flow,
+                )
         except ValueError as error:
             return f"Chiến lược {strategy.upper()}: chưa đủ dữ liệu ({error})."
         labels = {

@@ -409,3 +409,17 @@ WATCH → MONEY_FLOW → BREAKOUT → CONFIRMED → ACTIVE → EXIT
 
 ## News
 News is V2/bonus and must not block core bot delivery.
+
+## ASMF end-of-day data boundary
+
+`asmf_data` normalizes slow-moving data separately from Vietcap market prices.
+Sector membership is effective-dated; consolidated quarterly reports retain the
+real publication date; foreign and proprietary flows are stored per symbol/day.
+All scoring queries use an `as_of` date so a backtest cannot see a report or flow
+published in the future.
+
+Strict UTF-8 CSV schemas provide a stable import boundary for CafeF, Vietstock,
+UBCKNN, or licensed exports. `scripts/import_asmf_eod` loads these records into
+SQLite. Direct website adapters are intentionally deferred until their actual
+request/response or export format is observed; core scoring does not depend on a
+particular web page layout.
