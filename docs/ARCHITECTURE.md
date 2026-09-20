@@ -440,6 +440,17 @@ from SQLite and reports cached-member progress plus queue state, so a slow
 provider cannot multiply command latency. A manual full run remains available
 through `python -m scripts.sync_sector_history ACB`.
 
+Worker completion is exposed as a `SectorSyncResult` listener rather than a
+Telegram call. `telegram_bot.sector_notifications` bridges that synchronous
+worker event into the Telegram asyncio application through a thread-safe broker.
+Handlers register the requesting chat before invoking ASMF/sector rendering, and
+remove it immediately when SQLite already has five usable peers. One incomplete
+notice is allowed per chat/symbol; the registration remains until one READY
+notice is delivered. Failed sends are requeued. READY messages provide an ASMF
+callback button so analysis is recomputed on demand rather than replayed from the
+time the background job began. Notification registrations are process-local and
+do not contain portfolio data.
+
 Strict UTF-8 CSV schemas provide a stable import boundary for CafeF, Vietstock,
 UBCKNN, or licensed exports. `scripts/import_asmf_eod` loads these records into
 SQLite.

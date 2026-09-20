@@ -8,7 +8,11 @@ from asmf_data.models import SectorMembership
 from asmf_data.store import upsert_sector_memberships
 from data.database import connect_database
 from runtime.bot_service import RuntimeBotDataService
-from runtime.sector_history_sync import SectorHistorySynchronizer, SectorHistorySyncWorker
+from runtime.sector_history_sync import (
+    SectorHistorySynchronizer,
+    SectorHistorySyncWorker,
+    SectorSyncResult,
+)
 from scanner.universe import ScannerInstrument
 
 
@@ -129,6 +133,35 @@ def test_worker_accepts_arbitrary_symbol_and_deduplicates_inflight_and_cooldown(
         assert fake.calls == ["VHM"]
     finally:
         release.set()
+        worker.stop(2)
+
+
+def test_worker_publishes_completed_sync_result_to_listeners() -> None:
+    completed = threading.Event()
+    published = []
+
+    class Synchronizer:
+        def sync_symbol_sector(self, symbol: str, **kwargs):
+            return SectorSyncResult(symbol, "8600", 123, 4, 1, ())
+
+    worker = SectorHistorySyncWorker(
+        (), interval_seconds=3600,
+        synchronizer_factory=Synchronizer,
+    )
+
+    def listener(result):
+        published.append(result)
+        completed.set()
+
+    worker.add_listener(listener)
+    worker.start()
+    try:
+        assert worker.request("VHM") is True
+        assert completed.wait(2)
+        assert len(published) == 1
+        assert published[0].requested_symbol == "VHM"
+        assert published[0].usable == 5
+    finally:
         worker.stop(2)
 
 

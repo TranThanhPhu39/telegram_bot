@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 20 operational follow-up — arbitrary-symbol sector sync (COMPLETE)**
+**Phase 20 operational follow-up — sector-sync completion notifications (COMPLETE)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -387,6 +387,20 @@ was fabricated from incomplete inputs.
   - Focused runtime/worker/Telegram regression: 54 passed.
   - Full isolated-dependency regression: 594 passed.
   - Isolated dependency check: `No broken requirements found`.
+- [x] STOP and report
+
+### Operational follow-up — Telegram completion notifications
+- [x] Register the requesting chat before `/soi ... ASMF`, `/sector`, or the
+      ASMF inline callback starts sector synchronization
+- [x] Publish worker results without coupling the worker to Telegram
+- [x] Notify once when a batch remains incomplete and once when it becomes ready
+- [x] Retain the latest incomplete result so late subscribers are not left silent
+- [x] Add a `Xem lại ASMF` callback button instead of replaying stale analysis
+- [x] Requeue failed Telegram deliveries and deduplicate per chat/symbol
+- [x] Start and stop the async notification dispatcher with the Telegram app
+- [x] Run focused and full regression tests
+  - Focused notification/worker/Telegram regression: 59 passed.
+  - Full isolated-dependency regression: 599 passed.
 - [x] STOP and report
 
 ---

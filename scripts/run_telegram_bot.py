@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 from telegram_bot.app import run_polling
 from telegram_bot.commands import TelegramCommandService
+from telegram_bot.sector_notifications import SectorSyncNotificationBroker
 from runtime.bot_service import build_runtime_service_from_env
 from runtime.sector_history_sync import start_sector_history_background_sync
 
@@ -26,4 +27,6 @@ if __name__ == "__main__":
         ),
     )
     service.set_sector_history_requester(sector_worker.request)
-    run_polling(TelegramCommandService(service))
+    sector_notifications = SectorSyncNotificationBroker()
+    sector_worker.add_listener(sector_notifications.publish)
+    run_polling(TelegramCommandService(service), sector_notifications)

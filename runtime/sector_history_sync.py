@@ -220,6 +220,7 @@ class SectorHistorySyncWorker:
         self._last_attempt: dict[str, float] = {}
         self._queue: Queue[str | object] = Queue()
         self._lock = threading.Lock()
+        self._listeners: list[Callable[[SectorSyncResult], None]] = []
         self._thread: threading.Thread | None = None
         self._stopped = False
 
@@ -246,6 +247,12 @@ class SectorHistorySyncWorker:
                 return False
             self._tracked.add(normalized)
             return self._enqueue_locked(normalized, force=False)
+
+    def add_listener(self, listener: Callable[[SectorSyncResult], None]) -> None:
+        """Register a quick, thread-safe observer for completed worker passes."""
+        with self._lock:
+            if listener not in self._listeners:
+                self._listeners.append(listener)
 
     def stop(self, timeout: float | None = None) -> None:
         """Stop the daemon cooperatively; primarily useful for deterministic tests."""
@@ -295,9 +302,10 @@ class SectorHistorySyncWorker:
                 return
             symbol = str(item)
             try:
-                synchronizer.sync_symbol_sector(
+                result = synchronizer.sync_symbol_sector(
                     symbol, max_uncached_members=self.max_members_per_run
                 )
+                self._publish(result)
             except Exception:
                 logger.exception(
                     "Unexpected sector history synchronization failure",
@@ -308,6 +316,18 @@ class SectorHistorySyncWorker:
                     self._pending.discard(symbol)
                     self._last_attempt[symbol] = self.monotonic()
                 self._queue.task_done()
+
+    def _publish(self, result: SectorSyncResult) -> None:
+        with self._lock:
+            listeners = tuple(self._listeners)
+        for listener in listeners:
+            try:
+                listener(result)
+            except Exception:
+                logger.exception(
+                    "Sector history completion listener failed",
+                    extra={"symbol": result.requested_symbol},
+                )
 
 
 def build_sector_history_synchronizer_from_env() -> SectorHistorySynchronizer:

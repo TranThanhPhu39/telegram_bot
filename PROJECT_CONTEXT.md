@@ -46,11 +46,11 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 20 operational follow-up — arbitrary-symbol sector synchronization —
-COMPLETE. Any valid symbol requested through `/soi ... ASMF` or `/sector` can now
-enter the existing background queue even when it is absent from
-`BOT_WATCH_SYMBOLS`. Phase 23 remains complete. Phases 3–7 remain pending live
-validation and may not be reported as PASS.
+Phase 20 operational follow-up — sector-sync completion notifications — COMPLETE.
+Chats requesting `/soi ... ASMF`, `/sector`, or the ASMF inline action now receive
+a deduplicated incomplete/ready notification from the background worker and an
+actionable `Xem lại ASMF` button. Phase 23 remains complete. Phases 3–7 remain
+pending live validation and may not be reported as PASS.
 
 ## 4. Completed
 
@@ -121,12 +121,11 @@ validation and may not be reported as PASS.
 
 ## 5. Currently Working On
 
-The requested Phase 20 operational follow-up is complete and stopped at its
-acceptance boundary. Dynamic sector synchronization is implemented and verified
-offline. It cannot guarantee provider availability, sufficient history for newly
-listed stocks, or BCTC/institutional-flow coverage; those conditions continue to
-fail closed rather than being fabricated. Phases 3–7 retain their pending
-live-validation status.
+The requested sector-notification follow-up is complete and stopped at its
+acceptance boundary. The next requested work must be handled as separate phases:
+populate real point-in-time BCTC/institutional-flow data, then add candlestick
+chart presentation. Provider availability and newly listed stocks with short
+history continue to fail closed. Phases 3–7 retain pending live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -2522,3 +2521,26 @@ realtime pricing, Phase 24 valuation, forecasting, optimization, brokerage execu
 - Isolated `.venv-phase21` dependency check: `No broken requirements found`.
 - Live Vietcap population for VHM is NOT TESTED in this coding iteration; provider
   timeout and data availability remain external runtime conditions.
+
+### 2026-09-20 — Phase 20 sector-sync notification follow-up
+
+- Added a worker completion-listener boundary. `SectorHistorySyncWorker` publishes
+  normalized `SectorSyncResult` values after each expected sync pass and remains
+  independent of Telegram APIs.
+- Added a thread-safe Telegram broker keyed by chat and symbol. It emits at most
+  one incomplete notification while keeping the chat subscribed, then one READY
+  notification when at least five sector histories are usable. The most recent
+  incomplete result is retained for chats that register after a fast worker pass.
+- Telegram registers the chat before executing `/soi <symbol> ASMF`, `/sector
+  <symbol>`, or the ASMF inline callback, preventing a completion race. A local
+  readiness check removes registrations immediately when no sync is needed.
+- Notifications contain a `Xem lại ASMF` callback. The bot never pushes an old
+  analysis automatically; clicking the button recomputes it from current data.
+- Failed Telegram sends are returned to the broker queue and are not treated as
+  delivered. The async dispatcher starts/stops with the polling application.
+- Focused notification/worker/runtime/Telegram regression: 59 passed. Full
+  isolated-dependency regression: 599 passed in 5.01 seconds.
+- Live Telegram delivery after a real VHM Vietcap sync is NOT TESTED; it requires
+  a successful external provider batch while the polling bot is running.
+- BCTC/institutional-flow acquisition and candlestick charts were not mixed into
+  this phase and remain the next two explicit user-requested follow-ups.

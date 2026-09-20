@@ -7,6 +7,7 @@ also reachable as a plain command, so losing the keyboard never loses a feature.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
@@ -22,6 +23,10 @@ from telegram.ext import (
 
 from telegram_bot.commands import TelegramCommandService
 from telegram_bot.portfolio_handlers import build_portfolio_handlers
+from telegram_bot.sector_notifications import (
+    SectorSyncNotificationBroker,
+    deliver_sector_notifications,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -118,10 +123,41 @@ def split_message(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> tuple[str, 
     return tuple(chunks)
 
 
-def build_application(token: str, commands: TelegramCommandService) -> Application:
+def build_application(
+    token: str,
+    commands: TelegramCommandService,
+    sector_notifications: SectorSyncNotificationBroker | None = None,
+) -> Application:
     if not token or not token.strip():
         raise ValueError("Telegram token must not be empty")
-    application = ApplicationBuilder().token(token.strip()).build()
+    builder = ApplicationBuilder().token(token.strip())
+    if sector_notifications is not None:
+        async def notification_loop(application: Application) -> None:
+            while True:
+                try:
+                    await deliver_sector_notifications(
+                        application.bot, sector_notifications
+                    )
+                except Exception:
+                    LOGGER.exception("Sector sync notification delivery failed")
+                await asyncio.sleep(1)
+
+        async def post_init(application: Application) -> None:
+            application.bot_data["sector_notification_task"] = asyncio.create_task(
+                notification_loop(application), name="sector-sync-notifications"
+            )
+
+        async def post_shutdown(application: Application) -> None:
+            task = application.bot_data.pop("sector_notification_task", None)
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        builder = builder.post_init(post_init).post_shutdown(post_shutdown)
+    application = builder.build()
 
     async def reply(update: Update, text: str, markup: InlineKeyboardMarkup | None = None) -> None:
         if update.effective_message is None:
@@ -154,6 +190,31 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
             return None
         return user.id
 
+    def _notification_chat_id(update: Update) -> int | str | None:
+        chat = getattr(update, "effective_chat", None)
+        return None if chat is None else chat.id
+
+    def _watch_sector(update: Update, symbol: str) -> tuple[int | str, str] | None:
+        if sector_notifications is None or not symbol or not symbol.isalnum():
+            return None
+        chat_id = _notification_chat_id(update)
+        if chat_id is None:
+            return None
+        sector_notifications.watch(chat_id, symbol)
+        return chat_id, symbol
+
+    def _remove_unneeded_watch(watch: tuple[int | str, str] | None) -> None:
+        if watch is None or sector_notifications is None:
+            return
+        checker = getattr(commands.data, "sector_history_needs_sync", None)
+        try:
+            needed = callable(checker) and checker(watch[1])
+        except Exception:
+            LOGGER.exception("Could not verify sector sync notification watch")
+            return
+        if not needed:
+            sector_notifications.unwatch(*watch)
+
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, commands.start())
 
@@ -162,13 +223,19 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
 
     async def soi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         markup = None
+        watch = None
         try:
-            text = commands.soi(context.args, _private_user_id(update))
             symbol = _first_argument(context)
+            args = context.args or []
+            if symbol and len(args) == 2 and args[1].strip().upper() == "ASMF":
+                watch = _watch_sector(update, symbol)
+            text = commands.soi(context.args, _private_user_id(update))
             if symbol:
                 markup = build_symbol_keyboard(symbol)
         except ValueError as error:
             text = str(error)
+        finally:
+            _remove_unneeded_watch(watch)
         await reply(update, text, markup)
 
     async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -199,7 +266,12 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
         await _reply_with_usage(update, lambda: commands.fundamental(context.args))
 
     async def sector(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await _reply_with_usage(update, lambda: commands.sector(context.args))
+        symbol = _first_argument(context)
+        watch = _watch_sector(update, symbol) if symbol else None
+        try:
+            await _reply_with_usage(update, lambda: commands.sector(context.args))
+        finally:
+            _remove_unneeded_watch(watch)
 
     async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -211,10 +283,12 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
         except ValueError as error:
             text = str(error)
         else:
+            watch = _watch_sector(update, symbol) if action == "asmf" else None
             text = render_callback(
                 commands, action, symbol,
                 _private_user_id(update),
             )
+            _remove_unneeded_watch(watch)
         if query.message is not None:
             for part in split_message(text):
                 await query.message.reply_text(part)
@@ -241,7 +315,12 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
     return application
 
 
-def run_polling(commands: TelegramCommandService) -> None:
-    application = build_application(load_telegram_token(), commands)
+def run_polling(
+    commands: TelegramCommandService,
+    sector_notifications: SectorSyncNotificationBroker | None = None,
+) -> None:
+    application = build_application(
+        load_telegram_token(), commands, sector_notifications
+    )
     LOGGER.info("Starting Telegram polling")
     application.run_polling(allowed_updates=Update.ALL_TYPES)

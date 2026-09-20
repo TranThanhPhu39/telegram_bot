@@ -121,6 +121,19 @@ class RuntimeBotDataService:
     ) -> None:
         """Attach the non-blocking background queue after runtime construction."""
         self.sector_history_requester = requester
+
+    def sector_history_needs_sync(self, symbol: str) -> bool:
+        """Return whether the current sector has fewer than five usable histories."""
+        symbol = symbol.strip().upper()
+        as_of = datetime.fromtimestamp(self.now(), VIETNAM_TIMEZONE).date()
+        membership = active_sector(self.connection, symbol, as_of)
+        if membership is None:
+            return False
+        members = sector_members(self.connection, membership["sector_code"], as_of)
+        usable = sum(
+            len(self._load(member)) >= MINIMUM_SECTOR_HISTORY for member in members
+        )
+        return usable < 5
     # ---------------------------------------------------------------- views
 
     def stock_analysis(self, symbol: str, strategy: str = "CL1") -> StockAnalysisView:
