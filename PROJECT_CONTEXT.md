@@ -2071,3 +2071,22 @@ three observed values before request construction.
   search attempt was interrupted by the execution approval service; NPL/CAR
   extraction remains NOT TESTED beyond those pages.
 - Real sector membership is still unavailable, so Phase 20 remains partial.
+
+### 2026-09-20 — Phase 20 ACB NPL extraction (partial)
+
+- Extracted and locally cached all 84 note pages from the supplied image-only
+  ACB report, then OCRed them with `vie+eng` without modifying the source PDF.
+- Located note 9.3 on PDF page 49 and visually verified the 30 June 2026 loan
+  quality values: group 3 = 1,350,279; group 4 = 1,339,763; group 5 = 4,967,367
+  million VND. Normalized NPL is their exact sum, 7,657,409 million VND.
+- The quality table reconciles: groups 1–5 plus margin lending equal gross loans
+  of 745,759,303 million VND.
+- Extended the OCR parser and CLI with an optional loan-quality page. NPL remains
+  nullable for reports without that page; invalid or impossible group sums fail.
+- No CAR disclosure was found across the 84 note pages. CAR remains NULL and the
+  bank score remains unavailable, as designed.
+- The real ACB regression fixture now includes NPL. Live OCR generated a matching
+  CSV with NPL, and the complete suite passes with 404 tests.
+- Financial PDF extraction is now checked complete for values actually disclosed
+  by this report. Phase 20 still remains partial solely within its current task
+  list because real sector membership has not been acquired and validated.

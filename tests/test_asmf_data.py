@@ -136,5 +136,5 @@ def test_real_acb_ocr_dataset_imports_and_reads_back() -> None:
     assert stored["equity"] == 99_314_518
     assert stored["gross_loans"] == 745_759_303
     assert stored["loan_loss_reserve"] == 8_065_344
-    assert stored["nonperforming_loans"] is None
+    assert stored["nonperforming_loans"] == 7_657_409
     assert stored["car_percent"] is None

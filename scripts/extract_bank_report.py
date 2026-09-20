@@ -19,15 +19,19 @@ def main() -> int:
     parser.add_argument("--asset-page", required=True, type=int)
     parser.add_argument("--liability-page", required=True, type=int)
     parser.add_argument("--income-page", required=True, type=int)
+    parser.add_argument("--quality-page", type=int)
     parser.add_argument("--source", required=True)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
-    page_numbers = (args.asset_page, args.liability_page, args.income_page)
+    page_numbers = tuple(dict.fromkeys(filter(None, (
+        args.asset_page, args.liability_page, args.income_page, args.quality_page,
+    ))))
     text = ocr_pdf_pages(args.pdf, page_numbers)
     row = parse_bank_interim_ocr(
         symbol=args.symbol, report_period=args.period, public_date=args.public_date,
         asset_text=text[args.asset_page], liability_text=text[args.liability_page],
         income_text=text[args.income_page], source=args.source,
+        quality_text=text[args.quality_page] if args.quality_page else None,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     fields = tuple(row.__dataclass_fields__)

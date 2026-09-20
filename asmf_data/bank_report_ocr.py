@@ -82,6 +82,7 @@ def parse_bank_interim_ocr(
     asset_text: str,
     liability_text: str,
     income_text: str,
+    quality_text: str | None = None,
     source: str,
 ) -> BankFinancialReport:
     """Parse only verified Vietnamese B02a/B03a labels with integrity checks."""
@@ -99,11 +100,21 @@ def parse_bank_interim_ocr(
     if interest_income - interest_expense != net_interest_income:
         raise BankReportOcrError("interest values fail income minus expense equals NII check")
     net_profit = _current_value(income_text, "loi nhuan sau thue")
+    nonperforming_loans = None
+    if quality_text is not None:
+        nonperforming_loans = sum(
+            _current_value(quality_text, f"nhom {group} - no")
+            for group in (3, 4, 5)
+        )
+        if nonperforming_loans <= 0 or nonperforming_loans > gross_loans:
+            raise BankReportOcrError("nonperforming-loan groups are invalid")
 
     return BankFinancialReport(
         symbol.strip().upper(), report_period.strip().upper(), public_date,
         int(report_period[-1]) * 3, float(net_interest_income), float(net_profit),
-        float(equity), float(gross_loans), None, float(reserve), None, source.strip(),
+        float(equity), float(gross_loans),
+        float(nonperforming_loans) if nonperforming_loans is not None else None,
+        float(reserve), None, source.strip(),
     )
 
 

@@ -440,3 +440,6 @@ rotated, contrast-normalized, and upscaled before local Tesseract `vie+eng` OCR.
 Only verified B02a/B03a labels are normalized. Gross loans and net interest income
 must reconcile against their component lines; small digit errors may be corrected
 only from an exact accounting identity, while material mismatches fail closed.
+When a loan-quality table is supplied, NPL is the explicit sum of current-period
+groups 3, 4, and 5. CAR remains nullable because ordinary financial statements
+may not contain the regulatory capital disclosure.
