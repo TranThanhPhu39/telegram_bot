@@ -48,8 +48,8 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 Phase 20 — ASMF EOD data integration — PARTIAL. Provider-independent models,
 SQLite persistence, CSV ingestion, point-in-time scoring, and runtime wiring are
-implemented. Automatic CafeF/Vietstock acquisition and real-data acceptance are
-blocked until exact export or Network response samples are supplied. Phases
+implemented. Vietstock document discovery now works live without stored tokens;
+financial-value extraction and real-data import remain pending. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -114,17 +114,18 @@ blocked until exact export or Network response samples are supplied. Phases
 - [x] Sunday fallback verified against Friday 2026-09-18 ACB and VNINDEX data
 - [x] Selectable CL1 and honest partial-data ASMF strategy runtime implemented
 - [x] Point-in-time ASMF sector/BCTC/institutional-flow foundation implemented
+- [x] Bank-specific financial schema and ASMF quality score implemented
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 20 is split at a safe boundary because CafeF/Vietstock acquisition formats
-are an unresolved external dependency. Normalized CSV data can already be loaded
-and consumed by ASMF without look-ahead. Automatic acquisition and real-data
-acceptance remain NOT TESTED and must not be marked complete until representative
-source exports or Network JSON responses are available.
+Phase 20 remains split at a safe boundary. Vietstock metadata discovery is now
+live-verified, including runtime anti-forgery token/cookie acquisition, but report
+content is delivered as PDF/ZIP and still needs a bank-aware extraction pipeline.
+Normalized CSV data can already be loaded and consumed by ASMF without look-ahead.
+Real-value import remains NOT TESTED and Phase 20 is not complete.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
@@ -1979,6 +1980,37 @@ three observed values before request construction.
   breadth scoring requiring at least five members.
 - Connected available persisted scores to the existing shared ASMF evaluator.
 - Confirmed that foreign-only flow remains usable when proprietary data is absent.
-- Split Phase 20 because automatic CafeF/Vietstock acquisition cannot be safely
-  implemented without observed source export schemas or Network JSON contracts.
-  Automatic acquisition and real-data acceptance remain NOT TESTED.
+- Added a Vietstock client from the observed `getdocument` contract. It acquires
+  CSRF/cookies at runtime, normalizes report metadata, filters consolidated files,
+  validates download hosts, and never persists session secrets.
+- Live discovery passed for ACB page 1 and returned ten consolidated reports from
+  2024–2026. Full PDF download did not complete within the bounded runner and is
+  NOT TESTED; no partial file was retained.
+- Phase 20 remains partial because PDF/ZIP content extraction and real normalized
+  value import are not implemented yet.
+- Added schema migration v3 and a bank-specific cumulative-report model. Quarterly
+  NII/profit are derived from successive cumulative periods without look-ahead.
+- Added bank scoring based on ROE, NII growth, profit growth, NPL ratio, loan-loss
+  coverage, and CAR. The industrial-company debt/equity rule is never applied to
+  rows in the bank table, and missing asset-quality/CAR inputs keep the score
+  unavailable rather than silently passing.
+- Added an ACB H1 2026 normalized CSV template containing only values confirmed
+  from the reviewed consolidated report; NPL, reserve, and CAR remain blank.
+- Real sector membership has not been acquired yet. Only the effective-dated
+  schema, importer, and sector RS/breadth calculation currently exist.
+
+### 2026-09-20 — Phase 20 safe report-file boundary (partial)
+
+- Fixed bank dispatch so the existence of bank-specific rows selects the bank
+  scoring branch even when CAR/NPL/coverage data is incomplete. It can no longer
+  fall through to the industrial debt/equity formula.
+- Changed Vietstock report downloads to bounded streaming through an atomic
+  `.part` file, capped at 100 MiB. PDF signatures and ZIP integrity/path safety
+  are validated before a file is accepted.
+- Passed the complete 396-test suite.
+- Direct HEAD requests to the Q1 ZIP and Q2 PDF did not respond inside two
+  consecutive 30-second windows and were stopped. Live file download therefore
+  remains NOT TESTED in this iteration; no partial file was retained.
+- Phase 20 remains partial. The next task is to obtain one real ZIP/PDF through
+  the bounded downloader, inspect its contents, and implement only the verified
+  bank-field extraction path.

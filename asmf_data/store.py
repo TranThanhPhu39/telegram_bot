@@ -6,7 +6,7 @@ from datetime import date
 import sqlite3
 from typing import Iterable
 
-from asmf_data.models import FinancialReport, InstitutionalFlow, SectorMembership
+from asmf_data.models import BankFinancialReport, FinancialReport, InstitutionalFlow, SectorMembership
 
 
 def upsert_sector_memberships(connection: sqlite3.Connection, rows: Iterable[SectorMembership]) -> int:
@@ -54,10 +54,35 @@ def upsert_institutional_flows(connection: sqlite3.Connection, rows: Iterable[In
     return len(values)
 
 
+def upsert_bank_financial_reports(connection: sqlite3.Connection, rows: Iterable[BankFinancialReport]) -> int:
+    values = tuple(rows)
+    _ensure_symbols(connection, (row.symbol for row in values))
+    with connection:
+        connection.executemany(
+            "INSERT INTO bank_financial_reports VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(symbol,report_period) DO UPDATE SET public_date=excluded.public_date,"
+            "period_months=excluded.period_months,net_interest_income=excluded.net_interest_income,"
+            "net_profit=excluded.net_profit,equity=excluded.equity,gross_loans=excluded.gross_loans,"
+            "nonperforming_loans=excluded.nonperforming_loans,loan_loss_reserve=excluded.loan_loss_reserve,"
+            "car_percent=excluded.car_percent,source=excluded.source",
+            [(r.symbol, r.report_period, r.public_date.isoformat(), r.period_months,
+              r.net_interest_income, r.net_profit, r.equity, r.gross_loans,
+              r.nonperforming_loans, r.loan_loss_reserve, r.car_percent, r.source) for r in values],
+        )
+    return len(values)
+
+
 def latest_financial_reports(connection: sqlite3.Connection, symbol: str, as_of: date) -> tuple[sqlite3.Row, ...]:
     return tuple(connection.execute(
         "SELECT * FROM financial_reports WHERE symbol=? AND consolidated=1 AND public_date<=? "
         "ORDER BY report_period DESC LIMIT 8", (symbol, as_of.isoformat())
+    ).fetchall())
+
+
+def latest_bank_financial_reports(connection: sqlite3.Connection, symbol: str, as_of: date) -> tuple[sqlite3.Row, ...]:
+    return tuple(connection.execute(
+        "SELECT * FROM bank_financial_reports WHERE symbol=? AND public_date<=? "
+        "ORDER BY report_period DESC LIMIT 12", (symbol, as_of.isoformat())
     ).fetchall())
 
 

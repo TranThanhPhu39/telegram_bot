@@ -6,7 +6,7 @@ import csv
 from datetime import date
 from pathlib import Path
 
-from asmf_data.models import FinancialReport, InstitutionalFlow, SectorMembership
+from asmf_data.models import BankFinancialReport, FinancialReport, InstitutionalFlow, SectorMembership
 
 
 def load_sector_csv(path: str | Path) -> tuple[SectorMembership, ...]:
@@ -31,6 +31,22 @@ def load_flow_csv(path: str | Path) -> tuple[InstitutionalFlow, ...]:
         _optional_float(r["foreign_buy_value"]), _optional_float(r["foreign_sell_value"]),
         _optional_float(r["proprietary_buy_value"]), _optional_float(r["proprietary_sell_value"]),
         r["source"].strip()) for r in rows)
+
+
+def load_bank_financial_csv(path: str | Path) -> tuple[BankFinancialReport, ...]:
+    columns = ("symbol", "report_period", "public_date", "period_months",
+               "net_interest_income", "net_profit", "equity", "gross_loans",
+               "nonperforming_loans", "loan_loss_reserve", "car_percent", "source")
+    rows = _rows(path, columns)
+    return tuple(BankFinancialReport(
+        r["symbol"].strip().upper(), r["report_period"].strip().upper(),
+        date.fromisoformat(r["public_date"].strip()), int(r["period_months"]),
+        float(r["net_interest_income"]), float(r["net_profit"]),
+        float(r["equity"]), float(r["gross_loans"]),
+        _optional_float(r["nonperforming_loans"]),
+        _optional_float(r["loan_loss_reserve"]), _optional_float(r["car_percent"]),
+        r["source"].strip(),
+    ) for r in rows)
 
 
 def _rows(path: str | Path, columns: tuple[str, ...]) -> list[dict[str, str]]:

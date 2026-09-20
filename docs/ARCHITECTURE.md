@@ -420,6 +420,17 @@ published in the future.
 
 Strict UTF-8 CSV schemas provide a stable import boundary for CafeF, Vietstock,
 UBCKNN, or licensed exports. `scripts/import_asmf_eod` loads these records into
-SQLite. Direct website adapters are intentionally deferred until their actual
-request/response or export format is observed; core scoring does not depend on a
-particular web page layout.
+SQLite.
+
+`asmf_data.vietstock.VietstockDocumentClient` implements the observed public
+document contract. It opens the symbol document page to obtain the session cookie
+and anti-forgery token at runtime, posts `code/page/type` to `data/getdocument`,
+normalizes metadata, and allow-lists the static download host. No token or cookie
+is persisted. Core scoring remains independent of the provider.
+
+Banks use a separate `bank_financial_reports` table because customer deposits and
+interbank funding make industrial debt/equity thresholds invalid. Income fields
+are stored cumulatively with `period_months`; scoring derives standalone quarters
+from adjacent cumulative reports, then evaluates ROE, net-interest-income growth,
+profit growth, NPL ratio, loan-loss coverage, and CAR. Missing prudential inputs
+produce an unavailable score, not a neutral or passing default.

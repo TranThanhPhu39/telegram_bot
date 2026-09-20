@@ -7,8 +7,8 @@ import os
 
 from dotenv import load_dotenv
 
-from asmf_data.csv_source import load_financial_csv, load_flow_csv, load_sector_csv
-from asmf_data.store import upsert_financial_reports, upsert_institutional_flows, upsert_sector_memberships
+from asmf_data.csv_source import load_bank_financial_csv, load_financial_csv, load_flow_csv, load_sector_csv
+from asmf_data.store import upsert_bank_financial_reports, upsert_financial_reports, upsert_institutional_flows, upsert_sector_memberships
 from data.database import connect_database
 from data.migrations import bootstrap_schema
 
@@ -18,9 +18,10 @@ def main() -> int:
     parser.add_argument("--sectors")
     parser.add_argument("--financials")
     parser.add_argument("--flows")
+    parser.add_argument("--bank-financials")
     args = parser.parse_args()
-    if not any((args.sectors, args.financials, args.flows)):
-        parser.error("provide at least one of --sectors, --financials, or --flows")
+    if not any((args.sectors, args.financials, args.flows, args.bank_financials)):
+        parser.error("provide at least one ASMF input file")
     load_dotenv()
     connection = connect_database(os.getenv("DATABASE_URL", "sqlite:///stock_bot.db"))
     bootstrap_schema(connection)
@@ -31,6 +32,8 @@ def main() -> int:
             print(f"financials: {upsert_financial_reports(connection, load_financial_csv(args.financials))}")
         if args.flows:
             print(f"flows: {upsert_institutional_flows(connection, load_flow_csv(args.flows))}")
+        if args.bank_financials:
+            print(f"bank_financials: {upsert_bank_financial_reports(connection, load_bank_financial_csv(args.bank_financials))}")
     finally:
         connection.close()
     return 0

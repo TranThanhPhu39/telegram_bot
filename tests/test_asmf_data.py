@@ -2,10 +2,10 @@
 
 from datetime import date
 
-from asmf_data.csv_source import load_financial_csv, load_flow_csv, load_sector_csv
-from asmf_data.models import FinancialReport, InstitutionalFlow, SectorMembership
-from asmf_data.scoring import fundamental_score, institutional_flow_score, sector_strength_score
-from asmf_data.store import upsert_financial_reports, upsert_institutional_flows, upsert_sector_memberships
+from asmf_data.csv_source import load_bank_financial_csv, load_financial_csv, load_flow_csv, load_sector_csv
+from asmf_data.models import BankFinancialReport, FinancialReport, InstitutionalFlow, SectorMembership
+from asmf_data.scoring import bank_fundamental_score, fundamental_score, institutional_flow_score, sector_strength_score
+from asmf_data.store import upsert_bank_financial_reports, upsert_financial_reports, upsert_institutional_flows, upsert_sector_memberships
 from data.database import connect_database
 from data.migrations import bootstrap_schema
 from data.models import OHLCVBar
@@ -74,3 +74,48 @@ def test_strict_csv_templates_load(tmp_path) -> None:
     assert load_sector_csv(sector)[0].sector_code == "TECH"
     assert load_financial_csv(financial)[0].public_date == date(2025, 4, 20)
     assert load_flow_csv(flow)[0].proprietary_buy_value is None
+
+
+def test_bank_score_uses_bank_quality_not_debt_to_equity() -> None:
+    db = connection()
+    reports = []
+    cumulative_nii = {2024: 0.0, 2025: 0.0}
+    cumulative_profit = {2024: 0.0, 2025: 0.0}
+    for year in (2024, 2025):
+        for quarter in range(1, 5):
+            growth = 1.0 if year == 2024 else 1.25
+            cumulative_nii[year] += 100 * growth
+            cumulative_profit[year] += 25 * growth
+            reports.append(BankFinancialReport(
+                "ACB", f"{year}Q{quarter}", date(year, quarter * 3, 28), quarter * 3,
+                cumulative_nii[year], cumulative_profit[year], 500, 10_000,
+                150, 180, 12, "TEST",
+            ))
+    upsert_bank_financial_reports(db, reports)
+    assert bank_fundamental_score(db, "ACB", date(2025, 12, 31)) == 100
+    assert fundamental_score(db, "ACB", date(2025, 12, 31)) == 100
+
+
+def test_bank_score_blocks_when_car_or_asset_quality_is_missing() -> None:
+    db = connection()
+    reports = [BankFinancialReport(
+        "ACB", f"{year}Q{quarter}", date(year, quarter * 3, 28), quarter * 3,
+        quarter * 100, quarter * 25, 500, 10_000, None, None, None, "TEST",
+    ) for year in (2024, 2025) for quarter in range(1, 5)]
+    upsert_bank_financial_reports(db, reports)
+    assert bank_fundamental_score(db, "ACB", date(2025, 12, 31)) is None
+
+
+def test_incomplete_bank_data_never_falls_back_to_industrial_score() -> None:
+    db = connection()
+    bank_rows = [BankFinancialReport(
+        "ACB", f"{year}Q{quarter}", date(year, quarter * 3, 28), quarter * 3,
+        quarter * 100, quarter * 25, 500, 10_000, None, None, None, "TEST",
+    ) for year in (2024, 2025) for quarter in range(1, 5)]
+    industrial_rows = [FinancialReport(
+        "ACB", f"{year}Q{quarter}", date(year, quarter * 3, 28), True,
+        200, 50, 100, 10, "SHOULD_NOT_BE_USED",
+    ) for year in (2024, 2025) for quarter in range(1, 5)]
+    upsert_bank_financial_reports(db, bank_rows)
+    upsert_financial_reports(db, industrial_rows)
+    assert fundamental_score(db, "ACB", date(2025, 12, 31)) is None

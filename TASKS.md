@@ -342,9 +342,19 @@ was fabricated from incomplete inputs.
 - [x] Add sector, fundamental, and institutional-flow scoring
 - [x] Connect stored scores to the shared ASMF runtime
 - [x] Add schema migration and no-look-ahead tests
-- [ ] Add automatic CafeF/Vietstock acquisition adapters
-  - BLOCKED: exact public request/response or export formats have not been
-    observed. Do not guess unstable endpoints or HTML fields.
+- [x] Add automatic Vietstock document discovery adapter
+  - Live verified for ACB: runtime CSRF/cookie acquisition and page-1 JSON list.
+- [x] Normalize Vietstock document metadata and filter consolidated reports
+- [x] Add bank-specific point-in-time financial schema and CSV import
+- [x] Add bank-specific ASMF score (ROE/NII/profit/NPL/coverage/CAR)
+- [x] Prevent industrial debt/equity rules from being applied to banks
+  - Incomplete bank rows remain unavailable and cannot fall back to the
+    industrial-company score.
+- [x] Add bounded, streamed Vietstock PDF/ZIP download validation
+  - Uses an atomic `.part` file, a 100 MiB limit, signature checks, and ZIP path
+    safety checks; malformed responses are not retained.
+- [ ] Acquire and validate real sector membership data
+- [ ] Extract normalized financial statement values from PDF/ZIP contents
 - [ ] Validate a real imported dataset
 - [ ] STOP and report
 

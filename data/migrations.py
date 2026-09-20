@@ -15,6 +15,7 @@ from data.schema import (
     SECTOR_MEMBERSHIPS_TABLE_SQL,
     FINANCIAL_REPORTS_TABLE_SQL,
     INSTITUTIONAL_FLOWS_TABLE_SQL,
+    BANK_FINANCIAL_REPORTS_TABLE_SQL,
 )
 
 SCHEMA_MIGRATIONS_TABLE_SQL = """
@@ -63,6 +64,11 @@ MIGRATIONS = (
             FINANCIAL_REPORTS_TABLE_SQL,
             INSTITUTIONAL_FLOWS_TABLE_SQL,
         ),
+    ),
+    Migration(
+        version=3,
+        name="asmf_bank_financials",
+        statements=(BANK_FINANCIAL_REPORTS_TABLE_SQL,),
     ),
 )
 

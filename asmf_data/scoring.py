@@ -6,11 +6,19 @@ from datetime import date
 import sqlite3
 from typing import Mapping, Sequence
 
-from asmf_data.store import active_sector, latest_financial_reports, recent_flows, sector_members
+from asmf_data.store import (
+    active_sector, latest_bank_financial_reports, latest_financial_reports,
+    recent_flows, sector_members,
+)
 from data.models import OHLCVBar
 
 
 def fundamental_score(connection: sqlite3.Connection, symbol: str, as_of: date) -> float | None:
+    # The presence of point-in-time bank rows identifies the bank branch.  An
+    # incomplete bank score must stay unavailable; it must never fall through
+    # to industrial-company leverage rules.
+    if latest_bank_financial_reports(connection, symbol, as_of):
+        return bank_fundamental_score(connection, symbol, as_of)
     reports = latest_financial_reports(connection, symbol, as_of)
     if len(reports) < 8:
         return None
@@ -34,6 +42,50 @@ def fundamental_score(connection: sqlite3.Connection, symbol: str, as_of: date) 
         profit_growth > 15,
         latest_profit_growth > prior_profit_growth,
         debt_equity < 1.5,
+    )
+    return 100 * sum(checks) / len(checks)
+
+
+def bank_fundamental_score(connection: sqlite3.Connection, symbol: str, as_of: date) -> float | None:
+    """Score banks without applying industrial-company leverage rules."""
+    rows = latest_bank_financial_reports(connection, symbol, as_of)
+    by_period = {row["report_period"]: row for row in rows}
+    if len(by_period) < 8:
+        return None
+    periods = sorted(by_period, reverse=True)[:8]
+    standalone: dict[str, tuple[float, float]] = {}
+    for period in periods:
+        row = by_period[period]
+        quarter = int(period[-1])
+        if quarter == 1:
+            standalone[period] = (row["net_interest_income"], row["net_profit"])
+            continue
+        prior = by_period.get(f"{period[:4]}Q{quarter - 1}")
+        if prior is None:
+            return None
+        standalone[period] = (
+            row["net_interest_income"] - prior["net_interest_income"],
+            row["net_profit"] - prior["net_profit"],
+        )
+    current_periods, previous_periods = periods[:4], periods[4:8]
+    nii_now = sum(standalone[p][0] for p in current_periods)
+    nii_before = sum(standalone[p][0] for p in previous_periods)
+    profit_now = sum(standalone[p][1] for p in current_periods)
+    profit_before = sum(standalone[p][1] for p in previous_periods)
+    latest = by_period[periods[0]]
+    required = (latest["nonperforming_loans"], latest["loan_loss_reserve"], latest["car_percent"])
+    if min(nii_before, profit_before) <= 0 or any(value is None for value in required):
+        return None
+    npl_ratio = latest["nonperforming_loans"] / latest["gross_loans"] * 100
+    coverage = latest["loan_loss_reserve"] / latest["nonperforming_loans"] * 100 if latest["nonperforming_loans"] else 999.0
+    roe = profit_now / latest["equity"] * 100
+    checks = (
+        roe > 15,
+        (nii_now / nii_before - 1) * 100 > 10,
+        (profit_now / profit_before - 1) * 100 > 15,
+        npl_ratio < 3,
+        coverage > 100,
+        latest["car_percent"] >= 8,
     )
     return 100 * sum(checks) / len(checks)
 

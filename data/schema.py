@@ -195,6 +195,34 @@ CREATE TABLE IF NOT EXISTS institutional_flows (
 ) WITHOUT ROWID
 """
 
+BANK_FINANCIAL_REPORTS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS bank_financial_reports (
+    symbol TEXT NOT NULL,
+    report_period TEXT NOT NULL,
+    public_date TEXT NOT NULL,
+    period_months INTEGER NOT NULL,
+    net_interest_income REAL NOT NULL,
+    net_profit REAL NOT NULL,
+    equity REAL NOT NULL,
+    gross_loans REAL NOT NULL,
+    nonperforming_loans REAL,
+    loan_loss_reserve REAL,
+    car_percent REAL,
+    source TEXT NOT NULL,
+    PRIMARY KEY (symbol, report_period),
+    FOREIGN KEY (symbol) REFERENCES symbols(symbol) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CHECK (symbol = upper(trim(symbol))),
+    CHECK (report_period GLOB '[0-9][0-9][0-9][0-9]Q[1-4]'),
+    CHECK (date(public_date) = public_date),
+    CHECK (period_months IN (3, 6, 9, 12)),
+    CHECK (net_interest_income >= 0 AND equity > 0 AND gross_loans > 0),
+    CHECK (nonperforming_loans IS NULL OR nonperforming_loans >= 0),
+    CHECK (loan_loss_reserve IS NULL OR loan_loss_reserve >= 0),
+    CHECK (car_percent IS NULL OR car_percent > 0),
+    CHECK (length(trim(source)) > 0)
+) WITHOUT ROWID
+"""
+
 
 def create_symbols_table(connection: sqlite3.Connection) -> None:
     """Create the normalized symbol catalog without altering existing rows."""

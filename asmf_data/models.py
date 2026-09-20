@@ -71,6 +71,42 @@ class InstitutionalFlow:
             raise ValueError("flow values must be finite and non-negative")
 
 
+@dataclass(frozen=True, slots=True)
+class BankFinancialReport:
+    """Cumulative bank income and point-in-time balance-sheet values."""
+
+    symbol: str
+    report_period: str
+    public_date: date
+    period_months: int
+    net_interest_income: float
+    net_profit: float
+    equity: float
+    gross_loans: float
+    nonperforming_loans: float | None
+    loan_loss_reserve: float | None
+    car_percent: float | None
+    source: str
+
+    def __post_init__(self) -> None:
+        _normalized(self.symbol, "symbol")
+        _text(self.source, "source")
+        if len(self.report_period) != 6 or self.report_period[4] != "Q" or self.report_period[-1] not in "1234":
+            raise ValueError("report_period must use YYYYQn")
+        expected_months = int(self.report_period[-1]) * 3
+        if self.period_months != expected_months:
+            raise ValueError("period_months must match the cumulative report quarter")
+        for name in ("net_interest_income", "net_profit", "equity", "gross_loans"):
+            if not isfinite(getattr(self, name)):
+                raise ValueError(f"{name} must be finite")
+        if self.net_interest_income < 0 or self.equity <= 0 or self.gross_loans <= 0:
+            raise ValueError("bank income must be non-negative and balance values positive")
+        for name in ("nonperforming_loans", "loan_loss_reserve", "car_percent"):
+            value = getattr(self, name)
+            if value is not None and (not isfinite(value) or value < 0):
+                raise ValueError(f"{name} must be finite and non-negative when present")
+
+
 def _normalized(value: str, name: str) -> None:
     if not value or value != value.strip().upper() or not value.replace("_", "").isalnum():
         raise ValueError(f"{name} must be normalized uppercase text")
