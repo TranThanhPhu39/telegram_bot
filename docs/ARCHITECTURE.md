@@ -418,6 +418,12 @@ real publication date; foreign and proprietary flows are stored per symbol/day.
 All scoring queries use an `as_of` date so a backtest cannot see a report or flow
 published in the future.
 
+`asmf_data.vietcap_sectors.VietcapSectorClient` snapshots the observed Vietcap
+`/api/price/symbols/getAll` catalog. It retains only STOCK rows on HSX/HOSE, HNX,
+and UPCOM with a valid `icbCode2`, records the observation date as
+`effective_from`, and never backdates membership. Codes remain the grouping key;
+when no verified ICB name table is available, the display name is `ICB2 <code>`.
+
 Strict UTF-8 CSV schemas provide a stable import boundary for CafeF, Vietstock,
 UBCKNN, or licensed exports. `scripts/import_asmf_eod` loads these records into
 SQLite.

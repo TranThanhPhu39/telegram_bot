@@ -2090,3 +2090,26 @@ three observed values before request construction.
 - Financial PDF extraction is now checked complete for values actually disclosed
   by this report. Phase 20 still remains partial solely within its current task
   list because real sector membership has not been acquired and validated.
+
+### 2026-09-20 — Phase 20 real sector snapshot (complete)
+
+- Confirmed from the installed vnstock VCI adapter source that the observed
+  Vietcap catalog endpoint is `/api/price/symbols/getAll` and `icbCode2` is its
+  industry grouping field. The legacy GraphQL request returned HTTP 200 with an
+  empty object and was not used.
+- Added an authenticated Vietcap sector client and CLI. It filters STOCK records
+  to HSX/HOSE, HNX, and UPCOM; validates symbol/code shape; rejects conflicting
+  classifications; and records the observation date rather than backdating.
+- Runtime evidence corrected an initial assumption: Vietcap uses `HSX` for HOSE
+  rows. A regression test now covers the real ACB shape.
+- A live 2026-09-20 snapshot normalized 1,523 ICB2 memberships and imported all
+  of them into runtime SQLite. Read-back confirmed ACB has ICB2 code 8300,
+  effective from 2026-09-20, with 28 members in that group.
+- The snapshot deliberately does not apply to the completed 2026-09-18 session;
+  doing so would backdate knowledge and introduce look-ahead. It becomes usable
+  from its observed date onward.
+- The CafeF workbook supplied earlier contains one six-row financial-report sheet
+  and no industry field; it was not used as a sector source.
+- Added three offline adapter tests. The complete suite passes with 407 tests.
+- All Phase 20 checklist items now have runtime or test evidence. Phase 20 is
+  complete; Phase 21 has not been started.

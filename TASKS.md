@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 20 — ASMF EOD data integration (PARTIAL; provider samples required)**
+**Phase 20 — ASMF EOD data integration (COMPLETE)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -356,14 +356,16 @@ was fabricated from incomplete inputs.
 - [x] Classify downloaded PDF/ZIP reports before extraction
   - Real ACB H1 2026 PDF: 96 pages, zero text characters, 96 embedded images;
     correctly routed to `ocr_required` rather than parsed as text.
-- [ ] Acquire and validate real sector membership data
+- [x] Acquire and validate real sector membership data
+  - Vietcap `getAll` snapshot on 2026-09-20 normalized 1,523 ICB2 memberships
+    and was imported into runtime SQLite. ACB has code 8300 with 28 members.
 - [x] Extract normalized financial statement values from PDF/ZIP contents
   - Tesseract `vie+eng` extracts verified ACB B02a/B03a values and NPL as the
     checked sum of groups 3–5. CAR is not present in this report and remains NULL.
 - [x] Validate a real imported dataset
   - ACB 2026Q2 OCR fixture imports into SQLite and reads back six verified
     values without fabricating unavailable CAR.
-- [ ] STOP and report
+- [x] STOP and report
 
 ---
 
