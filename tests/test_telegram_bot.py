@@ -17,7 +17,7 @@ class FakeData:
     overviews: dict[str, str] = field(default_factory=lambda: {"FPT": "FPT: ACTIVE"})
     explanations: dict[str, str] = field(default_factory=lambda: {"FPT": "RVOL tốt"})
 
-    def symbol_overview(self, symbol: str) -> str | None:
+    def symbol_overview(self, symbol: str, strategy: str = "CL1") -> str | None:
         return self.overviews.get(symbol)
 
     def scan_results(self) -> tuple[str, ...]:
@@ -31,6 +31,9 @@ class FakeData:
 
     def performance_overview(self) -> str:
         return "Win rate: 50%"
+
+    def strategy_catalog(self) -> str:
+        return "CL1, ASMF"
 
 
 class FakeBot:
@@ -56,6 +59,8 @@ def test_start_help_and_all_data_commands() -> None:
     assert "/soi FPT" in commands.start()
     assert "/why FPT" in commands.help()
     assert commands.soi(["fpt"]) == "FPT: ACTIVE"
+    assert commands.soi(["fpt", "asmf"]) == "FPT: ACTIVE"
+    assert commands.strategies() == "CL1, ASMF"
     assert commands.scan() == "Watchlist: FPT, ACB"
     assert commands.market() == "VNINDEX: BULL"
     assert commands.why(["fpt"]) == "RVOL tốt"
@@ -68,6 +73,8 @@ def test_commands_handle_missing_data_and_usage() -> None:
     assert commands.why(["ACB"]) == "Chưa có giải thích tín hiệu cho ACB."
     with pytest.raises(ValueError, match="/soi FPT"):
         commands.soi([])
+    with pytest.raises(ValueError, match="CL1 hoặc ASMF"):
+        commands.soi(["FPT", "unknown"])
     with pytest.raises(ValueError, match="/why FPT"):
         commands.why(["FPT", "ACB"])
 
@@ -84,7 +91,7 @@ def test_safe_runtime_fallback_never_fabricates_market_data() -> None:
 def test_application_registers_all_required_commands() -> None:
     application = build_application("123456:TEST_TOKEN", TelegramCommandService(FakeData()))
     commands = {command for handler in application.handlers[0] for command in handler.commands}
-    assert commands == {"start", "help", "soi", "scan", "market", "why", "performance"}
+    assert commands == {"start", "help", "soi", "scan", "market", "why", "performance", "chienluoc"}
 
 
 def test_alert_format_contains_transition_and_reason() -> None:

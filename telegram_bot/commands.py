@@ -6,16 +6,18 @@ from typing import Protocol, Sequence
 
 
 class BotDataService(Protocol):
-    def symbol_overview(self, symbol: str) -> str | None: ...
+    def symbol_overview(self, symbol: str, strategy: str = "CL1") -> str | None: ...
     def scan_results(self) -> Sequence[str]: ...
     def market_overview(self) -> str: ...
     def signal_explanation(self, symbol: str) -> str | None: ...
     def performance_overview(self) -> str: ...
+    def strategy_catalog(self) -> str: ...
 
 
 HELP_TEXT = (
     "Các lệnh:\n"
-    "/soi FPT - xem trạng thái một mã\n"
+    "/soi FPT [CL1|ASMF] - xem trạng thái một mã\n"
+    "/chienluoc - xem các chiến lược\n"
     "/scan - xem danh sách quét\n"
     "/market - xem trạng thái thị trường\n"
     "/why FPT - xem lý do tín hiệu\n"
@@ -26,7 +28,7 @@ HELP_TEXT = (
 class UnavailableBotDataService:
     """Safe runtime fallback until live orchestration wires the data layers."""
 
-    def symbol_overview(self, symbol: str) -> None:
+    def symbol_overview(self, symbol: str, strategy: str = "CL1") -> None:
         return None
 
     def scan_results(self) -> tuple[str, ...]:
@@ -41,6 +43,9 @@ class UnavailableBotDataService:
     def performance_overview(self) -> str:
         return "Kết quả backtest hiện chưa sẵn sàng."
 
+    def strategy_catalog(self) -> str:
+        return "CL1 và ASMF hiện chưa sẵn sàng."
+
 
 class TelegramCommandService:
     def __init__(self, data: BotDataService) -> None:
@@ -53,8 +58,8 @@ class TelegramCommandService:
         return HELP_TEXT
 
     def soi(self, arguments: Sequence[str]) -> str:
-        symbol = _one_symbol(arguments, "/soi FPT")
-        result = self.data.symbol_overview(symbol)
+        symbol, strategy = _symbol_and_strategy(arguments)
+        result = self.data.symbol_overview(symbol, strategy)
         return result if result is not None else f"Chưa có dữ liệu cho {symbol}."
 
     def scan(self) -> str:
@@ -71,6 +76,19 @@ class TelegramCommandService:
 
     def performance(self) -> str:
         return self.data.performance_overview()
+
+    def strategies(self) -> str:
+        return self.data.strategy_catalog()
+
+
+def _symbol_and_strategy(arguments: Sequence[str]) -> tuple[str, str]:
+    if len(arguments) not in (1, 2):
+        raise ValueError("Cách dùng: /soi FPT [CL1|ASMF]")
+    symbol = _one_symbol(arguments[:1], "/soi FPT [CL1|ASMF]")
+    strategy = "CL1" if len(arguments) == 1 else arguments[1].strip().upper()
+    if strategy not in {"CL1", "ASMF"}:
+        raise ValueError("Chiến lược phải là CL1 hoặc ASMF.")
+    return symbol, strategy
 
 
 def _one_symbol(arguments: Sequence[str], usage: str) -> str:

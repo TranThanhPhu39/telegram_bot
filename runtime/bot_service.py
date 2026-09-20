@@ -18,6 +18,7 @@ from data.models import OHLCVBar
 from data.vietcap.historical import normalize_gap_chart
 from data.vietcap.rest import VietcapRestClient, VietcapRestError, VietcapTimeFrame
 from scanner.universe import ScannerConfig, ScannerInstrument, daily_prescreen, realtime_watch_universe
+from strategy.technical_strategies import StrategyAction, evaluate_asmf, evaluate_cl1
 
 
 VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
@@ -36,7 +37,7 @@ class RuntimeBotDataService:
         connection: sqlite3.Connection,
         instruments: tuple[ScannerInstrument, ...],
         *,
-        history_count: int = 170,
+        history_count: int = 260,
         now: Callable[[], float] = time.time,
     ) -> None:
         self.client = client
@@ -46,7 +47,7 @@ class RuntimeBotDataService:
         self.now = now
         bootstrap_schema(connection)
 
-    def symbol_overview(self, symbol: str) -> str:
+    def symbol_overview(self, symbol: str, strategy: str = "CL1") -> str:
         bars, note = self._history(symbol)
         if not bars:
             return f"Chưa có dữ liệu lịch sử cho {symbol}. {note}"
@@ -54,13 +55,50 @@ class RuntimeBotDataService:
         previous = bars[-2] if len(bars) > 1 else None
         change = 0.0 if previous is None else (latest.close / previous.close - 1.0) * 100.0
         ema_20, ema_50, rsi_14 = ema20(bars)[-1], ema50(bars)[-1], rsi14(bars)[-1]
+        benchmark = self._history("VNINDEX")[0] if strategy.upper() == "ASMF" else ()
+        strategy_text = self._strategy_text(strategy, bars, benchmark)
         return (
             f"{symbol} — phiên {_date(latest.timestamp)}\n"
             f"Đóng cửa: {latest.close:g} ({change:+.2f}%)\n"
             f"Khối lượng: {latest.volume:g}\n"
             f"EMA20: {_number(ema_20)} | EMA50: {_number(ema_50)} | RSI14: {_number(rsi_14)}\n"
-            f"Nguồn: {note}"
+            f"Nguồn: {note}\n{strategy_text}"
         )
+
+    def strategy_catalog(self) -> str:
+        return (
+            "Chiến lược khả dụng:\n"
+            "• CL1 (mặc định): EMA20/50 + RSI14 + ADX14 + volume + MA200.\n"
+            "• ASMF: nhiều tầng; chỉ MUA khi đủ ngành, BCTC và dòng tiền tổ chức.\n"
+            "Dùng: /soi ACB CL1 hoặc /soi ACB ASMF"
+        )
+
+    def _strategy_text(
+        self, strategy: str, bars: tuple[OHLCVBar, ...], benchmark: tuple[OHLCVBar, ...]
+    ) -> str:
+        try:
+            result = evaluate_cl1(bars) if strategy.upper() == "CL1" else evaluate_asmf(bars, benchmark)
+        except ValueError as error:
+            return f"Chiến lược {strategy.upper()}: chưa đủ dữ liệu ({error})."
+        labels = {
+            StrategyAction.BUY: "MUA",
+            StrategyAction.SELL: "BÁN/THOÁT",
+            StrategyAction.WATCH: "THEO DÕI",
+            StrategyAction.BLOCKED: "CHƯA ĐỦ ĐIỀU KIỆN",
+        }
+        lines = [f"Chiến lược {result.strategy.value}: {labels[result.action]}"]
+        if result.score is not None:
+            lines.append(f"Điểm hiện có: {result.score:.1f}/100")
+        if result.positive:
+            lines.append("Đạt: " + "; ".join(result.positive))
+        if result.negative:
+            lines.append("Chưa đạt: " + "; ".join(result.negative))
+        if result.missing:
+            lines.append("Thiếu dữ liệu: " + "; ".join(result.missing))
+        if result.stop is not None:
+            lines.append(f"Chandelier Exit: {result.stop:g}")
+        lines.append("Chỉ là tín hiệu định lượng, không phải khuyến nghị đầu tư.")
+        return "\n".join(lines)
 
     def scan_results(self) -> tuple[str, ...]:
         histories = {item.symbol: self._history(item.symbol)[0] for item in self.instruments}

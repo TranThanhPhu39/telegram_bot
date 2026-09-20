@@ -19,7 +19,7 @@ class FakeClient:
         return [row]
 
 
-def payload(count=60):
+def payload(count=260):
     timestamps = [1_789_300_800 + index * 86_400 for index in range(count)]
     closes = [100.0 + index for index in range(count)]
     return {
@@ -42,6 +42,9 @@ def test_symbol_market_why_scan_and_performance_use_real_modules() -> None:
     runtime = service(FakeClient(payload()))
     assert "phiên" in runtime.symbol_overview("FPT")
     assert "EMA20" in runtime.symbol_overview("FPT")
+    assert "Chiến lược CL1" in runtime.symbol_overview("FPT", "CL1")
+    assert "Chiến lược ASMF" in runtime.symbol_overview("FPT", "ASMF")
+    assert "CL1" in runtime.strategy_catalog()
     assert "VNINDEX" in runtime.market_overview()
     assert "khuyến nghị" in runtime.signal_explanation("FPT")
     assert runtime.scan_results() == ("FPT",)

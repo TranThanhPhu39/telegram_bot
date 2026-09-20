@@ -380,6 +380,20 @@ VNINDEX close and EMA trend while explicitly withholding unavailable breadth;
 The live Sunday acceptance on 2026-09-20 returned ACB and VNINDEX data dated
 Friday 2026-09-18, confirming closed-market fallback behavior.
 
+## Selectable strategy runtime
+
+`strategy.technical_strategies` contains provider-independent pure functions for
+CL1 Trend Rider and ASMF. Telegram selects them explicitly with
+`/soi <MÃ> CL1` or `/soi <MÃ> ASMF`; CL1 remains the default. They are not blended,
+because their entry logic, holding horizon, and required evidence differ.
+
+CL1 evaluates completed daily bars using EMA20/EMA50 cross timing, RSI14, ADX14,
+three-versus-twenty-session volume, MA200, and a 22-session/3×ATR Chandelier
+Exit. ASMF currently evaluates its VNINDEX regime and price-volume footprint
+layers. It reports a partial score but blocks BUY when sector breadth, point-in-
+time fundamentals, or institutional-flow data is missing. This preserves the
+strategy contract rather than treating neutral placeholders as real evidence.
+
 ## Planned V1 signal features
 - Market Regime
 - Trend

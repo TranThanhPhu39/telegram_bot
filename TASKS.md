@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 18 — Runtime bot integration (COMPLETE; stopped before optional Phase 19)**
+**Phase 19 — Selectable CL1 + ASMF strategies (COMPLETE; stopped before optional Phase 20)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -316,7 +316,25 @@ was explicitly reported unavailable rather than inferred.
 
 ---
 
-## Phase 19 — News V1 (optional / bonus)
+## Phase 19 — Selectable CL1 + ASMF strategies
+- [x] Keep CL1 and ASMF as independent selectable strategies
+- [x] Implement CL1 EMA/RSI/ADX/volume/MA200 entry conditions
+- [x] Implement CL1 EMA cross-down and Chandelier exit conditions
+- [x] Implement ASMF market-regime and price-volume footprint layers
+- [x] Block ASMF BUY when sector/fundamental/institutional data is missing
+- [x] Reuse pure strategy functions for runtime and future backtests
+- [x] Add `/chienluoc` and `/soi <MÃ> [CL1|ASMF]`
+- [x] Verify CL1 and ASMF against live ACB/VNINDEX history
+- [x] STOP and report
+
+Acceptance evidence: 385 offline tests passed. Live Vietcap history for ACB and
+VNINDEX dated 2026-09-18 produced an explainable CL1 WATCH and an ASMF
+CHƯA ĐỦ ĐIỀU KIỆN response listing the three missing data layers. No ASMF BUY
+was fabricated from incomplete inputs.
+
+---
+
+## Phase 20 — News V1 (optional / bonus)
 - [ ] News collector
 - [ ] Deduplication
 - [ ] ticker/entity mapping

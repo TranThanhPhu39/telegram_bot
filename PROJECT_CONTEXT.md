@@ -46,9 +46,9 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 18 — Runtime bot integration — COMPLETE. Development is stopped before
-optional Phase 19 News. Telegram commands now use historical Vietcap data and
-SQLite fallback outside market hours. Phases
+Phase 19 — Selectable CL1 + ASMF strategies — COMPLETE. Development is stopped
+before optional Phase 20 News. Telegram commands now allow explicit CL1 or ASMF
+analysis over historical Vietcap data and SQLite fallback. Phases
 3–7 remain pending live validation and may not be reported as PASS.
 
 ## 4. Completed
@@ -111,16 +111,18 @@ SQLite fallback outside market hours. Phases
 - [x] Provider-independent fundamental CSV source and explainable scanner context implemented
 - [x] Telegram runtime connected to Vietcap history, SQLite, indicators, and scanner
 - [x] Sunday fallback verified against Friday 2026-09-18 ACB and VNINDEX data
+- [x] Selectable CL1 and honest partial-data ASMF strategy runtime implemented
 - [ ] Binary `w-match-price` event received from Vietcap
 - [ ] Realtime FPT message decoded and validated
 - [ ] Two distinct valid FPT ticks observed
 
 ## 5. Currently Working On
 
-Phase 18 is complete. `scripts/run_telegram_bot` now starts with the concrete
-historical-first runtime service rather than the unavailable-data fallback. On
-Sunday 2026-09-20, live smoke tests returned the latest Friday 2026-09-18 ACB and
-VNINDEX sessions. Development stops before optional Phase 19 News.
+Phase 19 is complete. `/soi <MÃ> [CL1|ASMF]` selects an independent strategy and
+`/chienluoc` documents both choices. Live historical tests returned an explainable
+CL1 result and an ASMF result that explicitly blocks BUY while required sector,
+fundamental, and institutional-flow inputs are absent. Development stops before
+optional Phase 20 News.
 Phases 3–7 retain their pending live-validation status.
 
 ## 6. Files Created / Modified
@@ -1945,3 +1947,20 @@ three observed values before request construction.
 - Kept breadth unavailable outside the live index stream instead of fabricating a
   full Market Regime.
 - Marked runtime integration complete and moved optional News to Phase 19.
+
+### 2026-09-20 — Phase 19 selectable CL1 + ASMF strategies
+
+- Chose independent selectable strategies instead of blending incompatible entry
+  rules into one opaque signal.
+- Added pure provider-independent CL1 evaluation with EMA20/EMA50 cross timing,
+  RSI14, ADX14, volume confirmation, MA200, and Chandelier Exit.
+- Added ASMF market-regime, technical trigger, and price-volume footprint
+  evaluation while keeping sector, point-in-time fundamentals, and institutional
+  flow as explicit required inputs.
+- Prevented incomplete ASMF evidence from producing BUY; missing layers are shown
+  directly in the Telegram response.
+- Added `/chienluoc` and optional strategy selection to `/soi`.
+- Increased runtime daily history to 260 bars for MA200 and regime warm-up.
+- Passed 385 offline tests plus live CL1 and ASMF evaluation using ACB/VNINDEX
+  history for the completed 2026-09-18 session.
+- Marked Phase 19 complete and moved optional News to Phase 20.
