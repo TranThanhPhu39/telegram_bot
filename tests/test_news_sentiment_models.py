@@ -28,3 +28,14 @@ def test_explicit_lexicon_fallback():
     result = FallbackSentimentModel(Broken(), LexiconSentimentModel(backend="lexicon_fallback")).analyze(item())
     assert result.backend == "lexicon_fallback"
     assert result.label == SentimentLabel.POSITIVE
+
+
+def test_phobert_accepts_direct_single_input_pipeline_shape():
+    class DirectPipeline:
+        def __call__(self, *args, **kwargs):
+            return [{"label":"LABEL_0","score":.1},
+                    {"label":"LABEL_1","score":.2},
+                    {"label":"LABEL_2","score":.7}]
+    result = PhoBERTSentimentModel("test", loader=DirectPipeline).analyze(item())
+    assert result.label == SentimentLabel.POSITIVE
+    assert result.probability_positive == .7

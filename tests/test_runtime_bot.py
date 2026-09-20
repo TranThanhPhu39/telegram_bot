@@ -1,6 +1,6 @@
 """Tests for historical-first runtime orchestration."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from asmf_data.models import SectorMembership
 from asmf_data.store import upsert_sector_memberships
@@ -9,6 +9,7 @@ from data.vietcap.historical import normalize_gap_chart
 from data.vietcap.rest import VietcapTimeFrame
 from runtime.bot_service import RuntimeBotDataService
 from scanner.universe import ScannerInstrument
+from strategy.technical_strategies import StrategyAction, StrategyName, StrategyResult
 
 
 class FakeClient:
@@ -124,3 +125,39 @@ def test_sector_history_fetch_uses_sqlite_cache_without_refetching_peers() -> No
     runtime.symbol_overview("FPT", "ASMF")
 
     assert len(client.calls) == first_calls + 2
+
+
+class BrokenNews:
+    def latest_news(self, *args, **kwargs): raise RuntimeError("news offline")
+    def ticker_sentiment(self, *args, **kwargs): raise RuntimeError("news offline")
+    def severe_negative(self, *args, **kwargs): raise RuntimeError("news offline")
+
+
+def test_news_failure_does_not_break_market_commands() -> None:
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        news_service=BrokenNews(), now=lambda: 1_800_000_000,
+    )
+    assert "VNINDEX" in runtime.market_overview()
+    assert "News sentiment unavailable" in runtime.symbol_overview("FPT")
+    assert runtime.latest_news("FPT") == "News sentiment unavailable."
+
+
+def test_asmf_buy_is_blocked_only_when_severe_news_exists(monkeypatch) -> None:
+    class News(BrokenNews):
+        def ticker_sentiment(self, *args, **kwargs): return None
+        def severe_negative(self, *args, **kwargs): return object()
+
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        news_service=News(), now=lambda: 1_800_000_000,
+    )
+    buy = StrategyResult(StrategyName.ASMF, "FPT", 1, StrategyAction.BUY,
+                         80.0, ("trigger",), (), ())
+    monkeypatch.setattr("runtime.bot_service.evaluate_asmf", lambda *a, **k: buy)
+    monkeypatch.setattr("runtime.bot_service.fundamental_score", lambda *a: 80.0)
+    monkeypatch.setattr("runtime.bot_service.institutional_flow_score", lambda *a: 80.0)
+    monkeypatch.setattr("runtime.bot_service.sector_strength_score", lambda *a: 80.0)
+    assert "CHƯA ĐỦ ĐIỀU KIỆN" in runtime.symbol_overview("FPT", "ASMF")

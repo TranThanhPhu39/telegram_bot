@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 import os
 import sqlite3
@@ -29,6 +30,11 @@ VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
 class HistoricalClient(Protocol):
     def get_gap_chart(self, symbols: tuple[str, ...], *, time_frame: object, count_back: int, to_timestamp: int) -> list[dict[str, object]]: ...
 
+class NewsService(Protocol):
+    def latest_news(self, ticker: str, limit: int = 5): ...
+    def ticker_sentiment(self, ticker: str, hours: int = 24): ...
+    def severe_negative(self, ticker: str, **kwargs): ...
+
 
 class RuntimeBotDataService:
     """Connect REST history, SQLite cache, indicators, scanner, and Telegram."""
@@ -40,12 +46,14 @@ class RuntimeBotDataService:
         instruments: tuple[ScannerInstrument, ...],
         *,
         history_count: int = 260,
+        news_service: NewsService | None = None,
         now: Callable[[], float] = time.time,
     ) -> None:
         self.client = client
         self.connection = connection
         self.instruments = instruments
         self.history_count = history_count
+        self.news_service = news_service
         self.now = now
         bootstrap_schema(connection)
 
@@ -64,7 +72,7 @@ class RuntimeBotDataService:
             f"Đóng cửa: {latest.close:g} ({change:+.2f}%)\n"
             f"Khối lượng: {latest.volume:g}\n"
             f"EMA20: {_number(ema_20)} | EMA50: {_number(ema_50)} | RSI14: {_number(rsi_14)}\n"
-            f"Nguồn: {note}\n{strategy_text}"
+            f"Nguồn: {note}\n{strategy_text}\n{self.sentiment_overview(symbol)}"
         )
 
     def strategy_catalog(self) -> str:
@@ -101,6 +109,16 @@ class RuntimeBotDataService:
                     bars, benchmark, sector_score=sector,
                     fundamental_score=fundamental, institutional_flow_score=flow,
                 )
+                if result.action == StrategyAction.BUY and self._severe_negative_news(
+                    bars[-1].symbol
+                ) is not None:
+                    result = replace(
+                        result,
+                        action=StrategyAction.BLOCKED,
+                        negative=result.negative + (
+                            "tin phap ly tieu cuc nghiem trong con hieu luc",
+                        ),
+                    )
         except ValueError as error:
             return f"Chiến lược {strategy.upper()}: chưa đủ dữ liệu ({error})."
         labels = {
@@ -147,12 +165,13 @@ class RuntimeBotDataService:
             trend = "GIẢM"
         else:
             trend = "TRUNG TÍNH"
-        return (
+        market = (
             f"VNINDEX — phiên {_date(latest.timestamp)}\n"
             f"Đóng cửa: {latest.close:g} ({change:+.2f}%)\n"
             f"Xu hướng EMA: {trend}\nNguồn: {note}\n"
             "Breadth realtime không có ngoài phiên; không suy đoán Market Regime đầy đủ."
         )
+        return market + "\nMARKET NEWS SENTIMENT\nInsufficient coverage."
 
     def signal_explanation(self, symbol: str) -> str:
         bars, note = self._history(symbol)
@@ -186,6 +205,56 @@ class RuntimeBotDataService:
             "Max drawdown: 0.00% | Profit factor: N/A\n"
             "Kết quả zero-activity, không phải tuyên bố lợi nhuận."
         )
+
+    def latest_news(self, symbol: str) -> str:
+        if self.news_service is None:
+            return "News sentiment unavailable."
+        try:
+            items = self.news_service.latest_news(symbol, 5)
+        except Exception:
+            return "News sentiment unavailable."
+        if not items:
+            return f"Không có tin gần đây cho {symbol}."
+        lines = [f"TIN MỚI NHẤT — {symbol}"]
+        for item in items:
+            label = item.sentiment.label.value if item.sentiment else "unavailable"
+            lines.append(f"• {item.published_at:%d/%m %H:%M} | {item.event_type} | {label} | {item.source}\n{item.title}")
+        return "\n".join(lines)
+
+    def sentiment_overview(self, symbol: str) -> str:
+        if self.news_service is None:
+            return "NEWS SENTIMENT\nNews sentiment unavailable."
+        try:
+            aggregate = self.news_service.ticker_sentiment(symbol, 24)
+        except Exception:
+            return "NEWS SENTIMENT\nNews sentiment unavailable."
+        if aggregate is None:
+            return "NEWS SENTIMENT\nNo recent sentiment data."
+        label = "Positive" if aggregate.score >= .15 else "Negative" if aggregate.score <= -.15 else "Neutral"
+        return (f"NEWS SENTIMENT 24h: {label}\nScore: {aggregate.score:+.2f} | "
+                f"Model confidence: {aggregate.model_confidence:.2f} | Articles: {aggregate.article_count}\n"
+                f"Positive/Neutral/Negative: {aggregate.positive_count}/{aggregate.neutral_count}/{aggregate.negative_count}\n"
+                f"Main events: {', '.join(aggregate.top_events) or 'N/A'}\nModel: {', '.join(aggregate.backends)}")
+
+    def _severe_negative_news(self, symbol: str):
+        if self.news_service is None or os.getenv(
+            "ASMF_NEWS_BLOCKER_ENABLED", "true"
+        ).lower() != "true":
+            return None
+        try:
+            events = tuple(filter(None, (
+                value.strip().upper() for value in os.getenv(
+                    "ASMF_NEWS_BLOCKER_EVENTS", "LEGAL"
+                ).split(",")
+            )))
+            return self.news_service.severe_negative(
+                symbol, events=events,
+                negative_threshold=float(os.getenv("ASMF_NEWS_NEGATIVE_THRESHOLD", ".75")),
+                confidence_threshold=float(os.getenv("ASMF_NEWS_CONFIDENCE_THRESHOLD", ".70")),
+                max_age_hours=float(os.getenv("ASMF_NEWS_MAX_AGE_HOURS", "48")),
+            )
+        except (OSError, ValueError, sqlite3.Error):
+            return None
 
     def _history(self, symbol: str) -> tuple[tuple[OHLCVBar, ...], str]:
         symbol = symbol.strip().upper()
@@ -266,7 +335,17 @@ def build_runtime_service_from_env() -> RuntimeBotDataService:
     )
     connection = connect_database(os.getenv("DATABASE_URL", "sqlite:///stock_bot.db"))
     instruments = _instruments(os.getenv("BOT_WATCH_SYMBOLS", "FPT:HOSE,ACB:HOSE"))
-    return RuntimeBotDataService(client, connection, instruments)
+    news_service = None
+    try:
+        from intelligence.news.repository import SQLiteNewsRepository
+        from intelligence.news.service import SentimentQueryService
+        news_service = SentimentQueryService(
+            SQLiteNewsRepository(os.getenv("NEWS_DATABASE_PATH", "news_sentiment.db")),
+            float(os.getenv("SENTIMENT_HALF_LIFE_HOURS", "24")),
+        )
+    except (OSError, ValueError, sqlite3.Error):
+        news_service = None
+    return RuntimeBotDataService(client, connection, instruments, news_service=news_service)
 
 
 def _instruments(raw: str) -> tuple[ScannerInstrument, ...]:

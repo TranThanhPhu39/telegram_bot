@@ -56,6 +56,12 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
     async def strategies(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, commands.strategies())
 
+    async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await _reply_with_usage(update, lambda: commands.news(context.args))
+
+    async def sentiment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await _reply_with_usage(update, lambda: commands.sentiment(context.args))
+
     async def _reply_with_usage(update: Update, render: object) -> None:
         try:
             text = render()  # type: ignore[operator]
@@ -73,6 +79,8 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
             CommandHandler("why", why),
             CommandHandler("performance", performance),
             CommandHandler("chienluoc", strategies),
+            CommandHandler("tin", news),
+            CommandHandler("sentiment", sentiment),
         ]
     )
     return application

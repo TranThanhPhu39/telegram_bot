@@ -65,7 +65,9 @@ class PhoBERTSentimentModel:
 
     def analyze(self, item: NewsItem) -> SentimentResult:
         output = self._load()(item.model_text, truncation=True, max_length=256,
-                              top_k=None)[0]
+                              top_k=None)
+        if output and isinstance(output[0], list):
+            output = output[0]
         mapped = {"negative": 0.0, "neutral": 0.0, "positive": 0.0}
         labels = {"LABEL_0": "negative", "LABEL_1": "neutral", "LABEL_2": "positive"}
         for row in output:

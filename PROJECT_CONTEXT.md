@@ -2245,3 +2245,31 @@ three observed values before request construction.
   Focused sentiment/repository tests: 4 passed; full suite: 415 passed.
 - Provider, normalizer, dedup, entity/event layers remain the next task group;
   Phase 21 stays PARTIAL and Phase 22 has not started.
+
+### 2026-09-20 — Phase 21 News & Transformer Sentiment complete
+
+- Added the provider-independent CafeF RSS ingestion path with normalized text,
+  stable URL deduplication, priority event classification, title-first ticker
+  relevance, and bounded one-shot execution. It writes only to the separate news
+  SQLite database and does not start a second Telegram application.
+- Added time-decayed ticker aggregation and wired it into the existing runtime.
+  `/tin <MÃ>` and `/sentiment <MÃ>` are registered; `/soi` includes optional
+  company sentiment. `/market` reports insufficient news coverage instead of
+  fabricating a market-wide score from company-only links.
+- Added a configurable, fail-closed ASMF news overlay. It can only turn an
+  already-produced ASMF BUY into BLOCKED for a recent, primary-ticker, severe
+  negative configured event with adequate confidence. Positive news cannot
+  create a BUY, and stale/low-confidence/irrelevant news cannot block.
+- Extended the existing Telegram alert publisher with idempotent news delivery;
+  no independent alert manager, polling bot, or token path was introduced.
+- Added a checked-in 10-case Vietnamese benchmark and metric runner (accuracy,
+  macro F1, confusion matrix). Results are computed at runtime, not hard-coded.
+- Live CafeF/PhoBERT acceptance exposed a real `transformers` output-shape
+  difference. The first three items safely fell back to the explicitly labelled
+  lexicon backend. After fixing and regression-testing both supported shapes, a
+  bounded rerun inferred without fallback and persisted two new PhoBERT items
+  (`inserted=2 duplicates=3`).
+- Evidence: focused Phase 21 suite 23 passed before the live fix; output-shape
+  regression 6 passed; final full regression 422 passed; isolated transformer
+  environment `pip check` reports no broken requirements.
+- Phase 21 is complete. No Phase 22 work has started.

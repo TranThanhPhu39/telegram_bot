@@ -12,6 +12,8 @@ class BotDataService(Protocol):
     def signal_explanation(self, symbol: str) -> str | None: ...
     def performance_overview(self) -> str: ...
     def strategy_catalog(self) -> str: ...
+    def latest_news(self, symbol: str) -> str: ...
+    def sentiment_overview(self, symbol: str) -> str: ...
 
 
 HELP_TEXT = (
@@ -21,7 +23,9 @@ HELP_TEXT = (
     "/scan - xem danh sách quét\n"
     "/market - xem trạng thái thị trường\n"
     "/why FPT - xem lý do tín hiệu\n"
-    "/performance - xem kết quả backtest"
+    "/performance - xem kết quả backtest\n"
+    "/tin FPT - xem tin mới nhất\n"
+    "/sentiment FPT - xem sentiment 24 giờ"
 )
 
 
@@ -45,6 +49,12 @@ class UnavailableBotDataService:
 
     def strategy_catalog(self) -> str:
         return "CL1 và ASMF hiện chưa sẵn sàng."
+
+    def latest_news(self, symbol: str) -> str:
+        return "News sentiment unavailable."
+
+    def sentiment_overview(self, symbol: str) -> str:
+        return "News sentiment unavailable."
 
 
 class TelegramCommandService:
@@ -79,6 +89,12 @@ class TelegramCommandService:
 
     def strategies(self) -> str:
         return self.data.strategy_catalog()
+
+    def news(self, arguments: Sequence[str]) -> str:
+        return self.data.latest_news(_one_symbol(arguments, "/tin FPT"))
+
+    def sentiment(self, arguments: Sequence[str]) -> str:
+        return self.data.sentiment_overview(_one_symbol(arguments, "/sentiment FPT"))
 
 
 def _symbol_and_strategy(arguments: Sequence[str]) -> tuple[str, str]:

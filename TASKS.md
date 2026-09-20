@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 21 — News & Transformer Sentiment Integration (PARTIAL)**
+**Phase 21 — News & Transformer Sentiment Integration (COMPLETE)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -382,27 +382,27 @@ was fabricated from incomplete inputs.
 - [x] Create an integration map and dependency/model decision
   - Selected default candidate: `FiinGroup/phobert-finetuned`; its model card
     states 3-class training on about 15,000 Vietnamese financial-news records.
-- [ ] Restructure/import provider-independent news core
-- [ ] Preserve/migrate all relevant legacy tests
+- [x] Restructure/import provider-independent news core
+- [x] Preserve/migrate all relevant legacy tests
 - [x] Introduce pluggable `SentimentModel` interface
 - [x] Preserve lexicon backend and explicit fallback
 - [x] Add configurable PhoBERT backend with probability metadata
 - [x] Add backward-compatible news SQLite migration
   - Separate news DB retains legacy rows and adds probabilities, backend/model
     metadata, analysis timestamp, calibration slot, and ticker relevance.
-- [ ] Preserve event classifier, ticker relevance, dedup, and time decay
-- [ ] Wire `SentimentQueryService` into `RuntimeBotDataService`
-- [ ] Add `/tin <MÃ>` and `/sentiment <MÃ>`
-- [ ] Add optional sentiment sections to `/soi` and `/market`
-- [ ] Add ASMF context and configurable severe-negative-event blocker
-- [ ] Route news alerts through the existing alert boundary
-- [ ] Add bounded one-shot ingestion and benchmark framework
+- [x] Preserve event classifier, ticker relevance, dedup, and time decay
+- [x] Wire `SentimentQueryService` into `RuntimeBotDataService`
+- [x] Add `/tin <MÃ>` and `/sentiment <MÃ>`
+- [x] Add optional sentiment sections to `/soi` and `/market`
+- [x] Add ASMF context and configurable severe-negative-event blocker
+- [x] Route news alerts through the existing alert boundary
+- [x] Add bounded one-shot ingestion and benchmark framework
 - [x] Install/check transformer dependencies and validate model loading
   - Clean `.venv-phase21`: `pip check` PASS; real CPU inference loaded
     `FiinGroup/phobert-finetuned`, returned three probabilities summing to 1.
-- [ ] Run focused, legacy, full-regression, and `pip check`
-- [ ] Run bounded live CafeF/model acceptance or mark NOT TESTED
-- [ ] STOP and report
+- [x] Run focused, legacy, full-regression, and `pip check`
+- [x] Run bounded live CafeF/model acceptance or mark NOT TESTED
+- [x] STOP and report
 
 ## Explicitly out of V1
 - Real order placement
