@@ -353,9 +353,16 @@ was fabricated from incomplete inputs.
 - [x] Add bounded, streamed Vietstock PDF/ZIP download validation
   - Uses an atomic `.part` file, a 100 MiB limit, signature checks, and ZIP path
     safety checks; malformed responses are not retained.
+- [x] Classify downloaded PDF/ZIP reports before extraction
+  - Real ACB H1 2026 PDF: 96 pages, zero text characters, 96 embedded images;
+    correctly routed to `ocr_required` rather than parsed as text.
 - [ ] Acquire and validate real sector membership data
 - [ ] Extract normalized financial statement values from PDF/ZIP contents
-- [ ] Validate a real imported dataset
+  - Tesseract `vie+eng` now extracts verified ACB B02a/B03a values with exact
+    loan and interest accounting reconciliations. NPL and CAR are still absent.
+- [x] Validate a real imported dataset
+  - ACB 2026Q2 OCR fixture imports into SQLite and reads back the five verified
+    values without filling unavailable NPL/CAR fields.
 - [ ] STOP and report
 
 ---

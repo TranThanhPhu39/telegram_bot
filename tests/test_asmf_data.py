@@ -1,6 +1,7 @@
 """Tests for strict point-in-time ASMF EOD inputs."""
 
 from datetime import date
+from pathlib import Path
 
 from asmf_data.csv_source import load_bank_financial_csv, load_financial_csv, load_flow_csv, load_sector_csv
 from asmf_data.models import BankFinancialReport, FinancialReport, InstitutionalFlow, SectorMembership
@@ -119,3 +120,21 @@ def test_incomplete_bank_data_never_falls_back_to_industrial_score() -> None:
     upsert_bank_financial_reports(db, bank_rows)
     upsert_financial_reports(db, industrial_rows)
     assert fundamental_score(db, "ACB", date(2025, 12, 31)) is None
+
+
+def test_real_acb_ocr_dataset_imports_and_reads_back() -> None:
+    path = Path(__file__).parent / "fixtures" / "asmf" / "acb_2026q2_ocr.csv"
+    rows = load_bank_financial_csv(path)
+    db = connection()
+    assert upsert_bank_financial_reports(db, rows) == 1
+    stored = db.execute(
+        "SELECT * FROM bank_financial_reports WHERE symbol='ACB' AND report_period='2026Q2'"
+    ).fetchone()
+    assert stored["public_date"] == "2026-08-15"
+    assert stored["net_interest_income"] == 14_773_853
+    assert stored["net_profit"] == 8_612_866
+    assert stored["equity"] == 99_314_518
+    assert stored["gross_loans"] == 745_759_303
+    assert stored["loan_loss_reserve"] == 8_065_344
+    assert stored["nonperforming_loans"] is None
+    assert stored["car_percent"] is None

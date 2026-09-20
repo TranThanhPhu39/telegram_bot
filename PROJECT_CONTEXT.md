@@ -2014,3 +2014,60 @@ three observed values before request construction.
 - Phase 20 remains partial. The next task is to obtain one real ZIP/PDF through
   the bounded downloader, inspect its contents, and implement only the verified
   bank-field extraction path.
+
+### 2026-09-20 — Phase 20 real ACB container inspection (partial)
+
+- Added a provider-independent report inspector and CLI that classifies PDF and
+  ZIP inputs before extraction. ZIPs containing XLS/XLSX/CSV/XML/XBRL are routed
+  to a structured-data branch; PDFs with images but no text are routed to OCR.
+- Verified the user's real consolidated ACB H1 2026 report: 96 pages, zero
+  extractable text characters, and 96 embedded images. The correct branch is
+  `ocr_required`.
+- `tesseract`, `pdftoppm`, and `pdfinfo` are not installed. A package-manager
+  availability check did not complete in two bounded waits and was terminated.
+  Automatic numeric extraction from this scan is therefore blocked rather than
+  guessed. OCR extraction remains NOT TESTED.
+- The CLI is verified when invoked as
+  `py -3.12 -m scripts.inspect_financial_report <path>`. Direct invocation as a
+  file failed because Python used `scripts/` rather than the repository root as
+  its import path; this matches the project's module-based script convention.
+- Added three offline tests and passed the complete 399-test suite.
+- Phase 20 stays partial. The next required input is either a Vietnamese-capable
+  Tesseract installation (`vie` language data included) or a Vietstock ZIP that
+  contains structured XLS/XLSX/CSV/XML/XBRL data.
+
+### 2026-09-20 — Phase 20 OCR installation attempt (blocked)
+
+- Winget resolved `tesseract-ocr.tesseract` version 5.5.3 and downloaded the
+  upstream Windows installer, but no Tesseract executable appeared under either
+  Program Files location.
+- Follow-up installer and process checks hung in bounded command windows. The
+  available Windows UI automation service was not configured, so the interactive
+  installer/UAC step could not be completed safely by the agent.
+- No extraction code or report values were changed. OCR remains NOT TESTED and
+  the financial extraction checkbox remains open.
+- Required follow-up: the user completes Tesseract installation interactively,
+  including Vietnamese (`vie`) language data, then asks to rerun Phase 20.
+
+### 2026-09-20 — Phase 20 real ACB OCR and import (partial)
+
+- The user installed Tesseract 5.5.3 with `eng`, `osd`, and `vie` language data.
+- Added local OCR for selected image-only PDF pages. It rotates the verified ACB
+  scan by 180 degrees, normalizes contrast, doubles resolution, and invokes
+  Tesseract with `vie+eng`; source PDFs are never modified.
+- Added a fail-closed B02a/B03a parser. It requires the loan identity (gross loans
+  minus loan-loss reserve equals net loans) and the interest identity (interest
+  income minus interest expense equals net interest income). A small OCR digit
+  mismatch can be reconciled only from an exact identity and within 0.2%; larger
+  mismatches are rejected.
+- Live OCR of pages 7, 8, and 10 produced a normalized ACB 2026Q2 row with public
+  date 2026-08-15: cumulative NII 14,773,853; net profit 8,612,866; equity
+  99,314,518; gross loans 745,759,303; loan-loss reserve 8,065,344 (million VND).
+- Added that real row as a regression fixture and verified CSV loading, SQLite
+  insertion, and read-back. The complete suite passes with 403 tests.
+- NPL amount and CAR are not yet verified from the supplied report and remain
+  NULL. Consequently the bank ASMF score correctly remains unavailable.
+- OCR searches of pages 25–40 found no reliable NPL label. A second bounded
+  search attempt was interrupted by the execution approval service; NPL/CAR
+  extraction remains NOT TESTED beyond those pages.
+- Real sector membership is still unavailable, so Phase 20 remains partial.

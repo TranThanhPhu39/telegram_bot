@@ -434,3 +434,9 @@ are stored cumulatively with `period_months`; scoring derives standalone quarter
 from adjacent cumulative reports, then evaluates ROE, net-interest-income growth,
 profit growth, NPL ratio, loan-loss coverage, and CAR. Missing prudential inputs
 produce an unavailable score, not a neutral or passing default.
+
+Image-only bank PDFs pass through `asmf_data.bank_report_ocr`. Selected pages are
+rotated, contrast-normalized, and upscaled before local Tesseract `vie+eng` OCR.
+Only verified B02a/B03a labels are normalized. Gross loans and net interest income
+must reconcile against their component lines; small digit errors may be corrected
+only from an exact accounting identity, while material mismatches fail closed.
