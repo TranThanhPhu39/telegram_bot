@@ -2113,3 +2113,49 @@ three observed values before request construction.
 - Added three offline adapter tests. The complete suite passes with 407 tests.
 - All Phase 20 checklist items now have runtime or test evidence. Phase 20 is
   complete; Phase 21 has not been started.
+
+### 2026-09-20 — ASMF sector-price runtime connection
+
+- Closed the runtime gap between stored ICB2 membership and sector scoring.
+  `/soi <symbol> ASMF` now loads cached daily histories for sector peers and
+  fetches all missing peers in one bounded Vietcap `gap-chart` request.
+- The Telegram path is capped at nine total sector members so the first command
+  remains bounded. Up to eight peer histories are fetched concurrently using
+  the confirmed single-symbol request shape, normalized, persisted to SQLite,
+  and reused later. The scorer still requires at least five usable histories.
+- Live evidence showed that both 27-peer and four-peer Vietcap requests exceed
+  the 20-second HTTP timeout. A single-symbol request can also occasionally
+  time out, so peer calls run concurrently and one failure does not block the
+  other histories.
+- Current sector classification is evaluated at command time, while financial
+  reports and institutional flows remain evaluated at the latest price-bar date.
+  This lets the 2026-09-20 observed membership classify the last completed
+  2026-09-18 market session without backdating the stored snapshot.
+- Added runtime regression coverage for bounded peer acquisition, SQLite reuse,
+  and removal of the missing-sector flag. Full suite: 409 passed.
+- Live acceptance is NOT TESTED successfully: repeated 2026-09-20 ACB smoke
+  runs reached Vietcap's 20-second read timeout. This is an external provider
+  runtime condition; the bot keeps any successful peer histories and continues
+  to report the sector layer as missing until at least five histories exist.
+- Phase 20 remains complete. Phase 21 has not been started.
+
+### 2026-09-20 — Non-blocking sector-history synchronization
+
+- Runtime evidence showed that fetching sector peers inside `/soi ... ASMF`
+  makes Telegram depend on repeated 20-second Vietcap read timeouts. The task was
+  therefore split at the acquisition/runtime boundary already required by the
+  architecture.
+- Added `SectorHistorySynchronizer`: it processes one member at a time, retries
+  each failure with exponential backoff, stores each successful 260-bar history
+  immediately, skips members already holding at least 126 daily bars, and avoids
+  synchronizing the same sector twice in one watchlist run.
+- `scripts/run_telegram_bot` now starts the synchronizer in a separate daemon
+  thread with its own Vietcap client and SQLite connection. Default interval is
+  six hours. Retry count, backoff, and interval are configurable in `.env`.
+- `/soi ... ASMF` now performs no network requests for sector peers. It reads all
+  usable peer histories from SQLite and honestly retains the missing-sector flag
+  until five histories are available.
+- Added `scripts/sync_sector_history.py` for an explicit manual preload.
+- Focused tests: 7 passed. Complete suite: 411 passed.
+- Live sync remains NOT TESTED successfully because Vietcap was still timing out
+  on 2026-09-20. No live success has been claimed.

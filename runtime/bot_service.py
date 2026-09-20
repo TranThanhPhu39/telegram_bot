@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import os
 import sqlite3
 import time
@@ -85,13 +85,17 @@ class RuntimeBotDataService:
                 as_of = datetime.fromtimestamp(bars[-1].timestamp, VIETNAM_TIMEZONE).date()
                 fundamental = fundamental_score(self.connection, bars[-1].symbol, as_of)
                 flow = institutional_flow_score(self.connection, bars[-1].symbol, as_of)
-                membership = active_sector(self.connection, bars[-1].symbol, as_of)
-                histories = {bars[-1].symbol: bars}
-                if membership is not None:
-                    for member in sector_members(self.connection, membership["sector_code"], as_of):
-                        histories.setdefault(member, self._load(member))
+                # The membership snapshot is knowledge available at runtime;
+                # financial and flow inputs remain point-in-time at the last bar.
+                membership_as_of = datetime.fromtimestamp(
+                    self.now(), VIETNAM_TIMEZONE
+                ).date()
+                histories = self._sector_histories(
+                    bars[-1].symbol, bars, membership_as_of
+                )
                 sector = sector_strength_score(
-                    self.connection, bars[-1].symbol, as_of, histories, benchmark
+                    self.connection, bars[-1].symbol, membership_as_of,
+                    histories, benchmark
                 )
                 result = evaluate_asmf(
                     bars, benchmark, sector_score=sector,
@@ -201,6 +205,29 @@ class RuntimeBotDataService:
             pass
         cached = self._load(symbol)
         return cached, "SQLite cache" if cached else "Vietcap/SQLite đều không có dữ liệu"
+
+    def _sector_histories(
+        self,
+        symbol: str,
+        bars: tuple[OHLCVBar, ...],
+        membership_as_of: date,
+    ) -> dict[str, tuple[OHLCVBar, ...]]:
+        """Load sector histories from SQLite without blocking Telegram on I/O."""
+        histories = {symbol: bars}
+        membership = active_sector(self.connection, symbol, membership_as_of)
+        if membership is None:
+            return histories
+
+        all_members = sector_members(
+            self.connection, membership["sector_code"], membership_as_of
+        )
+        for member in all_members:
+            if member == symbol:
+                continue
+            cached = self._load(member)
+            if len(cached) >= 126:
+                histories[member] = cached
+        return histories
 
     def _store(self, symbol: str, bars: tuple[OHLCVBar, ...]) -> None:
         with self.connection:

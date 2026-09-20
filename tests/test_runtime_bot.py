@@ -1,6 +1,12 @@
 """Tests for historical-first runtime orchestration."""
 
+from datetime import date
+
+from asmf_data.models import SectorMembership
+from asmf_data.store import upsert_sector_memberships
 from data.database import connect_database
+from data.vietcap.historical import normalize_gap_chart
+from data.vietcap.rest import VietcapTimeFrame
 from runtime.bot_service import RuntimeBotDataService
 from scanner.universe import ScannerInstrument
 
@@ -9,14 +15,18 @@ class FakeClient:
     def __init__(self, payload):
         self.payload = payload
         self.fail = False
+        self.calls = []
 
     def get_gap_chart(self, symbols, **kwargs):
+        self.calls.append(tuple(symbols))
         if self.fail:
             raise ValueError("offline")
-        symbol = symbols[0]
-        row = dict(self.payload)
-        row["symbol"] = symbol
-        return [row]
+        rows = []
+        for symbol in symbols:
+            row = dict(self.payload)
+            row["symbol"] = symbol
+            rows.append(row)
+        return rows
 
 
 def payload(count=260):
@@ -68,3 +78,49 @@ def test_empty_provider_response_uses_cache() -> None:
     runtime.symbol_overview("FPT")
     client.payload = {"t": [], "o": [], "h": [], "l": [], "c": [], "v": []}
     assert "SQLite cache" in runtime.symbol_overview("FPT")
+
+
+def test_asmf_fetches_bounded_sector_member_histories() -> None:
+    client = FakeClient(payload())
+    runtime = service(client)
+    members = ("FPT", "AAA", "BBB", "CCC", "DDD")
+    upsert_sector_memberships(runtime.connection, [
+        SectorMembership(symbol, "TECH", "Technology", date(2020, 1, 1), None, "TEST")
+        for symbol in members
+    ])
+    for symbol in members[1:]:
+        row = dict(payload())
+        row["symbol"] = symbol
+        runtime._store(symbol, normalize_gap_chart(
+            [row], time_frame=VietcapTimeFrame.ONE_DAY
+        ))
+
+    result = runtime.symbol_overview("FPT", "ASMF")
+
+    assert client.calls[0] == ("FPT",)
+    assert client.calls[1] == ("VNINDEX",)
+    assert len(client.calls) == 2
+    assert all(len(runtime._load(symbol)) == 260 for symbol in members)
+    assert "sức mạnh ngành/breadth" not in result
+
+
+def test_sector_history_fetch_uses_sqlite_cache_without_refetching_peers() -> None:
+    client = FakeClient(payload())
+    runtime = service(client)
+    members = ("FPT", "AAA", "BBB", "CCC", "DDD")
+    upsert_sector_memberships(runtime.connection, [
+        SectorMembership(symbol, "TECH", "Technology", date(2020, 1, 1), None, "TEST")
+        for symbol in members
+    ])
+    for symbol in members[1:]:
+        row = dict(payload())
+        row["symbol"] = symbol
+        runtime._store(symbol, normalize_gap_chart(
+            [row], time_frame=VietcapTimeFrame.ONE_DAY
+        ))
+    runtime.symbol_overview("FPT", "ASMF")
+    first_calls = len(client.calls)
+
+    runtime.symbol_overview("FPT", "ASMF")
+
+    assert len(client.calls) == first_calls + 2

@@ -359,6 +359,13 @@ was fabricated from incomplete inputs.
 - [x] Acquire and validate real sector membership data
   - Vietcap `getAll` snapshot on 2026-09-20 normalized 1,523 ICB2 memberships
     and was imported into runtime SQLite. ACB has code 8300 with 28 members.
+- [x] Connect sector-member daily price histories to the ASMF Telegram runtime
+  - A background synchronizer fetches one member at a time with exponential
+    retry/backoff and persists every successful history immediately.
+  - `/soi ... ASMF` reads peer histories only from SQLite and never waits for
+    sector-member network calls. The bot starts a six-hour periodic sync worker.
+  - Live acceptance: NOT TESTED successfully on 2026-09-20 because Vietcap
+    `gap-chart` timed out after 20 seconds; offline integration tests pass.
 - [x] Extract normalized financial statement values from PDF/ZIP contents
   - Tesseract `vie+eng` extracts verified ACB B02a/B03a values and NPL as the
     checked sum of groups 3–5. CAR is not present in this report and remains NULL.

@@ -424,6 +424,15 @@ and UPCOM with a valid `icbCode2`, records the observation date as
 `effective_from`, and never backdates membership. Codes remain the grouping key;
 when no verified ICB name table is available, the display name is `ICB2 <code>`.
 
+Sector-member price acquisition is separated from Telegram command execution.
+`runtime.sector_history_sync.SectorHistorySynchronizer` downloads daily histories
+one symbol at a time, retries transient failures with exponential backoff, and
+commits each successful symbol immediately. `scripts/run_telegram_bot` starts a
+daemon worker that repeats this sync every six hours by default; the interval and
+retry policy are environment-configurable. `/soi ... ASMF` reads peer histories
+only from SQLite, so a slow provider cannot multiply command latency. A manual
+run is available through `python -m scripts.sync_sector_history ACB`.
+
 Strict UTF-8 CSV schemas provide a stable import boundary for CafeF, Vietstock,
 UBCKNN, or licensed exports. `scripts/import_asmf_eod` loads these records into
 SQLite.
