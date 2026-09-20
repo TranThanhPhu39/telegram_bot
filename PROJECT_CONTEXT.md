@@ -2159,3 +2159,89 @@ three observed values before request construction.
 - Focused tests: 7 passed. Complete suite: 411 passed.
 - Live sync remains NOT TESTED successfully because Vietcap was still timing out
   on 2026-09-20. No live success has been claimed.
+
+### 2026-09-20 — Phase 21 News/Sentiment ZIP audit and integration map
+
+- Audited the supplied `vn-stock-sentiment-bot` ZIP as input material, not as a
+  second application. Its 68 legacy tests pass on Python 3.12. The ZIP contains
+  a CafeF RSS provider, normalizer, bounded fingerprint dedup, title-weighted
+  ticker linker, priority event classifier, lexicon sentiment, time-decay
+  aggregation, SQLite repository/query service, and a separate Telegram bot.
+- REUSE: CafeF provider contract, normalization, deduplication, ticker relevance,
+  event classification, time-decay aggregation, repository/query concepts,
+  bounded live runner, fixtures, and relevant tests.
+- MOVE/RENAME: provider-independent code will enter a top-level `intelligence`
+  package aligned with this repository; ZIP `src.news` and `src.storage`
+  namespaces will not be copied mechanically.
+- MODIFY: sentiment output must retain positive/neutral/negative probabilities,
+  model confidence (explicitly uncalibrated), backend/name/version and analysis
+  timestamp. SQLite changes must be additive and preserve existing rows.
+- ADAPTER: `SentimentQueryService` will be injected into `RuntimeBotDataService`;
+  Telegram and ASMF will depend only on that boundary.
+- DO NOT IMPORT: the ZIP Telegram polling application, token handling, independent
+  alert cooldown/manager, infinite runtime loop, Docker/build artifacts, caches,
+  bytecode, or bundled runtime database.
+- NEW FILES PLANNED: news domain/provider/repository/service package, transformer
+  and lexicon model backends, ingestion runner, query/Telegram adapters, benchmark
+  fixture/runner, migrations, and focused integration tests.
+- DATABASE: keep `news_sentiment.db` separate initially. Add probability/model
+  columns and primary-ticker relevance without dropping the legacy schema.
+- Model decision: `FiinGroup/phobert-finetuned` is the preferred default candidate
+  because its public model card describes three-class PhoBERT training on roughly
+  15,000 Vietnamese financial-news records (labels 0 negative, 1 neutral,
+  2 positive). This is provenance evidence, not an independent quality claim.
+- Concrete phase-split blocker: the environment has no `torch`, `transformers`,
+  `tokenizers`, or model weights, and the ZIP contains only lexicon code. Actual
+  transformer loading, CPU inference, dependency compatibility, and fallback
+  acceptance cannot be truthfully validated until pinned heavy dependencies and
+  the external model artifact are installed/downloaded. Phase 21 is PARTIAL;
+  no production code has been imported yet and Phase 22 has not started.
+
+### 2026-09-20 — Phase 21 transformer runtime unblocked
+
+- Pinned `pydantic==2.11.10`, `transformers==4.57.6`, `torch==2.9.1`, and
+  `safetensors==0.7.0`. Because the user-level Python environment already had
+  unrelated dependency conflicts, installation was isolated in the ignored
+  `.venv-phase21` environment instead of mutating those packages further.
+- `.venv-phase21` passes `pip check`; the complete existing bot suite passes
+  there with 411 tests.
+- Downloaded the public 540,026,460-byte safetensors checkpoint into the ignored,
+  configurable model cache. A bounded CPU smoke test loaded
+  `FiinGroup/phobert-finetuned` and produced three probabilities
+  `[0.12003749, 0.61362219, 0.26634035]`, sum `1.00000002`.
+- Runtime config exposes backend, model, CPU device, cache, lexicon fallback,
+  half-life, and severe-negative blocker thresholds. No secrets are involved.
+- The checkpoint config exposes generic `LABEL_0/1/2`; Phase 21 must map these
+  explicitly according to the model card (negative/neutral/positive) and retain
+  that mapping in tests. Transformer integration is now unblocked, but the news
+  core/import, schema migration, commands, and ASMF wiring remain incomplete.
+
+### 2026-09-20 — Phase 21 sentiment model boundary
+
+- Added the provider-independent `intelligence.news` domain with immutable news
+  and inference records. Inference retains all three probabilities, an explicitly
+  uncalibrated `model_confidence`, backend/name/version, analysis timestamp, and
+  a future calibration-version slot. Score is derived as `P(pos)-P(neg)`.
+- Added load-once `PhoBERTSentimentModel` with deterministic 256-token truncation
+  and explicit FiinGroup `LABEL_0/1/2` mapping to negative/neutral/positive.
+- Preserved a financial lexicon backend. Transformer failures are logged and
+  return `backend=lexicon_fallback`; fallback is never silent.
+- Focused tests prove normalized probabilities, label mapping, load-once behavior,
+  and explicit fallback. Focused: 2 passed; full suite: 413 passed.
+- This safe task boundary does not yet claim the ZIP provider/repository import.
+  SQLite migration is the next Phase 21 task group.
+
+### 2026-09-20 — Phase 21 news SQLite migration
+
+- Added a separate `SQLiteNewsRepository`; the main market database remains
+  untouched. Startup creates a new normalized schema or inspects a legacy ZIP
+  `news_items` table and additively introduces missing fields with `ALTER TABLE`.
+- Stored inference fields include label, derived score, all three probabilities,
+  model confidence, backend/name/version, analyzed timestamp, and nullable
+  calibration version. Ticker links preserve primary status and relevance.
+- Inserts are URL/idempotent and atomic with ticker links. Reads reconstruct the
+  immutable domain model; ticker queries remain behind the repository boundary.
+- Regression proves a pre-existing legacy row survives migration unchanged.
+  Focused sentiment/repository tests: 4 passed; full suite: 415 passed.
+- Provider, normalizer, dedup, entity/event layers remain the next task group;
+  Phase 21 stays PARTIAL and Phase 22 has not started.

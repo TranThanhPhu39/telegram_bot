@@ -3,6 +3,8 @@
 __pycache__/
 .pytest_cache/
 .venv/
+.venv-phase21/
+.model-cache/
 venv/
 *.db
 *.sqlite

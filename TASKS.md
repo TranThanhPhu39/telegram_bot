@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 20 — ASMF EOD data integration (COMPLETE)**
+**Phase 21 — News & Transformer Sentiment Integration (PARTIAL)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -376,12 +376,32 @@ was fabricated from incomplete inputs.
 
 ---
 
-## Phase 21 — News V1 (optional / bonus)
-- [ ] News collector
-- [ ] Deduplication
-- [ ] ticker/entity mapping
-- [ ] sentiment/event classification
-- [ ] Telegram news alert
+## Phase 21 — News & Transformer Sentiment Integration
+- [x] Audit current bot and supplied News/Sentiment ZIP
+  - ZIP baseline: 68 tests passed on Python 3.12.
+- [x] Create an integration map and dependency/model decision
+  - Selected default candidate: `FiinGroup/phobert-finetuned`; its model card
+    states 3-class training on about 15,000 Vietnamese financial-news records.
+- [ ] Restructure/import provider-independent news core
+- [ ] Preserve/migrate all relevant legacy tests
+- [x] Introduce pluggable `SentimentModel` interface
+- [x] Preserve lexicon backend and explicit fallback
+- [x] Add configurable PhoBERT backend with probability metadata
+- [x] Add backward-compatible news SQLite migration
+  - Separate news DB retains legacy rows and adds probabilities, backend/model
+    metadata, analysis timestamp, calibration slot, and ticker relevance.
+- [ ] Preserve event classifier, ticker relevance, dedup, and time decay
+- [ ] Wire `SentimentQueryService` into `RuntimeBotDataService`
+- [ ] Add `/tin <MÃ>` and `/sentiment <MÃ>`
+- [ ] Add optional sentiment sections to `/soi` and `/market`
+- [ ] Add ASMF context and configurable severe-negative-event blocker
+- [ ] Route news alerts through the existing alert boundary
+- [ ] Add bounded one-shot ingestion and benchmark framework
+- [x] Install/check transformer dependencies and validate model loading
+  - Clean `.venv-phase21`: `pip check` PASS; real CPU inference loaded
+    `FiinGroup/phobert-finetuned`, returned three probabilities summing to 1.
+- [ ] Run focused, legacy, full-regression, and `pip check`
+- [ ] Run bounded live CafeF/model acceptance or mark NOT TESTED
 - [ ] STOP and report
 
 ## Explicitly out of V1
