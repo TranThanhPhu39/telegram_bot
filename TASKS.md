@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 21 — News & Transformer Sentiment Integration (COMPLETE)**
+**Phase 23 — Portfolio, Risk & Watchlist (COMPLETE)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -443,7 +443,9 @@ was fabricated from incomplete inputs.
 
 ## Phase 23 — Portfolio, Risk & Watchlist
 - [x] Add user persistence (`users`, keyed by Telegram numeric id)
-- [x] Add portfolio schema migration (v4 `portfolio_watchlist_holdings`, atomic, idempotent, tested)
+- [x] Add portfolio schema migrations
+  - v4 `portfolio_watchlist_holdings`: users, watchlist and holdings.
+  - v5 `portfolio_exact_decimals`: additive exact Decimal text with v4 backfill.
 - [x] Add persistent watchlist
 - [x] Add portfolio holdings storage (long, whole shares, VND; no ledger — deferred)
 - [x] Add holdings CRUD (`/addholding` is an upsert that replaces quantity and average cost)
@@ -453,11 +455,13 @@ was fabricated from incomplete inputs.
 - [x] Add sector exposure (existing effective-dated memberships; missing → "Unknown")
 - [x] Add concentration warnings (config thresholds; NORMAL/WARNING/HIGH)
 - [x] Add position sizing
+  - Bounded by both the risk budget and available capital; V1 never assumes leverage.
 - [x] Add user risk settings (`/setrisk`, `/risksettings`)
 - [x] Add deterministic stress testing (portfolio and single symbol)
 - [x] Add portfolio risk view (concentration + static-weight volatility, beta, max drawdown)
   - Historical metrics are a static-weight proxy; "Unavailable" with a reason when history is short.
 - [x] Add portfolio context to `/soi` (informational only)
+- [x] Keep personal portfolio/risk commands and `/soi` portfolio context private-chat only
 - [x] Add `/watchlist`
 - [x] Add `/addwatch`
 - [x] Add `/removewatch`
@@ -470,18 +474,20 @@ was fabricated from incomplete inputs.
 - [x] Update `/help`
 - [x] Preserve CL1/ASMF behavior (test asserts identical strategy views with and without holdings)
 - [x] Run focused tests
-  - Sandbox, Python 3.12.3: 133 new Phase 23 tests passed.
+  - Python 3.12.10: 130 Phase 23-specific tests collected and passed.
+  - Focused Phase 23 plus migration/Telegram regression: 145 passed.
 - [x] Run full regression
-  - Sandbox, Python 3.12.3, partial dependency set: 592 passed (459 pre-existing + 133 new).
-    Two pre-existing tests were updated (schema version 3→4, registered command set).
-    Rerun locally in your `.venv`.
-- [ ] Run pip check
-  - Sandbox partial environment: "No broken requirements found". NOT TESTED in the project `.venv`; rerun locally.
-- [ ] Run bounded live acceptance or mark NOT TESTED
-  - NOT TESTED. No Vietcap/Telegram route or credentials in the build sandbox. A synthetic-provider,
-    temporary-database run of every command succeeded, but it is not live evidence.
-- [ ] Update PROJECT_CONTEXT.md (text provided; tick after pasting)
-- [ ] STOP and report
+  - Python 3.12.10, isolated `.venv-phase21` dependency set: 589 passed.
+- [x] Run pip check
+  - Isolated `.venv-phase21` dependency set: `No broken requirements found`.
+  - The Microsoft Store launcher for the workspace `.venv` remains unusable; tests used the same
+    isolated site-packages through `PYTHONNOUSERSITE`/`PYTHONPATH`, not global packages.
+- [x] Run bounded live acceptance
+  - `scripts/test_portfolio_live.py`: PASS against live Vietcap EOD history using a temporary database
+    and synthetic holdings; every Phase 23 command path succeeded without persisting real holdings.
+  - `scripts/test_telegram.py`: PASS, Telegram authenticated `@stock_vinavn_bot` via `getMe`.
+- [x] Update PROJECT_CONTEXT.md
+- [x] STOP and report
 
 Deferred: portfolio alerts, transaction ledger / realized P&L, beta-based VNINDEX stress, realtime
 pricing for valuation, Phase 24 valuation. Pending Phase 3–7 live validations remain PENDING.

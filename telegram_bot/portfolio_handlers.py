@@ -10,6 +10,9 @@ from telegram.ext import CommandHandler, ContextTypes
 from telegram_bot.portfolio_commands import COMMANDS
 
 Reply = Callable[[Update, str], Awaitable[None]]
+PRIVATE_CHAT_ONLY = (
+    "🔒 Portfolio and risk commands are available only in a private chat with the bot."
+)
 
 
 def build_portfolio_handlers(commands, reply: Reply) -> list[CommandHandler]:
@@ -17,6 +20,10 @@ def build_portfolio_handlers(commands, reply: Reply) -> list[CommandHandler]:
 
     def make(name: str):
         async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+            chat = getattr(update, "effective_chat", None)
+            if chat is not None and chat.type != "private":
+                await reply(update, PRIVATE_CHAT_ONLY)
+                return
             user = update.effective_user
             text = commands.portfolio_command(
                 name, None if user is None else user.id, context.args or []

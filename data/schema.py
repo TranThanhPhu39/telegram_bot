@@ -318,3 +318,36 @@ CREATE INDEX IF NOT EXISTS idx_watchlist_symbol ON watchlist(symbol)
 PORTFOLIO_HOLDINGS_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_portfolio_holdings_symbol ON portfolio_holdings(symbol)
 """
+
+# Migration 5 adds canonical decimal text beside the Phase 23 v4 REAL columns.
+# SQLite REAL cannot round-trip every Decimal exactly.  The legacy columns stay
+# populated for backward compatibility and their existing CHECK constraints;
+# repository reads use the exact text columns after migration.
+USERS_RISK_DECIMAL_COLUMN_SQL = """
+ALTER TABLE users ADD COLUMN default_risk_per_trade_decimal TEXT
+    CHECK (
+        default_risk_per_trade_decimal IS NULL
+        OR length(trim(default_risk_per_trade_decimal)) > 0
+    )
+"""
+
+PORTFOLIO_COST_DECIMAL_COLUMN_SQL = """
+ALTER TABLE portfolio_holdings ADD COLUMN average_cost_decimal TEXT
+    CHECK (
+        average_cost_decimal IS NULL
+        OR length(trim(average_cost_decimal)) > 0
+    )
+"""
+
+BACKFILL_USERS_RISK_DECIMAL_SQL = """
+UPDATE users
+SET default_risk_per_trade_decimal = CAST(default_risk_per_trade_pct AS TEXT)
+WHERE default_risk_per_trade_pct IS NOT NULL
+  AND default_risk_per_trade_decimal IS NULL
+"""
+
+BACKFILL_PORTFOLIO_COST_DECIMAL_SQL = """
+UPDATE portfolio_holdings
+SET average_cost_decimal = CAST(average_cost AS TEXT)
+WHERE average_cost_decimal IS NULL
+"""

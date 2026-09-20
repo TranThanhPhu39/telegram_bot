@@ -197,6 +197,7 @@ def test_registered_handlers_call_the_service_with_the_telegram_user_id(bot) -> 
         replies.append(text)
 
     update = SimpleNamespace(effective_user=SimpleNamespace(id=USER),
+                             effective_chat=SimpleNamespace(type="private"),
                              effective_message=SimpleNamespace(reply_text=reply_text))
 
     def call(name, *args):
@@ -212,6 +213,55 @@ def test_registered_handlers_call_the_service_with_the_telegram_user_id(bot) -> 
     assert "STRESS TEST" in call("stress", "FPT", "-10")
     assert "Usage:" in call("addholding", "FPT")
     assert commands.portfolio.execute("portfolio", USER + 5, []).startswith("💼 MY PORTFOLIO\n\nNo holdings")
+
+
+def test_portfolio_handlers_refuse_group_chats(bot) -> None:
+    commands, _, _ = bot
+    application = build_application("123456:TEST_TOKEN", commands)
+    handlers = {
+        name: handler for handler in application.handlers[0]
+        for name in getattr(handler, "commands", ())
+    }
+    replies: list[str] = []
+
+    async def reply_text(text, reply_markup=None):
+        replies.append(text)
+
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=USER),
+        effective_chat=SimpleNamespace(type="group"),
+        effective_message=SimpleNamespace(reply_text=reply_text),
+    )
+    asyncio.run(handlers["portfolio"].callback(update, SimpleNamespace(args=[])))
+    assert replies == [
+        "🔒 Portfolio and risk commands are available only in a private chat with the bot."
+    ]
+
+
+def test_soi_hides_portfolio_context_outside_private_chat(bot) -> None:
+    commands, run, _ = bot
+    run("addholding", "FPT", "1000", "150000")
+    application = build_application("123456:TEST_TOKEN", commands)
+    soi_handler = next(
+        handler for handler in application.handlers[0]
+        if "soi" in getattr(handler, "commands", ())
+    )
+    replies: list[str] = []
+
+    async def reply_text(text, reply_markup=None):
+        replies.append(text)
+
+    def invoke(chat_type: str) -> str:
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=USER),
+            effective_chat=SimpleNamespace(type=chat_type),
+            effective_message=SimpleNamespace(reply_text=reply_text),
+        )
+        asyncio.run(soi_handler.callback(update, SimpleNamespace(args=["FPT"])))
+        return replies[-1]
+
+    assert "PORTFOLIO CONTEXT" not in invoke("group")
+    assert "Holding: Yes" in invoke("private")
 
 
 # ------------------------------------------------------------- formatters

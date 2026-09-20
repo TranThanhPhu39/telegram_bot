@@ -146,6 +146,14 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
         args = update_context.args or []
         return args[0].strip().upper() if args else ""
 
+    def _private_user_id(update: Update) -> int | None:
+        """Expose personal portfolio context only inside a private chat."""
+        user = getattr(update, "effective_user", None)
+        chat = getattr(update, "effective_chat", None)
+        if user is None or chat is None or chat.type != "private":
+            return None
+        return user.id
+
     async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, commands.start())
 
@@ -155,8 +163,7 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
     async def soi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         markup = None
         try:
-            user = update.effective_user
-            text = commands.soi(context.args, None if user is None else user.id)
+            text = commands.soi(context.args, _private_user_id(update))
             symbol = _first_argument(context)
             if symbol:
                 markup = build_symbol_keyboard(symbol)
@@ -206,7 +213,7 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
         else:
             text = render_callback(
                 commands, action, symbol,
-                None if query.from_user is None else query.from_user.id,
+                _private_user_id(update),
             )
         if query.message is not None:
             for part in split_message(text):

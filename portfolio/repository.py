@@ -33,8 +33,13 @@ def _decimal(value: float | int | str) -> Decimal:
     return Decimal(str(value))
 
 
+def _decimal_text(value: Decimal) -> str:
+    """Canonical non-exponent form for exact SQLite round-tripping."""
+    return format(value, "f")
+
+
 class SQLitePortfolioRepository:
-    """Requires ``bootstrap_schema`` (migration 4) to have been applied."""
+    """Requires ``bootstrap_schema`` (through migration 5) to have been applied."""
 
     def __init__(
         self, connection: sqlite3.Connection, now: Callable[[], float] = time.time
@@ -66,7 +71,9 @@ class SQLitePortfolioRepository:
         ).fetchone()
         if row is None:
             return None
-        pct = row["default_risk_per_trade_pct"]
+        pct = row["default_risk_per_trade_decimal"]
+        if pct is None:
+            pct = row["default_risk_per_trade_pct"]  # pre-v5/backfill compatibility
         return UserProfile(
             row["telegram_user_id"], row["risk_profile"],
             None if pct is None else _decimal(pct), row["created_at"], row["updated_at"],
@@ -76,8 +83,9 @@ class SQLitePortfolioRepository:
         self.ensure_user(telegram_user_id)
         with self.connection:
             self.connection.execute(
-                "UPDATE users SET default_risk_per_trade_pct=?, updated_at=? WHERE telegram_user_id=?",
-                (float(risk_pct), self._ts(), telegram_user_id),
+                "UPDATE users SET default_risk_per_trade_pct=?, "
+                "default_risk_per_trade_decimal=?, updated_at=? WHERE telegram_user_id=?",
+                (float(risk_pct), _decimal_text(risk_pct), self._ts(), telegram_user_id),
             )
 
     # ------------------------------------------------------------ watchlist
@@ -139,11 +147,15 @@ class SQLitePortfolioRepository:
             self._ensure_symbol(symbol)
             self.connection.execute(
                 "INSERT INTO portfolio_holdings(telegram_user_id, symbol, quantity, "
-                "average_cost, updated_at) VALUES (?,?,?,?,?) "
+                "average_cost, average_cost_decimal, updated_at) VALUES (?,?,?,?,?,?) "
                 "ON CONFLICT(telegram_user_id, symbol) DO UPDATE SET "
                 "quantity=excluded.quantity, average_cost=excluded.average_cost, "
+                "average_cost_decimal=excluded.average_cost_decimal, "
                 "updated_at=excluded.updated_at",
-                (telegram_user_id, symbol, quantity, float(average_cost), self._ts()),
+                (
+                    telegram_user_id, symbol, quantity, float(average_cost),
+                    _decimal_text(average_cost), self._ts(),
+                ),
             )
         return not existed
 
@@ -178,9 +190,12 @@ class SQLitePortfolioRepository:
 
     @staticmethod
     def _holding(row: sqlite3.Row) -> PortfolioHolding:
+        average_cost = row["average_cost_decimal"]
+        if average_cost is None:
+            average_cost = row["average_cost"]  # pre-v5/backfill compatibility
         return PortfolioHolding(
             row["telegram_user_id"], row["symbol"], int(row["quantity"]),
-            _decimal(row["average_cost"]), row["updated_at"],
+            _decimal(average_cost), row["updated_at"],
         )
 
     def _ensure_symbol(self, symbol: str) -> None:

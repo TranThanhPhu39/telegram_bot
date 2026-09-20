@@ -21,6 +21,10 @@ from data.schema import (
     WATCHLIST_INDEX_SQL,
     PORTFOLIO_HOLDINGS_TABLE_SQL,
     PORTFOLIO_HOLDINGS_INDEX_SQL,
+    USERS_RISK_DECIMAL_COLUMN_SQL,
+    PORTFOLIO_COST_DECIMAL_COLUMN_SQL,
+    BACKFILL_USERS_RISK_DECIMAL_SQL,
+    BACKFILL_PORTFOLIO_COST_DECIMAL_SQL,
 )
 
 SCHEMA_MIGRATIONS_TABLE_SQL = """
@@ -76,14 +80,24 @@ MIGRATIONS = (
         statements=(BANK_FINANCIAL_REPORTS_TABLE_SQL,),
     ),
     Migration(
-    version=4,
-    name="portfolio_watchlist_holdings",
-    statements=(
-        USERS_TABLE_SQL,
-        WATCHLIST_TABLE_SQL,
-        WATCHLIST_INDEX_SQL,
-        PORTFOLIO_HOLDINGS_TABLE_SQL,
-        PORTFOLIO_HOLDINGS_INDEX_SQL,
+        version=4,
+        name="portfolio_watchlist_holdings",
+        statements=(
+            USERS_TABLE_SQL,
+            WATCHLIST_TABLE_SQL,
+            WATCHLIST_INDEX_SQL,
+            PORTFOLIO_HOLDINGS_TABLE_SQL,
+            PORTFOLIO_HOLDINGS_INDEX_SQL,
+        ),
+    ),
+    Migration(
+        version=5,
+        name="portfolio_exact_decimals",
+        statements=(
+            USERS_RISK_DECIMAL_COLUMN_SQL,
+            PORTFOLIO_COST_DECIMAL_COLUMN_SQL,
+            BACKFILL_USERS_RISK_DECIMAL_SQL,
+            BACKFILL_PORTFOLIO_COST_DECIMAL_SQL,
         ),
     ),
 )

@@ -458,3 +458,24 @@ only from an exact accounting identity, while material mismatches fail closed.
 When a loan-quality table is supplied, NPL is the explicit sum of current-period
 groups 3, 4, and 5. CAR remains nullable because ordinary financial statements
 may not contain the regulatory capital disclosure.
+
+## Portfolio, risk and watchlist layer
+
+Phase 23 keeps personal state behind `portfolio.repository` and the existing
+SQLite connection. Migration 4 adds users, watchlists and long-only holdings;
+migration 5 additively persists canonical Decimal text while retaining the v4
+REAL columns for compatibility. Repository reads prefer the exact representation.
+
+`portfolio.service` orchestrates pure valuation, concentration, historical-risk,
+position-sizing and deterministic-stress functions through an injected market
+port. The runtime adapter uses only `RuntimeBotDataService._history`, so portfolio
+commands cannot introduce another Vietcap contract. Missing prices are excluded
+and disclosed rather than valued at zero. Historical volatility, beta and maximum
+drawdown are explicitly static-current-weight proxies over aligned daily sessions.
+
+Position sizing is bounded by both the stop-loss risk budget and available capital;
+V1 never assumes leverage. Telegram portfolio/risk handlers run only in private
+chats, and stock dashboards omit personal portfolio context in groups. Rendering
+remains separate from portfolio arithmetic. Bounded live acceptance uses a
+temporary database and synthetic holdings, so verification cannot modify a real
+user portfolio.

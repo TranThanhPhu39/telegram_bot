@@ -139,6 +139,18 @@ def test_risk_settings_default_and_custom_feed_position_sizing() -> None:
         runtime.portfolio.set_default_risk(USER, D("5.5"))
 
 
+def test_position_sizing_never_assumes_leverage() -> None:
+    runtime, _ = make_runtime()
+    result = runtime.portfolio.size(
+        USER, "FPT", D("150000"), D("149000"), D("500000000"), D("1")
+    )
+    assert result.shares == 3333
+    assert result.position_value == D("499950000")
+    assert result.position_value <= result.capital
+    assert result.max_loss == D("3333000")
+    assert "Capped by available capital; no leverage is assumed." in result.notes
+
+
 def test_alert_preparation_hooks() -> None:
     runtime, _ = make_runtime()
     hold(runtime, "FPT", 1, "1")

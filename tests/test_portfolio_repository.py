@@ -97,6 +97,19 @@ def test_default_risk_is_stored_per_user(repo) -> None:
     assert repo.get_user(2) is None
 
 
+def test_money_decimals_round_trip_exactly(repo) -> None:
+    cost = Decimal("9007199254740993.123456")
+    risk = Decimal("1.123456789123456789")
+    repo.upsert_holding(1, "FPT", 1, cost)
+    repo.set_default_risk(1, risk)
+    assert repo.get_holding(1, "FPT").average_cost == cost
+    assert repo.get_user(1).default_risk_per_trade_pct == risk
+    row = repo.connection.execute(
+        "SELECT average_cost_decimal FROM portfolio_holdings WHERE symbol='FPT'"
+    ).fetchone()
+    assert row[0] == "9007199254740993.123456"
+
+
 def test_data_persists_across_connections(tmp_path) -> None:
     url = f"sqlite:///{(tmp_path / 'p.sqlite3').as_posix()}"
     first = connect_database(url)

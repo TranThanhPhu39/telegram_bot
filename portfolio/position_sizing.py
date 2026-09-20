@@ -22,13 +22,20 @@ def size_position(
 
     risk_budget = capital * risk_pct / Decimal(100)
     risk_per_share = entry - stop
-    shares = int((risk_budget / risk_per_share).to_integral_value(rounding=ROUND_FLOOR))
+    shares_by_risk = int(
+        (risk_budget / risk_per_share).to_integral_value(rounding=ROUND_FLOOR)
+    )
+    shares_by_capital = int((capital / entry).to_integral_value(rounding=ROUND_FLOOR))
+    # Long-only V1 never assumes leverage.  A very tight stop can otherwise make
+    # fixed-fractional sizing return a position whose purchase price exceeds the
+    # supplied capital even though its stop-loss budget is valid.
+    shares = min(shares_by_risk, shares_by_capital)
     position_value = shares * entry
     notes = ["Shares are not rounded to the exchange lot size."]
     if shares == 0:
         notes.append("Risk budget is smaller than the risk on a single share.")
-    if position_value > capital:
-        notes.append("Position value exceeds capital; this would require leverage.")
+    if shares_by_capital < shares_by_risk:
+        notes.append("Capped by available capital; no leverage is assumed.")
     return PositionSizingResult(
         symbol=symbol, capital=capital, risk_pct=risk_pct, entry=entry, stop=stop,
         risk_budget=risk_budget, risk_per_share=risk_per_share, shares=shares,
