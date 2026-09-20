@@ -429,9 +429,16 @@ Sector-member price acquisition is separated from Telegram command execution.
 one symbol at a time, retries transient failures with exponential backoff, and
 commits each successful symbol immediately. `scripts/run_telegram_bot` starts a
 daemon worker that repeats this sync every six hours by default; the interval and
-retry policy are environment-configurable. `/soi ... ASMF` reads peer histories
-only from SQLite, so a slow provider cannot multiply command latency. A manual
-run is available through `python -m scripts.sync_sector_history ACB`.
+retry policy are environment-configurable. The worker also owns a thread-safe
+on-demand queue: `/soi <symbol> ASMF` and `/sector <symbol>` enqueue any valid
+symbol whose sector has fewer than five usable histories, including symbols not
+listed in `BOT_WATCH_SYMBOLS`. In-flight requests are deduplicated, recently
+attempted symbols observe a configurable cooldown, and each pass attempts at most
+eight uncached members by default so a large sector cannot monopolize the queue.
+Successful bars are retained between passes. Telegram reads peer histories only
+from SQLite and reports cached-member progress plus queue state, so a slow
+provider cannot multiply command latency. A manual full run remains available
+through `python -m scripts.sync_sector_history ACB`.
 
 Strict UTF-8 CSV schemas provide a stable import boundary for CafeF, Vietstock,
 UBCKNN, or licensed exports. `scripts/import_asmf_eod` loads these records into

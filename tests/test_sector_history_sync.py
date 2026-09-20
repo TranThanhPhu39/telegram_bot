@@ -1,11 +1,15 @@
 """Tests for independent sector-member history synchronization."""
 
 from datetime import date
+import threading
+import time
 
 from asmf_data.models import SectorMembership
 from asmf_data.store import upsert_sector_memberships
 from data.database import connect_database
-from runtime.sector_history_sync import SectorHistorySynchronizer
+from runtime.bot_service import RuntimeBotDataService
+from runtime.sector_history_sync import SectorHistorySynchronizer, SectorHistorySyncWorker
+from scanner.universe import ScannerInstrument
 
 
 def payload(symbol: str, count: int = 260) -> dict[str, object]:
@@ -76,3 +80,110 @@ def test_sync_keeps_successes_and_only_retries_failed_member_next_run() -> None:
     assert second.failed == ("DDD",)
     assert client.calls.count("ACB") == 1
     assert client.calls.count("DDD") == 6
+
+
+def test_sync_can_bound_each_batch_without_losing_total_progress() -> None:
+    client = RetryClient()
+    service = synchronizer(client)
+
+    first = service.sync_symbol_sector("ACB", max_uncached_members=2)
+    second = service.sync_symbol_sector("ACB", max_uncached_members=2)
+
+    assert first.members == 5
+    assert first.downloaded == 2
+    assert first.cached == 0
+    assert second.downloaded == 2
+    assert second.cached == 2
+    assert len(set(client.calls)) == 4
+
+
+def test_worker_accepts_arbitrary_symbol_and_deduplicates_inflight_and_cooldown() -> None:
+    started = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+
+    class BlockingSynchronizer:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def sync_symbol_sector(self, symbol: str, **kwargs):
+            self.calls.append(symbol)
+            if symbol == "VHM":
+                started.set()
+                assert release.wait(2)
+                completed.set()
+
+    fake = BlockingSynchronizer()
+    worker = SectorHistorySyncWorker(
+        (), interval_seconds=3600, request_cooldown_seconds=3600,
+        synchronizer_factory=lambda: fake,
+    )
+    worker.start()
+    try:
+        assert worker.request(" vhm ") is True
+        assert started.wait(2)
+        assert worker.request("VHM") is False
+        release.set()
+        assert completed.wait(2)
+        assert worker.request("VHM") is False
+        assert fake.calls == ["VHM"]
+    finally:
+        release.set()
+        worker.stop(2)
+
+
+def test_arbitrary_symbol_request_populates_sector_and_clears_structural_missing(
+    tmp_path,
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'dynamic-sector.db'}"
+    runtime_connection = connect_database(database_url)
+    runtime = RuntimeBotDataService(
+        RetryClient(), runtime_connection,
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        now=lambda: 1_800_000_000,
+    )
+    members = ("VHM", "AAA", "BBB", "CCC", "DDD", "EEE")
+    upsert_sector_memberships(runtime_connection, [
+        SectorMembership(
+            symbol, "REAL_ESTATE", "Real Estate",
+            date(2020, 1, 1), None, "TEST",
+        )
+        for symbol in members
+    ])
+    def build_worker_synchronizer():
+        connection = connect_database(database_url)
+        return SectorHistorySynchronizer(
+            RetryClient(), connection, now=lambda: 1_800_000_000,
+            sleep=lambda _: None,
+        )
+
+    worker = SectorHistorySyncWorker(
+        (), interval_seconds=3600, request_cooldown_seconds=3600,
+        max_members_per_run=8,
+        synchronizer_factory=build_worker_synchronizer,
+    )
+    worker.start()
+    runtime.set_sector_history_requester(worker.request)
+    try:
+        first = runtime.symbol_overview("VHM", "ASMF")
+        assert "Đã xếp VHM vào hàng đợi đồng bộ nền." in first
+
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            ready = runtime_connection.execute(
+                "SELECT COUNT(*) FROM sector_memberships sm "
+                "WHERE sm.sector_code='REAL_ESTATE' AND "
+                "(SELECT COUNT(*) FROM candles c WHERE c.symbol=sm.symbol "
+                "AND c.timeframe='ONE_DAY') >= 126"
+            ).fetchone()[0]
+            if ready >= 5:
+                break
+            time.sleep(0.01)
+        assert ready >= 5
+
+        second = runtime.symbol_overview("VHM", "ASMF")
+        assert "Sector=MISSING" not in second
+        assert "sức mạnh ngành/breadth" not in second
+    finally:
+        worker.stop(2)
+        runtime_connection.close()

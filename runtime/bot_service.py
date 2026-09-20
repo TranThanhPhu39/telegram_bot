@@ -101,6 +101,7 @@ class RuntimeBotDataService:
         news_service: NewsService | None = None,
         now: Callable[[], float] = time.time,
         fundamentals_csv_path: str | None = None,
+        sector_history_requester: Callable[[str], bool] | None = None,
     ) -> None:
         self.client = client
         self.connection = connection
@@ -109,10 +110,17 @@ class RuntimeBotDataService:
         self.news_service = news_service
         self.now = now
         self.fundamentals_csv_path = fundamentals_csv_path
+        self.sector_history_requester = sector_history_requester
         bootstrap_schema(connection)
         self.portfolio = PortfolioRuntime(
            connection, self._history, lambda: self.now(), PortfolioConfig.from_env() 
         )
+
+    def set_sector_history_requester(
+        self, requester: Callable[[str], bool]
+    ) -> None:
+        """Attach the non-blocking background queue after runtime construction."""
+        self.sector_history_requester = requester
     # ---------------------------------------------------------------- views
 
     def stock_analysis(self, symbol: str, strategy: str = "CL1") -> StockAnalysisView:
@@ -313,6 +321,11 @@ class RuntimeBotDataService:
         laggards: tuple[tuple[str, float], ...] = ()
         if len(usable) < 5:
             missing.append(f"chỉ có {len(usable)}/{len(members)} mã đủ 126 phiên trong SQLite")
+            missing.append(self._sector_sync_message(
+                key if membership is not None else members[0],
+                len(usable),
+                len(members),
+            ))
         if len(benchmark) < MINIMUM_SECTOR_HISTORY:
             missing.append("lịch sử VNINDEX chưa đủ 126 phiên")
         if len(usable) >= 5 and len(benchmark) >= MINIMUM_SECTOR_HISTORY:
@@ -342,8 +355,12 @@ class RuntimeBotDataService:
         name = strategy.strip().upper() if isinstance(strategy, str) else "CL1"
         if name not in {"CL1", "ASMF"}:
             name = "CL1"
+        note = None
         try:
-            result = evaluate_cl1(bars) if name == "CL1" else self._evaluate_asmf(bars, benchmark)
+            if name == "CL1":
+                result = evaluate_cl1(bars)
+            else:
+                result, note = self._evaluate_asmf(bars, benchmark)
         except ValueError as error:
             return build_strategy_view(
                 _insufficient_result(name, bars, str(error)),
@@ -351,7 +368,7 @@ class RuntimeBotDataService:
             )
         if name == "ASMF":
             result = replace(result, layers=result.layers + (_sentiment_layer(sentiment),))
-        return build_strategy_view(result)
+        return build_strategy_view(result, note=note)
 
     def _evaluate_asmf(self, bars, benchmark):
         as_of = datetime.fromtimestamp(bars[-1].timestamp, VIETNAM_TIMEZONE).date()
@@ -362,6 +379,19 @@ class RuntimeBotDataService:
         # and flow inputs remain point-in-time at the last completed bar.
         membership_as_of = datetime.fromtimestamp(self.now(), VIETNAM_TIMEZONE).date()
         histories = self._sector_histories(symbol, bars, membership_as_of)
+        membership = active_sector(self.connection, symbol, membership_as_of)
+        members = () if membership is None else sector_members(
+            self.connection, membership["sector_code"], membership_as_of
+        )
+        usable_sector_histories = sum(
+            len(histories.get(member, ())) >= MINIMUM_SECTOR_HISTORY
+            for member in members
+        )
+        sync_note = None
+        if members and usable_sector_histories < 5:
+            sync_note = self._sector_sync_message(
+                symbol, usable_sector_histories, len(members)
+            )
         sector = sector_strength_score(
             self.connection, symbol, membership_as_of, histories, benchmark
         )
@@ -375,7 +405,22 @@ class RuntimeBotDataService:
                 action=StrategyAction.BLOCKED,
                 negative=result.negative + ("tin phap ly tieu cuc nghiem trong con hieu luc",),
             )
-        return result
+        return result, sync_note
+
+    def _sector_sync_message(self, symbol: str, usable: int, total: int) -> str:
+        progress = f"Dữ liệu ngành: {usable}/{total} mã đủ {MINIMUM_SECTOR_HISTORY} phiên."
+        if self.sector_history_requester is None:
+            return progress + " Chưa cấu hình worker đồng bộ nền."
+        try:
+            queued = self.sector_history_requester(symbol)
+        except (RuntimeError, ValueError):
+            return progress + " Không thể xếp lịch đồng bộ nền."
+        if queued:
+            return progress + f" Đã xếp {symbol} vào hàng đợi đồng bộ nền."
+        return (
+            progress
+            + f" {symbol} đang được đồng bộ hoặc đang trong thời gian chống gọi lặp."
+        )
 
     def _sentiment_view(self, symbol: str) -> SentimentView:
         if self.news_service is None:

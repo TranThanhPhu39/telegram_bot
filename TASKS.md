@@ -41,7 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 23 — Portfolio, Risk & Watchlist (COMPLETE)**
+**Phase 20 operational follow-up — arbitrary-symbol sector sync (COMPLETE)**
 ---
 
 ## Phase 0 — Repository bootstrap & planning
@@ -372,6 +372,21 @@ was fabricated from incomplete inputs.
 - [x] Validate a real imported dataset
   - ACB 2026Q2 OCR fixture imports into SQLite and reads back six verified
     values without fabricating unavailable CAR.
+- [x] STOP and report
+
+### Operational follow-up — arbitrary symbols
+- [x] Queue sector-history synchronization when `/soi <symbol> ASMF` requests a
+      valid symbol outside `BOT_WATCH_SYMBOLS`
+- [x] Queue the same non-blocking synchronization from `/sector <symbol>`
+- [x] Deduplicate in-flight requests and apply an on-demand cooldown
+- [x] Bound each worker pass to eight uncached members by default
+- [x] Show cached-sector progress and queue state without changing ASMF scoring
+- [x] Verify that an arbitrary symbol clears structural `Sector=MISSING` after
+      at least five real peer histories are cached
+- [x] Run focused and full regression tests
+  - Focused runtime/worker/Telegram regression: 54 passed.
+  - Full isolated-dependency regression: 594 passed.
+  - Isolated dependency check: `No broken requirements found`.
 - [x] STOP and report
 
 ---

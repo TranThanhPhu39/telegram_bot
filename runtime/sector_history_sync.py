@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 import logging
 import os
+from queue import Empty, Queue
 import sqlite3
 import threading
 import time
@@ -18,7 +19,12 @@ from data.database import connect_database
 from data.migrations import bootstrap_schema
 from data.models import OHLCVBar
 from data.vietcap.historical import normalize_gap_chart
-from data.vietcap.rest import VietcapRestClient, VietcapRestError, VietcapTimeFrame
+from data.vietcap.rest import (
+    VietcapRestClient,
+    VietcapRestError,
+    VietcapTimeFrame,
+    normalize_stock_symbol,
+)
 from runtime.bot_service import HistoricalClient, VIETNAM_TIMEZONE
 
 logger = logging.getLogger(__name__)
@@ -68,8 +74,14 @@ class SectorHistorySynchronizer:
         bootstrap_schema(connection)
 
     def sync_symbol_sector(
-        self, symbol: str, *, as_of: date | None = None
+        self,
+        symbol: str,
+        *,
+        as_of: date | None = None,
+        max_uncached_members: int | None = None,
     ) -> SectorSyncResult:
+        if max_uncached_members is not None and max_uncached_members < 1:
+            raise ValueError("max_uncached_members must be positive")
         symbol = symbol.strip().upper()
         effective_date = as_of or datetime.fromtimestamp(
             self.now(), VIETNAM_TIMEZONE
@@ -84,10 +96,17 @@ class SectorHistorySynchronizer:
         downloaded = 0
         cached = 0
         failed: list[str] = []
+        uncached: list[str] = []
         for member in members:
             if self._cached_bar_count(member) >= self.minimum_bars:
                 cached += 1
-                continue
+            else:
+                uncached.append(member)
+        candidates = (
+            uncached if max_uncached_members is None
+            else uncached[:max_uncached_members]
+        )
+        for member in candidates:
             bars = self._fetch_with_retry(member)
             if len(bars) < self.minimum_bars:
                 failed.append(member)
@@ -165,6 +184,132 @@ class SectorHistorySynchronizer:
             )
 
 
+class SectorHistorySyncWorker:
+    """Serialize periodic and on-demand sector synchronization off Telegram's path."""
+
+    _STOP = object()
+
+    def __init__(
+        self,
+        symbols: tuple[str, ...],
+        *,
+        interval_seconds: float,
+        request_cooldown_seconds: float = 900.0,
+        max_members_per_run: int = 8,
+        synchronizer_factory: Callable[[], SectorHistorySynchronizer] | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds must be positive")
+        if request_cooldown_seconds < 0:
+            raise ValueError("request_cooldown_seconds cannot be negative")
+        if max_members_per_run < 1:
+            raise ValueError("max_members_per_run must be positive")
+        self.interval_seconds = interval_seconds
+        self.request_cooldown_seconds = request_cooldown_seconds
+        self.max_members_per_run = max_members_per_run
+        self.synchronizer_factory = (
+            synchronizer_factory or build_sector_history_synchronizer_from_env
+        )
+        self.monotonic = monotonic
+        self._initial_symbols = tuple(
+            dict.fromkeys(normalize_stock_symbol(symbol) for symbol in symbols)
+        )
+        self._tracked = set(self._initial_symbols)
+        self._pending: set[str] = set()
+        self._last_attempt: dict[str, float] = {}
+        self._queue: Queue[str | object] = Queue()
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._stopped = False
+
+    def start(self) -> threading.Thread:
+        """Start one daemon thread and seed the configured watch symbols."""
+        with self._lock:
+            if self._stopped:
+                raise RuntimeError("sector history worker has been stopped")
+            if self._thread is not None:
+                return self._thread
+            for symbol in self._initial_symbols:
+                self._enqueue_locked(symbol, force=True)
+            self._thread = threading.Thread(
+                target=self._run, name="sector-history-sync", daemon=True
+            )
+            self._thread.start()
+            return self._thread
+
+    def request(self, symbol: str) -> bool:
+        """Queue an arbitrary stock once; return False for duplicate/cooldown calls."""
+        normalized = normalize_stock_symbol(symbol)
+        with self._lock:
+            if self._stopped:
+                return False
+            self._tracked.add(normalized)
+            return self._enqueue_locked(normalized, force=False)
+
+    def stop(self, timeout: float | None = None) -> None:
+        """Stop the daemon cooperatively; primarily useful for deterministic tests."""
+        with self._lock:
+            if self._stopped:
+                return
+            self._stopped = True
+            thread = self._thread
+            self._queue.put(self._STOP)
+        if thread is not None:
+            thread.join(timeout)
+
+    def _enqueue_locked(self, symbol: str, *, force: bool) -> bool:
+        if symbol in self._pending:
+            return False
+        last_attempt = self._last_attempt.get(symbol)
+        if (
+            not force
+            and last_attempt is not None
+            and self.monotonic() - last_attempt < self.request_cooldown_seconds
+        ):
+            return False
+        self._pending.add(symbol)
+        self._queue.put(symbol)
+        return True
+
+    def _enqueue_periodic(self) -> None:
+        with self._lock:
+            if self._stopped:
+                return
+            for symbol in sorted(self._tracked):
+                self._enqueue_locked(symbol, force=True)
+
+    def _run(self) -> None:
+        synchronizer = self.synchronizer_factory()
+        next_periodic = self.monotonic() + self.interval_seconds
+        while True:
+            timeout = max(0.0, next_periodic - self.monotonic())
+            try:
+                item = self._queue.get(timeout=timeout)
+            except Empty:
+                self._enqueue_periodic()
+                next_periodic = self.monotonic() + self.interval_seconds
+                continue
+            if item is self._STOP:
+                self._queue.task_done()
+                return
+            symbol = str(item)
+            try:
+                synchronizer.sync_symbol_sector(
+                    symbol, max_uncached_members=self.max_members_per_run
+                )
+            except Exception:
+                logger.exception(
+                    "Unexpected sector history synchronization failure",
+                    extra={"symbol": symbol},
+                )
+            finally:
+                with self._lock:
+                    self._pending.discard(symbol)
+                    self._last_attempt[symbol] = self.monotonic()
+                self._queue.task_done()
+
+
 def build_sector_history_synchronizer_from_env() -> SectorHistorySynchronizer:
     load_dotenv()
     required = {name: os.getenv(name, "").strip() for name in (
@@ -187,22 +332,15 @@ def build_sector_history_synchronizer_from_env() -> SectorHistorySynchronizer:
 
 
 def start_sector_history_background_sync(
-    symbols: tuple[str, ...], *, interval_seconds: float
-) -> threading.Thread:
-    if interval_seconds <= 0:
-        raise ValueError("interval_seconds must be positive")
-
-    def worker() -> None:
-        synchronizer = build_sector_history_synchronizer_from_env()
-        while True:
-            try:
-                synchronizer.sync_symbols(symbols)
-            except Exception:
-                logger.exception("Unexpected sector history synchronization failure")
-            time.sleep(interval_seconds)
-
-    thread = threading.Thread(
-        target=worker, name="sector-history-sync", daemon=True
+    symbols: tuple[str, ...], *, interval_seconds: float,
+    request_cooldown_seconds: float = 900.0,
+    max_members_per_run: int = 8,
+) -> SectorHistorySyncWorker:
+    worker = SectorHistorySyncWorker(
+        symbols,
+        interval_seconds=interval_seconds,
+        request_cooldown_seconds=request_cooldown_seconds,
+        max_members_per_run=max_members_per_run,
     )
-    thread.start()
-    return thread
+    worker.start()
+    return worker

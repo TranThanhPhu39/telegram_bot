@@ -46,11 +46,11 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 20 — ASMF EOD data integration — PARTIAL. Provider-independent models,
-SQLite persistence, CSV ingestion, point-in-time scoring, and runtime wiring are
-implemented. Vietstock document discovery now works live without stored tokens;
-financial-value extraction and real-data import remain pending. Phases
-3–7 remain pending live validation and may not be reported as PASS.
+Phase 20 operational follow-up — arbitrary-symbol sector synchronization —
+COMPLETE. Any valid symbol requested through `/soi ... ASMF` or `/sector` can now
+enter the existing background queue even when it is absent from
+`BOT_WATCH_SYMBOLS`. Phase 23 remains complete. Phases 3–7 remain pending live
+validation and may not be reported as PASS.
 
 ## 4. Completed
 
@@ -121,12 +121,12 @@ financial-value extraction and real-data import remain pending. Phases
 
 ## 5. Currently Working On
 
-Phase 20 remains split at a safe boundary. Vietstock metadata discovery is now
-live-verified, including runtime anti-forgery token/cookie acquisition, but report
-content is delivered as PDF/ZIP and still needs a bank-aware extraction pipeline.
-Normalized CSV data can already be loaded and consumed by ASMF without look-ahead.
-Real-value import remains NOT TESTED and Phase 20 is not complete.
-Phases 3–7 retain their pending live-validation status.
+The requested Phase 20 operational follow-up is complete and stopped at its
+acceptance boundary. Dynamic sector synchronization is implemented and verified
+offline. It cannot guarantee provider availability, sufficient history for newly
+listed stocks, or BCTC/institutional-flow coverage; those conditions continue to
+fail closed rather than being fabricated. Phases 3–7 retain their pending
+live-validation status.
 
 ## 6. Files Created / Modified
 
@@ -2497,3 +2497,28 @@ of the bot is Vietnamese; invalid Phase 23 `.env` values fail at startup.
 #### Deferred
 Portfolio-aware alerts (hooks `is_held` / `is_watched` exist), beta-based VNINDEX stress, transaction ledger,
 realtime pricing, Phase 24 valuation, forecasting, optimization, brokerage execution. No investment execution exists.
+
+### 2026-09-20 — Phase 20 arbitrary-symbol sector-sync follow-up
+
+- Replaced the fixed-watchlist-only sector daemon loop with a reusable background
+  worker that accepts arbitrary normalized ticker requests while retaining the
+  configured watch symbols for periodic synchronization.
+- `/soi <symbol> ASMF` and `/sector <symbol>` now enqueue missing sector history
+  without performing provider I/O on the Telegram command path. Responses expose
+  current usable/total member counts and whether a request was queued or already
+  protected by in-flight/cooldown deduplication.
+- Added a 15-minute default on-demand cooldown and an eight-uncached-member
+  default batch limit. Large sectors such as VHM's 123-member ICB2 group therefore
+  cannot hold the worker indefinitely in one pass; successful histories persist
+  and later periodic passes expand coverage.
+- Preserved ASMF fail-closed behavior. The queue does not fabricate a sector
+  score, and missing BCTC or institutional flow remains `MISSING` until real
+  point-in-time records exist.
+- Acceptance coverage uses a symbol outside the configured watchlist and proves
+  the sequence `Sector=MISSING` → background SQLite population → sector layer
+  available once five member histories exist.
+- Focused runtime/worker/dashboard/Telegram regression: 54 passed. Full isolated
+  dependency regression: 594 passed in 4.76 seconds.
+- Isolated `.venv-phase21` dependency check: `No broken requirements found`.
+- Live Vietcap population for VHM is NOT TESTED in this coding iteration; provider
+  timeout and data availability remain external runtime conditions.

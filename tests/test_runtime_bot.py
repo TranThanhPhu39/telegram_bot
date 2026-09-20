@@ -127,6 +127,58 @@ def test_sector_history_fetch_uses_sqlite_cache_without_refetching_peers() -> No
     assert len(client.calls) == first_calls + 2
 
 
+def test_arbitrary_asmf_symbol_queues_missing_sector_history_without_blocking() -> None:
+    requested: list[str] = []
+
+    def request(symbol: str) -> bool:
+        requested.append(symbol)
+        return True
+
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        now=lambda: 1_800_000_000,
+        sector_history_requester=request,
+    )
+    members = ("VHM", "AAA", "BBB", "CCC", "DDD", "EEE")
+    upsert_sector_memberships(runtime.connection, [
+        SectorMembership(symbol, "REAL_ESTATE", "Real Estate", date(2020, 1, 1), None, "TEST")
+        for symbol in members
+    ])
+
+    result = runtime.symbol_overview("VHM", "ASMF")
+
+    assert requested == ["VHM"]
+    assert "Dữ liệu ngành: 1/6 mã đủ 126 phiên." in result
+    assert "Đã xếp VHM vào hàng đợi đồng bộ nền." in result
+    assert runtime.client.calls == [("VHM",), ("VNINDEX",)]
+
+
+def test_sector_command_queues_arbitrary_symbol_without_provider_io() -> None:
+    requested: list[str] = []
+
+    def request(symbol: str) -> bool:
+        requested.append(symbol)
+        return True
+
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        now=lambda: 1_800_000_000,
+        sector_history_requester=request,
+    )
+    upsert_sector_memberships(runtime.connection, [
+        SectorMembership(symbol, "REAL_ESTATE", "Real Estate", date(2020, 1, 1), None, "TEST")
+        for symbol in ("VHM", "AAA", "BBB", "CCC", "DDD", "EEE")
+    ])
+
+    result = runtime.sector_overview("VHM")
+
+    assert requested == ["VHM"]
+    assert "Đã xếp VHM vào hàng đợi đồng bộ nền." in result
+    assert runtime.client.calls == []
+
+
 class BrokenNews:
     def latest_news(self, *args, **kwargs): raise RuntimeError("news offline")
     def ticker_sentiment(self, *args, **kwargs): raise RuntimeError("news offline")
