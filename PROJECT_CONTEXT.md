@@ -2544,3 +2544,138 @@ realtime pricing, Phase 24 valuation, forecasting, optimization, brokerage execu
   a successful external provider batch while the polling bot is running.
 - BCTC/institutional-flow acquisition and candlestick charts were not mixed into
   this phase and remain the next two explicit user-requested follow-ups.
+
+### 2026-09-20 — Phase 20 sector-sync notification durability follow-up
+
+Audit xác nhận đúng một vấn đề durability và hai bug vận hành thực sự trong
+đường notification; không có bug nào trong CL1/ASMF, BCTC, institutional flow
+hay OCR.
+
+#### Vấn đề đã xác nhận
+
+- DURABILITY LIMITATION (thật): `SectorSyncNotificationBroker` giữ toàn bộ
+  `_watchers`, `_latest`, `_pending` trong RAM; `scripts/run_telegram_bot.py`
+  tạo broker mới mỗi lần khởi động. Một lần restart làm mất registration, kết
+  quả incomplete được retain, và cả notification đã queue nhưng chưa gửi.
+- BUG (thật): `deliver_sector_notifications` raise ngay ở lần gửi hỏng đầu
+  tiên và requeue phần còn lại vào đầu hàng đợi — một chat bị chặn/lỗi sẽ chặn
+  vĩnh viễn toàn bộ hàng đợi (head-of-line blocking) và retry vô hạn mỗi giây.
+- BUG (thật): không có TTL. `_watchers`/`_latest` sống đến khi process chết,
+  nên một sector không bao giờ đủ dữ liệu để lại registration sống mãi.
+
+#### Kiến trúc sau thay đổi
+
+    SectorHistorySyncWorker (không import Telegram)
+      -> SectorSyncResult
+      -> completion listener
+      -> SectorSyncNotificationBroker
+           -> NotificationStore  (InMemory hoặc SQLite)
+      -> async dispatcher (post_init task của polling app, app.py không đổi)
+      -> Telegram sendMessage + nút "Xem lại ASMF"
+
+Broker giữ nguyên toàn bộ public API cũ (`watch`, `unwatch`, `is_watching`,
+`publish`, `drain`, `requeue`) và thêm `mark_delivered`, `pending_count`,
+`purge_stale`, `maintain`. Trạng thái được đẩy xuống một store có thể thay
+thế: `InMemoryNotificationStore` giữ nguyên hành vi RAM cũ (mặc định, dùng
+cho test), `SQLiteNotificationStore` ghi vào chính database runtime hiện có.
+Không có database thứ hai, không có alert manager thứ hai, không có bot
+Telegram thứ hai, worker vẫn không biết gì về Telegram.
+
+#### Schema migration
+
+Version 6 `sector_sync_notifications`, additive, không sửa/không drop bất kỳ
+migration 1–5 nào (xác định từ `data/migrations.py` thật, migration mới nhất
+trước đó là v5 `portfolio_exact_decimals`):
+
+- `sector_sync_watchers(chat_id, symbol, incomplete_sent, closed, pending_kind,
+  pending_text, pending_attempts, created_at, updated_at)`, khoá chính
+  `(chat_id, symbol)`, index theo `symbol` và theo `pending_kind`.
+- `sector_sync_results(symbol, sector_code, members, usable, failed, ready,
+  fingerprint, updated_at)` giữ kết quả worker gần nhất cho subscriber đến
+  muộn.
+
+Có chủ ý không đặt foreign key tới `symbols`: một chat có thể hỏi mã chưa
+từng tải lịch sử thành công, trong khi `symbols` chỉ được ghi sau khi worker
+tải thành công — FK sẽ khiến notification fail-closed sai.
+
+#### Ngữ nghĩa giao hàng
+
+At-least-once. Gửi Telegram trước, chỉ đánh dấu delivered sau khi gửi thành
+công; process chết giữa hai bước có thể lặp một thông báo nhưng không bao giờ
+mất im lặng. `drain()` claim theo process nên sau restart mọi dòng pending
+còn lại được giao lại.
+
+Một chat lỗi không còn chặn hàng đợi: mỗi notification thử riêng,
+`pending_attempts` tăng dần và bị loại sau `SECTOR_NOTIFICATION_MAX_ATTEMPTS`
+(mặc định 5). Registration/retained result quá
+`SECTOR_NOTIFICATION_TTL_SECONDS` (mặc định 86400) bị dọn định kỳ mỗi
+`SECTOR_NOTIFICATION_PURGE_INTERVAL_SECONDS` (mặc định 300).
+
+Đúng một process bot sở hữu hai bảng này; broker serialise mọi thao tác bằng
+một `threading.RLock`, mỗi thao tác store chạy trong transaction SQLite
+riêng qua connection ngắn hạn.
+
+#### Hành vi được giữ nguyên
+
+ASMF fail closed, ngưỡng năm peer history, worker độc lập Telegram, command
+path không chờ network, failed send vẫn retry được, "Xem lại ASMF" vẫn
+recompute bằng dữ liệu hiện tại, ranh giới private-chat của portfolio, ngữ
+nghĩa CL1/ASMF, news blocker, nhãn SQLite fallback. Ba test notification cũ
+(`tests/test_sector_notifications.py`) pass nguyên văn, không sửa một dòng.
+
+#### Test — bằng chứng thật, chạy cục bộ 2026-09-20
+
+Máy: Windows, `py -3.12`, `.venv` của repo.
+py -3.12 -m pytest -q tests/test_sector_notification_persistence.py tests/test_sector_notifications.py 17 passed in 5.59s
+
+py -3.12 -m pytest -q tests/test_migrations.py tests/test_portfolio_schema.py tests/test_sector_history_sync.py tests/test_telegram_bot.py 28 passed in 2.03s
+
+py -3.12 -m pytest -q 612 passed in 11.32s
+
+
+612 = 599 (regression trước iteration này) + 13 test mới trong
+`tests/test_sector_notification_persistence.py`. Không có test nào bị sửa để
+ép pass; không portfolio test nào fail; CL1/ASMF decision behavior không đổi.
+py -3.12 -m pip check
+
+
+Không sạch, nhưng cả 8 conflict đều thuộc các gói **không nằm trong
+`requirements.txt` của repo này** (`googleapis-common-protos`,
+`google-ai-generativelanguage`, `google-api-core`, `grpcio-status`,
+`proto-plus`, `pyppeteer`, `streamlit`) — các công cụ khác được cài chung vào
+cùng `.venv`. Iteration này không thêm bất kỳ dependency mới nào và không
+gây ra các conflict trên. Đây là tình trạng môi trường có từ trước; các
+phase trước (Phase 21+) từng phải tách `.venv-phase21` riêng vì cùng lý do.
+Khuyến nghị: chạy `pip check` trong một virtualenv chỉ chứa
+`requirements.txt` của repo để có kết quả sạch, chứ không kết luận đây là
+lỗi do thay đổi lần này.
+
+#### Live evidence — PASS, chạy cục bộ 2026-09-20
+
+Bước 1 — bounded dry-run (không gửi Telegram), xác nhận sync thật với
+Vietcap:
+
+py -3.12 scripts/test_sector_notification_live.py --symbol VHM --dry-run [INFO] sector=8600 members=123 usable=9 downloaded=8 failed=0 elapsed=2.2s [INFO] dry run queued 1 notification(s) ✅ Dữ liệu ngành VHM đã sẵn sàng: 9/123 mã đủ lịch sử. Bấm "Xem lại ASMF" để cập nhật phân tích.
+
+
+Bước 2 — sau khi cấu hình `TELEGRAM_CHAT_ID` trong `.env`, chạy end-to-end
+thật, có gửi Telegram:
+
+py -3.12 scripts/test_sector_notification_live.py --symbol VHM [INFO] sector=8600 members=123 usable=9 downloaded=8 failed=0 elapsed=1.7s [INFO] Telegram authenticated as @stock_vinavn_bot [PASS] delivered 1 real Telegram notification(s)
+
+
+Exit code `0`. Chuỗi thật đã được xác nhận: real Vietcap sector sync
+(`sector=8600`, `usable=9/123 ≥ 5` → READY) → worker completion → broker
+publish → Telegram `getMe` authenticate cho `@stock_vinavn_bot` → thật sự
+gửi 1 tin nhắn qua Telegram Bot API kèm nút "Xem lại ASMF". Không dùng
+holding/portfolio thật; chạy trên bản sao tạm của database
+(`copy_runtime_database`), không ghi vào database sản xuất thật; không log
+token/cookie/chat id.
+
+**LIVE ACCEPTANCE: PASS**
+
+#### Ngoài phạm vi
+
+Thu thập BCTC/institutional flow thật và candlestick chart vẫn là hai
+follow-up riêng, không bị trộn vào iteration này. Phase 3–7 giữ nguyên
+PENDING.

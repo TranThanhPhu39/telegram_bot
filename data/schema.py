@@ -351,3 +351,65 @@ UPDATE portfolio_holdings
 SET average_cost_decimal = CAST(average_cost AS TEXT)
 WHERE average_cost_decimal IS NULL
 """
+
+SECTOR_SYNC_WATCHERS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS sector_sync_watchers (
+    chat_id TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    incomplete_sent INTEGER NOT NULL DEFAULT 0,
+    closed INTEGER NOT NULL DEFAULT 0,
+    pending_kind TEXT,
+    pending_text TEXT,
+    pending_attempts INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (chat_id, symbol),
+    CHECK (length(trim(chat_id)) BETWEEN 1 AND 64),
+    CHECK (length(symbol) BETWEEN 1 AND 32),
+    CHECK (symbol = upper(trim(symbol))),
+    CHECK (symbol NOT GLOB '*[^A-Z0-9]*'),
+    CHECK (incomplete_sent IN (0, 1)),
+    CHECK (closed IN (0, 1)),
+    CHECK (
+        pending_kind IS NULL
+        OR pending_kind IN ('INCOMPLETE', 'READY', 'UNAVAILABLE')
+    ),
+    CHECK ((pending_kind IS NULL) = (pending_text IS NULL)),
+    CHECK (typeof(pending_attempts) = 'integer' AND pending_attempts >= 0),
+    CHECK (typeof(created_at) = 'integer' AND created_at > 0),
+    CHECK (typeof(updated_at) = 'integer' AND updated_at >= created_at)
+) WITHOUT ROWID
+"""
+
+SECTOR_SYNC_RESULTS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS sector_sync_results (
+    symbol TEXT PRIMARY KEY,
+    sector_code TEXT,
+    members INTEGER NOT NULL,
+    usable INTEGER NOT NULL,
+    failed INTEGER NOT NULL,
+    ready INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    CHECK (length(symbol) BETWEEN 1 AND 32),
+    CHECK (symbol = upper(trim(symbol))),
+    CHECK (symbol NOT GLOB '*[^A-Z0-9]*'),
+    CHECK (sector_code IS NULL OR length(trim(sector_code)) > 0),
+    CHECK (typeof(members) = 'integer' AND members >= 0),
+    CHECK (typeof(usable) = 'integer' AND usable >= 0),
+    CHECK (typeof(failed) = 'integer' AND failed >= 0),
+    CHECK (ready IN (0, 1)),
+    CHECK (length(trim(fingerprint)) > 0),
+    CHECK (typeof(updated_at) = 'integer' AND updated_at > 0)
+) WITHOUT ROWID
+"""
+
+SECTOR_SYNC_WATCHERS_SYMBOL_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_sector_sync_watchers_symbol
+    ON sector_sync_watchers(symbol)
+"""
+
+SECTOR_SYNC_WATCHERS_PENDING_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_sector_sync_watchers_pending
+    ON sector_sync_watchers(pending_kind)
+"""

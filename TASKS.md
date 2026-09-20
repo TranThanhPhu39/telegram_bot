@@ -41,8 +41,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 20 operational follow-up — sector-sync completion notifications (COMPLETE)**
----
+**Phase 20 operational follow-up — sector-sync notification durability (COMPLETE)**
 
 ## Phase 0 — Repository bootstrap & planning
 - [x] Inspect repository structure
@@ -403,6 +402,27 @@ was fabricated from incomplete inputs.
   - Full isolated-dependency regression: 599 passed.
 - [x] STOP and report
 
+
+
+### Operational follow-up — notification durability
+- [x] Audit và phân loại đúng bản chất ba problem (durability / bug / live gap)
+- [x] Tách trạng thái notification vào store có thể thay thế
+- [x] Thêm `SQLiteNotificationStore` dùng database runtime hiện có
+- [x] Thêm migration v6 `sector_sync_notifications` (additive, không sửa v1–v5)
+- [x] Khôi phục registration, incomplete state và pending delivery sau restart
+- [x] Không gửi lại READY đã giao sau restart
+- [x] Giao hàng at-least-once: send trước, mark delivered sau
+- [x] Bỏ head-of-line blocking; retry có ngân sách, có thể cấu hình
+- [x] TTL/cleanup registration cũ, có thể cấu hình
+- [x] Giữ nguyên ba test notification cũ, không sửa để ép pass
+- [x] Thêm 13 deterministic test restart/dedup/retry/migration
+- [x] Chạy full regression: 612 passed cục bộ trên `py -3.12`, 2026-09-20
+- [x] Chạy `pip check`: chạy xong; 8 conflict đều thuộc gói ngoài
+      `requirements.txt` của repo (không do iteration này gây ra)
+- [x] Bounded live acceptance `scripts/test_sector_notification_live.py`:
+      **PASS** — sector VHM thật (usable 9/123, READY), gửi thành công 1 tin
+      nhắn Telegram thật qua `@stock_vinavn_bot`, exit code 0
+- [x] STOP and report
 ---
 
 ## Phase 21 — News & Transformer Sentiment Integration
