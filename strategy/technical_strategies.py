@@ -29,6 +29,15 @@ class StrategyAction(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class StrategyLayer:
+    """One decision layer with an explicit, non-inferred status."""
+
+    name: str
+    status: str
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class StrategyResult:
     strategy: StrategyName
     symbol: str
@@ -39,6 +48,7 @@ class StrategyResult:
     negative: tuple[str, ...]
     missing: tuple[str, ...]
     stop: float | None = None
+    layers: tuple[StrategyLayer, ...] = ()
 
 
 def evaluate_cl1(bars: Sequence[OHLCVBar]) -> StrategyResult:
@@ -134,8 +144,30 @@ def evaluate_asmf(
     action = StrategyAction.BLOCKED if missing or risk_off else (
         StrategyAction.BUY if score >= 60 and trigger else StrategyAction.WATCH
     )
+    layers = (
+        StrategyLayer(
+            "Market", "FAIL" if risk_off else "PASS",
+            f"regime score {regime_score:.1f}/100; Hurst {hurst:.2f}",
+        ),
+        _supplied_layer("Sector", sector_score),
+        _supplied_layer("Fundamental", fundamental_score),
+        _supplied_layer("Institutional", institutional_flow_score),
+        StrategyLayer(
+            "Technical", "PASS" if trigger and smf_score >= 60 else "FAIL",
+            f"SMF {smf_score:.1f}/100; trigger {'có' if trigger else 'chưa'}",
+        ),
+    )
     return StrategyResult(StrategyName.ASMF, latest.symbol, latest.timestamp, action,
-                          score, tuple(positive), tuple(negative), tuple(missing))
+                          score, tuple(positive), tuple(negative), tuple(missing),
+                          None, layers)
+
+
+def _supplied_layer(name: str, value: float | None, threshold: float = 60.0) -> StrategyLayer:
+    """A layer without stored input stays MISSING; it never defaults to PASS."""
+    if value is None:
+        return StrategyLayer(name, "MISSING", "chưa có dữ liệu point-in-time")
+    status = "PASS" if value >= threshold else "FAIL"
+    return StrategyLayer(name, status, f"score {value:.1f}/100")
 
 
 def adx(bars: Sequence[OHLCVBar], period: int = 14) -> tuple[float | None, ...]:

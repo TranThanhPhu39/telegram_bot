@@ -100,8 +100,12 @@ def test_safe_runtime_fallback_never_fabricates_market_data() -> None:
 
 def test_application_registers_all_required_commands() -> None:
     application = build_application("123456:TEST_TOKEN", TelegramCommandService(FakeData()))
-    commands = {command for handler in application.handlers[0] for command in handler.commands}
-    assert commands == {"start", "help", "soi", "scan", "market", "why", "performance", "chienluoc", "tin", "sentiment"}
+    commands = {
+        command
+        for handler in application.handlers[0]
+        for command in getattr(handler, "commands", ())
+    }
+    assert commands == {"start", "help", "soi", "scan", "market", "why", "performance", "chienluoc", "tin", "sentiment", "technical", "fundamental", "sector"}
 
 
 def test_alert_format_contains_transition_and_reason() -> None:

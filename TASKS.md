@@ -409,3 +409,31 @@ was fabricated from incomplete inputs.
 - Automated brokerage execution
 - ML price prediction
 - Full news intelligence before core bot works
+
+---
+
+## Phase 22 — Investor dashboard, explainability & data provenance
+- [x] Introduce a presentation-free view-model layer (`runtime/views.py`)
+- [x] Add pure analysis builders (`runtime/analysis.py`)
+- [x] Move all Telegram rendering into `telegram_bot/formatters.py`
+- [x] Rebuild `/soi` as a compact dashboard with price, technical, market,
+      strategy, fundamental, news and data-quality sections
+- [x] Expose support/resistance levels with their reasons
+- [x] Rebuild `/why` as indicator → meaning → implication with triggers and
+      data limitations
+- [x] Rebuild `/market` with explicit unavailable breadth/liquidity/flow
+- [x] Show freshness, session date, staleness and source on every response
+- [x] Label SQLite fallback as cached/EOD
+- [x] Expose point-in-time fundamentals with as-of date and source
+- [x] Add `/technical`, `/fundamental`, `/sector`
+- [x] Expose ASMF layer status (PASS/FAIL/MISSING) plus a sentiment context layer
+- [x] Explain scanner results instead of returning a bare ticker list
+- [x] Separate ENGINE TEST from STRATEGY VALIDATION in `/performance`
+- [x] Add an inline keyboard for `/soi` without bypassing any text command
+- [x] Add evidence to signal alerts while preserving dedup
+- [x] Keep all pre-existing tests passing and add new coverage
+  - Offline: 459 passed on Python 3.12 (422 pre-existing + 37 new).
+- [ ] Live acceptance of `/soi`, `/market`, `/sentiment` during a session
+  - NOT TESTED. The build environment has no route to Vietcap, CafeF or
+    Telegram. Must be rerun locally with real credentials during an active
+    Vietnamese market session.

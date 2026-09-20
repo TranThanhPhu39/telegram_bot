@@ -58,14 +58,25 @@ class TelegramAlertPublisher:
 
 
 def format_signal_alert(event: SignalEvent) -> str:
+    """Evidence-first alert; nothing is sent that the event did not establish."""
     previous = "NEW" if event.from_state is None else event.from_state.value
     positives = "; ".join(event.reason.positive_factors) or "không có"
-    return (
-        f"{event.symbol}: {previous} → {event.to_state.value}\n"
-        f"Giá: {event.price:g}\n"
-        f"Kích hoạt: {event.reason.trigger}\n"
-        f"Yếu tố tích cực: {positives}"
-    )
+    lines = [
+        f"🚨 {event.symbol} — CHUYỂN TRẠNG THÁI",
+        f"{event.symbol}: {previous} → {event.to_state.value}",
+        f"Giá: {event.price:g}",
+        f"Kích hoạt: {event.reason.trigger}",
+        f"Yếu tố tích cực: {positives}",
+    ]
+    negatives = getattr(event.reason, "negative_factors", ())
+    if negatives:
+        lines.append("Chưa đạt: " + "; ".join(negatives))
+    missing = getattr(event.reason, "missing_factors", ())
+    if missing:
+        lines.append("Thiếu dữ liệu: " + "; ".join(missing))
+    lines.append(f"Thời điểm: {event.occurred_at}")
+    lines.append("Tín hiệu định lượng, không phải khuyến nghị đầu tư.")
+    return "\n".join(lines)
 
 
 def format_news_alert(item: NewsItem) -> str:

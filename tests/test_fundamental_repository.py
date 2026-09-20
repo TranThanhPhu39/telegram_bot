@@ -1,0 +1,107 @@
+"""Point-in-time fundamental facts: no look-ahead, no invented ratios."""
+
+from datetime import date
+
+from asmf_data.models import BankFinancialReport, FinancialReport
+from asmf_data.store import upsert_bank_financial_reports, upsert_financial_reports
+from data.database import connect_database
+from data.migrations import bootstrap_schema
+from fundamentals.repository import load_fundamental_facts
+
+
+def connection():
+    conn = connect_database("sqlite:///:memory:")
+    bootstrap_schema(conn)
+    return conn
+
+
+def corporate_rows(symbol="FPT"):
+    rows = []
+    for index in range(8):
+        year, quarter = 2025 + index // 4, index % 4 + 1
+        rows.append(
+            FinancialReport(
+                symbol, f"{year}Q{quarter}", date(year, quarter * 3, 28), True,
+                1_000.0 + index * 100, 100.0 + index * 20, 5_000.0, 2_500.0,
+                "Vietstock",
+            )
+        )
+    return rows
+
+
+def test_corporate_facts_are_derived_from_stored_reports() -> None:
+    conn = connection()
+    upsert_financial_reports(conn, corporate_rows())
+    facts = load_fundamental_facts(conn, "FPT", date(2027, 1, 1))
+    assert facts is not None
+    assert facts.kind == "CORPORATE"
+    assert facts.period == "2026Q4"
+    assert facts.debt_to_equity == 0.5
+    assert facts.roe_percent is not None
+    assert facts.revenue_growth_percent > 0
+    assert facts.pe is None and facts.pb is None and facts.eps is None
+    assert "P/E" in facts.missing_fields
+
+
+def test_reports_published_after_the_as_of_date_are_ignored() -> None:
+    conn = connection()
+    upsert_financial_reports(conn, corporate_rows())
+    facts = load_fundamental_facts(conn, "FPT", date(2025, 6, 30))
+    assert facts is not None
+    assert facts.period == "2025Q2"
+    assert facts.roe_percent is None
+
+
+def test_unknown_symbol_returns_none() -> None:
+    assert load_fundamental_facts(connection(), "ZZZ", date(2027, 1, 1)) is None
+
+
+def bank_rows(symbol="ACB"):
+    rows = []
+    for index in range(8):
+        year, quarter = 2025 + index // 4, index % 4 + 1
+        rows.append(
+            BankFinancialReport(
+                symbol, f"{year}Q{quarter}", date(year, quarter * 3, 28), quarter * 3,
+                1_000.0 * quarter + index * 10, 400.0 * quarter + index * 5,
+                20_000.0, 100_000.0, 1_500.0, 1_800.0, 12.0, "Vietstock",
+            )
+        )
+    return rows
+
+
+def test_bank_facts_use_bank_specific_metrics_only() -> None:
+    conn = connection()
+    upsert_bank_financial_reports(conn, bank_rows())
+    facts = load_fundamental_facts(conn, "ACB", date(2027, 1, 1))
+    assert facts is not None
+    assert facts.kind == "BANK"
+    assert facts.npl_percent == 1.5
+    assert facts.coverage_percent == 120.0
+    assert facts.car_percent == 12.0
+    assert facts.debt_to_equity is None
+    assert "Debt/Equity" not in facts.missing_fields
+
+
+def test_csv_snapshot_supplies_only_ratios_sqlite_cannot_derive(tmp_path) -> None:
+    conn = connection()
+    upsert_financial_reports(conn, corporate_rows())
+    csv_path = tmp_path / "fundamentals.csv"
+    csv_path.write_text(
+        "symbol,as_of_date,source,eps,pe,pb,roe_percent,"
+        "revenue_growth_percent,profit_growth_percent\n"
+        "FPT,2026-12-30,Vietstock snapshot,5000,14.2,3.1,,,\n",
+        encoding="utf-8",
+    )
+    facts = load_fundamental_facts(conn, "FPT", date(2027, 1, 1), csv_path=csv_path)
+    assert facts is not None
+    assert facts.pe == 14.2 and facts.pb == 3.1 and facts.eps == 5000
+    assert facts.roe_percent is not None
+    assert "Vietstock snapshot" in facts.source
+
+
+def test_missing_csv_path_is_not_an_error() -> None:
+    conn = connection()
+    upsert_financial_reports(conn, corporate_rows())
+    facts = load_fundamental_facts(conn, "FPT", date(2027, 1, 1), csv_path="/nope.csv")
+    assert facts is not None and facts.pe is None

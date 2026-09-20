@@ -2273,3 +2273,129 @@ three observed values before request construction.
   regression 6 passed; final full regression 422 passed; isolated transformer
   environment `pip check` reports no broken requirements.
 - Phase 21 is complete. No Phase 22 work has started.
+
+### 2026-09-20 — Phase 22 Investment Intelligence Dashboard
+
+Goal of this phase: move `/soi` from a price-and-signal reply toward a compact
+investment dashboard, and make every displayed number traceable to a source and
+a session date. No architecture was replaced and no provider contract changed.
+
+#### Capabilities added
+
+- **View-model layer.** `runtime/views.py` holds immutable, presentation-free
+  dataclasses (`StockAnalysisView`, `TechnicalView`, `MarketContextView`,
+  `StrategyView`, `FundamentalView`, `SentimentView`, `SectorView`,
+  `DataQualityView`). Every optional field means exactly one thing: the backend
+  could not establish that value.
+- **Pure analysis builders.** `runtime/analysis.py` converts bars, scores and
+  aggregates into views. It computes only indicators the repository already
+  owns (EMA20/50, MA200, RSI14, ATR14, ADX14, 20-session volume ratio, relative
+  strength vs VNINDEX, 20/60-session breakout levels). No new indicator family
+  was introduced.
+- **Formatter boundary.** `telegram_bot/formatters.py` renders views and does no
+  computation or data access. Unavailable values render as an explicit marker,
+  never as `None`, `NaN` or a silent omission.
+- **Support/resistance exposure.** R1/R2 come from prior 20/60-session highs,
+  S1/S2 from the matching lows, plus EMA50/MA200 when they sit on the correct
+  side of price. Each level carries its reason. Duplicate levels are dropped.
+- **Fundamental exposure.** `fundamentals/repository.py` reads point-in-time
+  facts from the consolidated quarterly reports already stored for ASMF, with a
+  separate bank branch (ROE, TTM profit growth, NPL, coverage, CAR) that never
+  falls through to industrial leverage rules. P/E, P/B and EPS cannot be derived
+  from stored data (no share count) and stay unavailable unless a controlled CSV
+  snapshot is supplied through `FUNDAMENTALS_CSV_PATH`.
+- **ASMF layer status.** `StrategyResult` gained a `layers` tuple. ASMF now
+  reports Market / Sector / Fundamental / Institutional / Technical explicitly as
+  PASS / FAIL / MISSING, and the runtime appends a Sentiment layer as
+  SUPPORTIVE / NEUTRAL / RISK / MISSING. A MISSING layer still blocks BUY; a
+  SUPPORTIVE sentiment layer can never unlock one.
+- **Explainability.** `/why` renders state, evidence coverage, layer status,
+  indicator interpretation in `indicator → meaning → implication` form, next
+  triggers to watch, market context, news context and data limitations.
+- **Data quality on every response.** Freshness is derived from the session date
+  against the current date (EOD_TODAY / EOD / STALE / UNAVAILABLE) with the
+  staleness in days, the session date, the market source, the fundamental source
+  with as-of date, and the news backend with its latest article time. A SQLite
+  fallback is always labelled as cached.
+- **Scanner explanations.** `/scan` now reports trend, relative strength,
+  liquidity, fundamental status and CL1 state per symbol. `scan_results()` still
+  returns the original ticker tuple, so existing callers are unaffected.
+- **New commands.** `/technical`, `/fundamental`, `/sector`. `/chienluoc` now
+  documents CL1 entry/exit conditions and the ASMF layers with the data each
+  needs. `/performance` separates ENGINE TEST from STRATEGY VALIDATION and states
+  plainly that a zero-trade sample establishes nothing about profitability.
+- **Telegram UX.** `/soi` attaches an inline keyboard (Technical, Fundamental,
+  ASMF, Why, Tin, Sentiment, Market). Every button maps to an existing text
+  command, so the keyboard is additive. Long replies are chunked on paragraph
+  boundaries below the Telegram length limit.
+- **Smart alerts.** Signal alerts now carry positive, negative and missing
+  evidence plus the event timestamp. Dedup and the single alert boundary are
+  unchanged.
+
+#### Files changed
+
+Added: `runtime/views.py`, `runtime/analysis.py`, `fundamentals/repository.py`,
+`telegram_bot/formatters.py`, `tests/test_stock_dashboard.py`,
+`tests/test_fundamental_repository.py`.
+
+Replaced: `runtime/bot_service.py`, `telegram_bot/commands.py`,
+`telegram_bot/app.py`.
+
+Modified: `strategy/technical_strategies.py` (added `StrategyLayer` and the
+`layers` field; ASMF layer population; no decision rule changed),
+`telegram_bot/alerts.py` (richer alert body), `tests/test_telegram_bot.py`
+(registered-command set now includes the three new commands, and the assertion
+ignores non-command handlers).
+
+#### Architecture
+
+    Vietcap REST / SQLite / news DB
+      → repositories & stores (asmf_data, fundamentals, intelligence.news)
+      → analysis engines (data.indicators, strategy.technical_strategies,
+                          asmf_data.scoring)
+      → runtime.analysis (pure view builders)
+      → RuntimeBotDataService (orchestration only)
+      → telegram_bot.formatters (rendering only)
+      → telegram_bot.commands / app (argument parsing and delivery)
+
+Strategies still never call a provider, and the Telegram layer still never calls
+a provider or the news database directly.
+
+#### Tests
+
+459 passed offline on Python 3.12 (422 pre-existing plus 37 new). New coverage:
+complete `/soi`, `/soi` without fundamentals, `/soi` without a sentiment module,
+`/soi` with an empty news window, provider failure with SQLite fallback
+labelling, missing history, `/why` interpretation shape, RSI interpretation not
+becoming an order, `/market` regime and unavailable sections, freshness
+classification by age, cached labelling, fundamental as-of and period display,
+strategy evidence coverage, ASMF missing-layer blocking, positive sentiment not
+producing BUY, technical levels with reasons, scan explanations, preserved
+`scan_results()` contract, sector missing-data honesty, legacy data-service
+compatibility, usage-error handling, formatter safety on a fully empty view, and
+short-history degradation.
+
+#### Live evidence
+
+NOT TESTED. The development sandbox has no route to Vietcap, CafeF or the
+Telegram API (outbound requests to `mt.vietcap.com.vn` return no response), so
+`/soi`, `/market` and `/sentiment` were validated offline only. Live acceptance
+must be rerun locally with real credentials.
+
+#### Limitations
+
+- Market breadth, market-wide liquidity and market-wide foreign flow remain
+  unavailable outside a live session and are printed as `unavailable`.
+- Regime is trend-only until breadth is live; the response says so on every
+  `/market` reply.
+- No calibrated strategy confidence exists. Only evidence coverage (`n/m`) and
+  the sentiment classifier's own model confidence are shown.
+- P/E, P/B and EPS require the optional CSV snapshot.
+- `/sector` leaders and laggards appear only when at least five members have 126
+  cached sessions; otherwise the shortfall is reported.
+
+#### Deferred
+
+Portfolio management, DCF/fair value, price forecasting and ML prediction,
+social-media sentiment, watchlist persistence (no user-persistence layer exists
+yet), and Sharpe/Sortino metrics.

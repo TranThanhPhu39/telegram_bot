@@ -1,4 +1,9 @@
-"""Pure command rendering for the Telegram bot."""
+"""Pure command rendering for the Telegram bot.
+
+The command layer holds no business logic.  It validates arguments, calls one
+data-service method and returns text.  New drill-down commands degrade safely
+when a data service predates them, so older services keep working unchanged.
+"""
 
 from __future__ import annotations
 
@@ -18,15 +23,20 @@ class BotDataService(Protocol):
 
 HELP_TEXT = (
     "Các lệnh:\n"
-    "/soi FPT [CL1|ASMF] - xem trạng thái một mã\n"
-    "/chienluoc - xem các chiến lược\n"
-    "/scan - xem danh sách quét\n"
-    "/market - xem trạng thái thị trường\n"
-    "/why FPT - xem lý do tín hiệu\n"
-    "/performance - xem kết quả backtest\n"
-    "/tin FPT - xem tin mới nhất\n"
-    "/sentiment FPT - xem sentiment 24 giờ"
+    "/soi FPT [CL1|ASMF] - dashboard tổng quan một mã\n"
+    "/why FPT - giải thích vì sao ở trạng thái đó\n"
+    "/technical FPT - chi tiết kỹ thuật + hỗ trợ/kháng cự\n"
+    "/fundamental FPT - chỉ số cơ bản theo ngày công bố\n"
+    "/sentiment FPT - sentiment tin tức 24 giờ\n"
+    "/tin FPT - các tin mới nhất\n"
+    "/sector ACB - bối cảnh ngành\n"
+    "/market - trạng thái thị trường\n"
+    "/scan - danh sách quét kèm lý do\n"
+    "/chienluoc - mô tả CL1 và ASMF\n"
+    "/performance - kết quả backtest"
 )
+
+UNSUPPORTED = "Tính năng này chưa được bật trong runtime hiện tại."
 
 
 class UnavailableBotDataService:
@@ -56,6 +66,15 @@ class UnavailableBotDataService:
     def sentiment_overview(self, symbol: str) -> str:
         return "News sentiment unavailable."
 
+    def technical_overview(self, symbol: str) -> str:
+        return "Dữ liệu kỹ thuật hiện chưa sẵn sàng."
+
+    def fundamental_overview(self, symbol: str) -> str:
+        return "Fundamental data missing."
+
+    def sector_overview(self, name: str) -> str:
+        return "Dữ liệu ngành hiện chưa sẵn sàng."
+
 
 class TelegramCommandService:
     def __init__(self, data: BotDataService) -> None:
@@ -73,6 +92,9 @@ class TelegramCommandService:
         return result if result is not None else f"Chưa có dữ liệu cho {symbol}."
 
     def scan(self) -> str:
+        detailed = getattr(self.data, "scan_overview", None)
+        if callable(detailed):
+            return detailed()
         symbols = tuple(self.data.scan_results())
         return "Chưa có mã đạt bộ lọc." if not symbols else "Watchlist: " + ", ".join(symbols)
 
@@ -95,6 +117,25 @@ class TelegramCommandService:
 
     def sentiment(self, arguments: Sequence[str]) -> str:
         return self.data.sentiment_overview(_one_symbol(arguments, "/sentiment FPT"))
+
+    def technical(self, arguments: Sequence[str]) -> str:
+        symbol = _one_symbol(arguments, "/technical FPT")
+        return self._optional("technical_overview", symbol)
+
+    def fundamental(self, arguments: Sequence[str]) -> str:
+        symbol = _one_symbol(arguments, "/fundamental FPT")
+        return self._optional("fundamental_overview", symbol)
+
+    def sector(self, arguments: Sequence[str]) -> str:
+        name = _one_symbol(arguments, "/sector ACB")
+        return self._optional("sector_overview", name)
+
+    def _optional(self, method: str, argument: str) -> str:
+        handler = getattr(self.data, method, None)
+        if not callable(handler):
+            return UNSUPPORTED
+        result = handler(argument)
+        return result if result else UNSUPPORTED
 
 
 def _symbol_and_strategy(arguments: Sequence[str]) -> tuple[str, str]:
