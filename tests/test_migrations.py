@@ -25,6 +25,9 @@ EXPECTED_TABLES = {
     "financial_reports",
     "institutional_flows",
     "bank_financial_reports",
+    "users",
+    "watchlists",
+    "portfolio_holdings",
 }
 
 
@@ -41,14 +44,14 @@ def test_bootstrap_creates_versioned_schema_in_dependency_order(tmp_path) -> Non
     try:
         version = bootstrap_schema(connection)
 
-        assert version == LATEST_SCHEMA_VERSION == 3
+        assert version == LATEST_SCHEMA_VERSION == 4
         assert EXPECTED_TABLES <= table_names(connection)
         migrations = connection.execute(
             "SELECT version, name, applied_at FROM schema_migrations"
         ).fetchall()
         assert [tuple(row[:2]) for row in migrations] == [
             (1, "initial_v1_schema"), (2, "asmf_eod_inputs"),
-            (3, "asmf_bank_financials")
+            (3, "asmf_bank_financials"), (4, "portfolio_watchlist_holdings")
         ]
         assert all(row["applied_at"] > 0 for row in migrations)
     finally:
@@ -62,13 +65,13 @@ def test_bootstrap_is_idempotent_and_preserves_data() -> None:
         connection.execute("INSERT INTO symbols (symbol) VALUES ('FPT')")
         connection.commit()
 
-        assert bootstrap_schema(connection) == 3
+        assert bootstrap_schema(connection) == 4
         assert connection.execute(
             "SELECT symbol FROM symbols"
         ).fetchone()["symbol"] == "FPT"
         assert connection.execute(
             "SELECT COUNT(*) FROM schema_migrations"
-        ).fetchone()[0] == 3
+        ).fetchone()[0] == 4
     finally:
         connection.close()
 
@@ -81,7 +84,7 @@ def test_file_schema_version_survives_reopen(tmp_path) -> None:
 
     second = connect_database(database_url)
     try:
-        assert bootstrap_schema(second) == 3
+        assert bootstrap_schema(second) == 4
         assert EXPECTED_TABLES <= table_names(second)
     finally:
         second.close()

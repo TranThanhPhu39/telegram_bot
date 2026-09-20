@@ -39,6 +39,8 @@ from runtime.analysis import (
     interpret_indicators,
     session_date,
 )
+from portfolio.config import PortfolioConfig
+from runtime.portfolio_runtime import PortfolioRuntime
 from runtime.views import (
     DataQualityView,
     Freshness,
@@ -56,6 +58,7 @@ from strategy.technical_strategies import (
     evaluate_asmf,
     evaluate_cl1,
 )
+from telegram_bot.portfolio_formatters import format_portfolio_context
 from telegram_bot.formatters import (
     format_data_quality,
     format_fundamental,
@@ -107,7 +110,9 @@ class RuntimeBotDataService:
         self.now = now
         self.fundamentals_csv_path = fundamentals_csv_path
         bootstrap_schema(connection)
-
+        self.portfolio = PortfolioRuntime(
+           connection, self._history, lambda: self.now(), PortfolioConfig.from_env() 
+        )
     # ---------------------------------------------------------------- views
 
     def stock_analysis(self, symbol: str, strategy: str = "CL1") -> StockAnalysisView:
@@ -155,8 +160,14 @@ class RuntimeBotDataService:
 
     # ------------------------------------------------------------- commands
 
-    def symbol_overview(self, symbol: str, strategy: str = "CL1") -> str:
-        return format_stock_overview(self.stock_analysis(symbol, strategy))
+    def symbol_overview(
+            self, symbol: str, strategy: str = "CL1", user_id: int | None = None
+    ) -> str:
+        view = self.stock_analysis(symbol, strategy)
+        extra: tuple[str, ...] = ()
+        if user_id is not None and not view.error:
+            extra = (format_portfolio_context(self.portfolio.context_for(user_id, symbol)),)
+        return format_stock_overview(view, extra)        
 
     def technical_overview(self, symbol: str) -> str:
         return format_technical(self.stock_analysis(symbol))

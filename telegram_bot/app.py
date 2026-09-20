@@ -21,6 +21,7 @@ from telegram.ext import (
 )
 
 from telegram_bot.commands import TelegramCommandService
+from telegram_bot.portfolio_handlers import build_portfolio_handlers
 
 
 LOGGER = logging.getLogger(__name__)
@@ -72,11 +73,13 @@ def parse_callback(data: str) -> tuple[str, str]:
     return parts[1], symbol
 
 
-def render_callback(commands: TelegramCommandService, action: str, symbol: str) -> str:
+def render_callback(
+    commands: TelegramCommandService, action: str, symbol: str, user_id: int | None = None
+)-> str:
     handlers = {
         "tech": lambda: commands.technical([symbol]),
         "fund": lambda: commands.fundamental([symbol]),
-        "asmf": lambda: commands.soi([symbol, "ASMF"]),
+        "asmf": lambda: commands.soi([symbol, "ASMF"], user_id),
         "why": lambda: commands.why([symbol]),
         "news": lambda: commands.news([symbol]),
         "sent": lambda: commands.sentiment([symbol]),
@@ -152,7 +155,8 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
     async def soi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         markup = None
         try:
-            text = commands.soi(context.args)
+            user = update.effective_user
+            text = commands.soi(context.args, None if user is None else user.id)
             symbol = _first_argument(context)
             if symbol:
                 markup = build_symbol_keyboard(symbol)
@@ -200,7 +204,10 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
         except ValueError as error:
             text = str(error)
         else:
-            text = render_callback(commands, action, symbol)
+            text = render_callback(
+                commands, action, symbol,
+                None if query.from_user is None else query.from_user.id,
+            )
         if query.message is not None:
             for part in split_message(text):
                 await query.message.reply_text(part)
@@ -223,6 +230,7 @@ def build_application(token: str, commands: TelegramCommandService) -> Applicati
             CallbackQueryHandler(on_callback),
         ]
     )
+    application.add_handlers(build_portfolio_handlers(commands, reply))
     return application
 
 

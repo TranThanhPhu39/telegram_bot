@@ -256,3 +256,65 @@ def create_signal_events_table(connection: sqlite3.Connection) -> None:
     with connection:
         connection.execute(SIGNAL_EVENTS_TABLE_SQL)
         connection.execute(SIGNAL_EVENTS_INDEX_SQL)
+
+
+USERS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    telegram_user_id INTEGER PRIMARY KEY,
+    risk_profile TEXT,
+    default_risk_per_trade_pct REAL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    CHECK (telegram_user_id > 0),
+    CHECK (risk_profile IS NULL OR length(trim(risk_profile)) > 0),
+    CHECK (
+        default_risk_per_trade_pct IS NULL OR (
+            typeof(default_risk_per_trade_pct) IN ('integer', 'real')
+            AND default_risk_per_trade_pct > 0
+            AND default_risk_per_trade_pct <= 100
+        )
+    ),
+    CHECK (typeof(created_at) = 'integer' AND created_at > 0),
+    CHECK (typeof(updated_at) = 'integer' AND updated_at >= created_at)
+) WITHOUT ROWID
+"""
+
+WATCHLIST_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS watchlist (
+    telegram_user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (telegram_user_id, symbol),
+    FOREIGN KEY (telegram_user_id) REFERENCES users(telegram_user_id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (symbol) REFERENCES symbols(symbol)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CHECK (typeof(created_at) = 'integer' AND created_at > 0)
+) WITHOUT ROWID
+"""
+
+PORTFOLIO_HOLDINGS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS portfolio_holdings (
+    telegram_user_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    average_cost REAL NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (telegram_user_id, symbol),
+    FOREIGN KEY (telegram_user_id) REFERENCES users(telegram_user_id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    FOREIGN KEY (symbol) REFERENCES symbols(symbol)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CHECK (typeof(quantity) = 'integer' AND quantity > 0),
+    CHECK (typeof(average_cost) IN ('integer', 'real') AND average_cost > 0),
+    CHECK (typeof(updated_at) = 'integer' AND updated_at > 0)
+) WITHOUT ROWID
+"""
+
+WATCHLIST_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_watchlist_symbol ON watchlist(symbol)
+"""
+
+PORTFOLIO_HOLDINGS_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_portfolio_holdings_symbol ON portfolio_holdings(symbol)
+"""

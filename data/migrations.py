@@ -16,6 +16,11 @@ from data.schema import (
     FINANCIAL_REPORTS_TABLE_SQL,
     INSTITUTIONAL_FLOWS_TABLE_SQL,
     BANK_FINANCIAL_REPORTS_TABLE_SQL,
+    USERS_TABLE_SQL,
+    WATCHLIST_TABLE_SQL,
+    WATCHLIST_INDEX_SQL,
+    PORTFOLIO_HOLDINGS_TABLE_SQL,
+    PORTFOLIO_HOLDINGS_INDEX_SQL,
 )
 
 SCHEMA_MIGRATIONS_TABLE_SQL = """
@@ -69,6 +74,17 @@ MIGRATIONS = (
         version=3,
         name="asmf_bank_financials",
         statements=(BANK_FINANCIAL_REPORTS_TABLE_SQL,),
+    ),
+    Migration(
+    version=4,
+    name="portfolio_watchlist_holdings",
+    statements=(
+        USERS_TABLE_SQL,
+        WATCHLIST_TABLE_SQL,
+        WATCHLIST_INDEX_SQL,
+        PORTFOLIO_HOLDINGS_TABLE_SQL,
+        PORTFOLIO_HOLDINGS_INDEX_SQL,
+        ),
     ),
 )
 

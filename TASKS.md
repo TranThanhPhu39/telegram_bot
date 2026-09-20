@@ -437,3 +437,51 @@ was fabricated from incomplete inputs.
   - NOT TESTED. The build environment has no route to Vietcap, CafeF or
     Telegram. Must be rerun locally with real credentials during an active
     Vietnamese market session.
+
+
+---
+
+## Phase 23 — Portfolio, Risk & Watchlist
+- [x] Add user persistence (`users`, keyed by Telegram numeric id)
+- [x] Add portfolio schema migration (v4 `portfolio_watchlist_holdings`, atomic, idempotent, tested)
+- [x] Add persistent watchlist
+- [x] Add portfolio holdings storage (long, whole shares, VND; no ledger — deferred)
+- [x] Add holdings CRUD (`/addholding` is an upsert that replaces quantity and average cost)
+- [x] Add portfolio valuation (via the existing history/cache boundary; no new provider call)
+- [x] Add unrealized P&L (labelled UNREALIZED; excludes fees/taxes)
+- [x] Add stock exposure
+- [x] Add sector exposure (existing effective-dated memberships; missing → "Unknown")
+- [x] Add concentration warnings (config thresholds; NORMAL/WARNING/HIGH)
+- [x] Add position sizing
+- [x] Add user risk settings (`/setrisk`, `/risksettings`)
+- [x] Add deterministic stress testing (portfolio and single symbol)
+- [x] Add portfolio risk view (concentration + static-weight volatility, beta, max drawdown)
+  - Historical metrics are a static-weight proxy; "Unavailable" with a reason when history is short.
+- [x] Add portfolio context to `/soi` (informational only)
+- [x] Add `/watchlist`
+- [x] Add `/addwatch`
+- [x] Add `/removewatch`
+- [x] Add `/portfolio`
+- [x] Add `/addholding`
+- [x] Add `/removeholding`
+- [x] Add `/risk`
+- [x] Add `/size`
+- [x] Add `/stress`
+- [x] Update `/help`
+- [x] Preserve CL1/ASMF behavior (test asserts identical strategy views with and without holdings)
+- [x] Run focused tests
+  - Sandbox, Python 3.12.3: 133 new Phase 23 tests passed.
+- [x] Run full regression
+  - Sandbox, Python 3.12.3, partial dependency set: 592 passed (459 pre-existing + 133 new).
+    Two pre-existing tests were updated (schema version 3→4, registered command set).
+    Rerun locally in your `.venv`.
+- [ ] Run pip check
+  - Sandbox partial environment: "No broken requirements found". NOT TESTED in the project `.venv`; rerun locally.
+- [ ] Run bounded live acceptance or mark NOT TESTED
+  - NOT TESTED. No Vietcap/Telegram route or credentials in the build sandbox. A synthetic-provider,
+    temporary-database run of every command succeeded, but it is not live evidence.
+- [ ] Update PROJECT_CONTEXT.md (text provided; tick after pasting)
+- [ ] STOP and report
+
+Deferred: portfolio alerts, transaction ledger / realized P&L, beta-based VNINDEX stress, realtime
+pricing for valuation, Phase 24 valuation. Pending Phase 3–7 live validations remain PENDING.

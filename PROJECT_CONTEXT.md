@@ -2399,3 +2399,84 @@ must be rerun locally with real credentials.
 Portfolio management, DCF/fair value, price forecasting and ML prediction,
 social-media sentiment, watchlist persistence (no user-persistence layer exists
 yet), and Sharpe/Sortino metrics.
+
+### Phase 23 — Portfolio, Risk & Watchlist
+
+#### Goal
+Evolve the bot from a stock-analysis bot toward an investment assistant: per-user watchlist and holdings,
+valuation, unrealized P&L, exposure, concentration, position sizing and deterministic stress tests.
+No forecast/ML, no DCF/fair value (Phase 24), no execution, no optimization.
+
+#### Architecture
+SQLite → `portfolio.repository` → `portfolio.service` (+ pure `valuation`, `risk`, `position_sizing`,
+`stress`) → `runtime.portfolio_runtime.PortfolioRuntime` (view models in `runtime.portfolio_views`) →
+`telegram_bot.portfolio_formatters` → `telegram_bot.portfolio_commands` → thin handlers in
+`telegram_bot.portfolio_handlers`. Prices come only through `RuntimeBotDataService._history`
+(Vietcap historical, SQLite cache fallback); no second data pipeline exists. Identity is the Telegram
+numeric user id. Money uses `Decimal`; VND only, long equity only.
+
+#### Schema migration
+Version 4 `portfolio_watchlist_holdings`: `users`, `watchlist`, `portfolio_holdings` (+ symbol indexes).
+FKs to `users` (cascade delete) and `symbols`. Atomic via `bootstrap_schema`; migrations 1–3 untouched.
+
+#### Files added
+`portfolio/{__init__,config,models,repository,risk,valuation,position_sizing,stress,service}.py`,
+`runtime/portfolio_views.py`, `runtime/portfolio_runtime.py`,
+`telegram_bot/portfolio_{commands,formatters,handlers}.py`,
+`tests/portfolio_fakes.py`, `tests/test_portfolio_{schema,repository,domain,runtime,telegram}.py`.
+
+#### Files modified
+`data/schema.py` (append SQL), `data/migrations.py`, `runtime/bot_service.py` (`self.portfolio`,
+`symbol_overview(..., user_id=None)`), `telegram_bot/app.py`, `telegram_bot/commands.py`
+(help, `portfolio_command`, `soi(..., user_id=None)`), `telegram_bot/formatters.py`
+(`extra_blocks`), `.env.example`, `tests/test_migrations.py` and `tests/test_telegram_bot.py`
+(schema version 4 / extended command set).
+
+#### Commands
+`/watchlist`, `/addwatch S`, `/removewatch S`, `/portfolio`, `/addholding S QTY AVG_COST` (upsert:
+replaces quantity and average cost), `/removeholding S`, `/risk`, `/size S ENTRY STOP CAPITAL [RISK_PCT]`,
+`/stress portfolio PCT`, `/stress S PCT`, `/setrisk PCT`, `/risksettings`; `/soi` gains a portfolio-context block.
+
+#### Formulas
+cost = qty × avg cost; value = qty × price; unrealized P&L = value − cost; P&L % = P&L / cost × 100;
+weight = value / Σ priced value; sector weight = Σ member value / Σ priced value.
+Sizing: risk budget = capital × risk% / 100; risk/share = entry − stop; shares = floor(budget / risk per share);
+value = shares × entry; allocation = value / capital; max loss = shares × risk/share.
+Stress: change = value × shock% (whole portfolio or one symbol); impact = change / current portfolio value.
+
+#### Risk assumptions
+Concentration uses `>=` thresholds from `.env` (stock 25/40, sector 40/60, no opaque score); "Unknown" sector
+is missing data, not a sector. Historical volatility, beta vs VNINDEX and max drawdown use aligned DAILY simple
+returns of current weights held constant (static-weight proxy), lookback 120, minimum 60 sessions; holdings that
+skipped different sessions are not mixed. Otherwise the metric prints "Unavailable — reason".
+
+#### Price-source behavior
+Latest close from `_history`; freshness from `describe_freshness`; fallback labelled "Cached EOD". Realtime state is
+not wired into the runtime service, so valuation is never labelled Realtime. Mixed sessions produce a warning.
+A holding without a price is excluded from value, weights, exposure and stress and flagged
+("Valuation incomplete"); it is never valued at zero. Unknown symbols cannot be added.
+
+#### P&L meaning
+UNREALIZED only. Average cost is user-supplied; fees, taxes and slippage are excluded. No realized P&L / ledger.
+
+#### Stress methodology
+Deterministic arithmetic, not a forecast. Shock range −100..+100. No VNINDEX/beta stress.
+
+#### Tests
+Offline, Python 3.12.3 sandbox (partial deps): 592 passed = 459 pre-existing + 133 new (schema, repository, domain
+maths, runtime orchestration, Telegram commands/handlers/formatters, CL1/ASMF unchanged). Two pre-existing tests
+updated for schema version 4 and the extended command set. `pip check` passed in the partial sandbox environment only.
+
+#### Live evidence
+NOT TESTED (no Vietcap/Telegram route or credentials in the build sandbox). A synthetic-provider run on a
+temporary database exercised every command. Phase 3–7 live validations remain PENDING.
+
+#### Limitations
+No transaction ledger or realized P&L; long-only; no fees; whole shares, not rounded to lot size; no realtime
+valuation; one history request per holding per command (`/portfolio`, `/risk`, `/stress`, and `/soi` for held
+symbols); historical metrics need ≥60 aligned sessions; new portfolio output is English while the rest of the
+bot is Vietnamese; invalid Phase 23 `.env` values fail at startup.
+
+#### Deferred
+Portfolio-aware alerts (hooks `is_held` / `is_watched` exist), beta-based VNINDEX stress, transaction ledger,
+realtime pricing, Phase 24 valuation, forecasting, optimization, brokerage execution. No investment execution exists.

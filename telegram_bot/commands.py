@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol, Sequence
 
+from telegram_bot.portfolio_commands import PortfolioCommands
 
 class BotDataService(Protocol):
     def symbol_overview(self, symbol: str, strategy: str = "CL1") -> str | None: ...
@@ -33,7 +34,17 @@ HELP_TEXT = (
     "/market - trạng thái thị trường\n"
     "/scan - danh sách quét kèm lý do\n"
     "/chienluoc - mô tả CL1 và ASMF\n"
-    "/performance - kết quả backtest"
+    "/performance - kết quả backtest\n"
+    "\n"
+    "Danh mục & rủi ro:\n"
+    "/watchlist - danh sách theo dõi | /addwatch FPT | /removewatch FPT\n"
+    "/portfolio - danh mục, P&L chưa thực hiện, tỷ trọng, phơi nhiễm\n"
+    "/addholding FPT 1000 150000 - thêm/cập nhật vị thế (số lượng, giá vốn)\n"
+    "/removeholding FPT - xóa vị thế\n"
+    "/risk - rủi ro danh mục (tập trung, biến động lịch sử)\n"
+    "/size FPT 150000 142000 500000000 [rủi ro %] - tính khối lượng theo ngân sách rủi ro\n"
+    "/stress portfolio -5 | /stress FPT -10 - kịch bản giảm giá tất định\n"
+    "/setrisk 1 | /risksettings - rủi ro mặc định mỗi lệnh"
 )
 
 UNSUPPORTED = "Tính năng này chưa được bật trong runtime hiện tại."
@@ -79,6 +90,13 @@ class UnavailableBotDataService:
 class TelegramCommandService:
     def __init__(self, data: BotDataService) -> None:
         self.data = data
+        self.portfolio = PortfolioCommands(data)
+
+    def portfolio_command(
+        self, name: str, user_id: int | None, arguments: Sequence[str]
+    ) -> str:
+        """Portfolio/watchlist/risk commands, keyed by Telegram numeric user id."""
+        return self.portfolio.execute(name, user_id, arguments)    
 
     def start(self) -> str:
         return "Bot tín hiệu chứng khoán Việt Nam đã sẵn sàng.\n" + HELP_TEXT
@@ -86,9 +104,12 @@ class TelegramCommandService:
     def help(self) -> str:
         return HELP_TEXT
 
-    def soi(self, arguments: Sequence[str]) -> str:
+    def soi(self, arguments: Sequence[str], user_id: int | None = None) -> str:
         symbol, strategy = _symbol_and_strategy(arguments)
-        result = self.data.symbol_overview(symbol, strategy)
+        if user_id is not None and getattr(self.data, "portfolio", None) is not None:
+            result = self.data.symbol_overview(symbol, strategy, user_id=user_id)
+        else:
+            result = self.data.symbol_overview(symbol, strategy)
         return result if result is not None else f"Chưa có dữ liệu cho {symbol}."
 
     def scan(self) -> str:

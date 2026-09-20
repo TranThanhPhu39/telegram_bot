@@ -44,8 +44,12 @@ def percent(value: float | None, digits: int = 2) -> str:
     return UNAVAILABLE if value is None else f"{value:+.{digits}f}%"
 
 
-def format_stock_overview(view: StockAnalysisView) -> str:
-    """Compact dashboard; drill-down lives in /technical, /fundamental, /why."""
+def format_stock_overview(view: StockAnalysisView, extra_blocks: Sequence[str] = ()) -> str:
+    """Compact dashboard; drill-down lives in /technical, /fundamental, /why.
+
+    ``extra_blocks`` are informational sections (e.g. portfolio context) that are
+    appended before the data-quality block and never alter strategy output.
+    """
     if view.error:
         return view.error
     blocks: list[str] = [f"📊 {view.symbol} — TỔNG QUAN"]
@@ -90,6 +94,7 @@ def format_stock_overview(view: StockAnalysisView) -> str:
         lines.extend(f"→ {item}" for item in view.watch_items[:3])
         blocks.append("\n".join(lines))
 
+    blocks.extend(block for block in extra_blocks if block)
     blocks.append(_data_quality_block(view))
     blocks.append("Gõ /why " + view.symbol + " để xem giải thích chi tiết.")
     blocks.append(DISCLAIMER)
