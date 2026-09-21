@@ -95,13 +95,23 @@ class SQLiteNewsRepository:
                 values,
             )
             if cursor.rowcount == 0:
+                existing = self.connection.execute(
+                    "SELECT id FROM news_items WHERE id=? OR url=? LIMIT 1",
+                    (item.id, item.url),
+                ).fetchone()
+                if existing is not None:
+                    self._replace_ticker_links(existing["id"], item)
                 return False
-            self.connection.executemany(
-                "INSERT INTO news_tickers(news_id,ticker,is_primary,relevance) VALUES(?,?,?,?)",
-                [(item.id, ticker, int(ticker == item.primary_ticker),
-                  item.ticker_relevance.get(ticker, 0.0)) for ticker in item.tickers],
-            )
+            self._replace_ticker_links(item.id, item)
         return True
+
+    def _replace_ticker_links(self, news_id: str, item: NewsItem) -> None:
+        self.connection.execute("DELETE FROM news_tickers WHERE news_id=?", (news_id,))
+        self.connection.executemany(
+            "INSERT INTO news_tickers(news_id,ticker,is_primary,relevance) VALUES(?,?,?,?)",
+            [(news_id, ticker, int(ticker == item.primary_ticker),
+              item.ticker_relevance.get(ticker, 0.0)) for ticker in item.tickers],
+        )
 
     def get(self, item_id: str) -> NewsItem | None:
         row = self.connection.execute("SELECT * FROM news_items WHERE id=?", (item_id,)).fetchone()

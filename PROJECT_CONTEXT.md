@@ -2799,3 +2799,69 @@ verify bằng dữ liệu tổng hợp, chưa verify bằng lịch sử Vietcap 
 #### Ngoài phạm vi
 
 BCTC/institutional flow thu thập thật vẫn là follow-up riêng, chưa đụng tới.
+
+### 2026-09-21 — Phase 21 dynamic all-symbol news-linking follow-up
+
+#### Problem confirmed
+
+`TickerLinker` contained a fixed mapping for only ACB, FPT, HPG, VCB, VHM,
+MWG, SSI and VND. `/sentiment` for any other ticker could not see a CafeF item
+even when the article explicitly contained that ticker. This was an acquisition/
+entity-linking limitation, not a PhoBERT limitation.
+
+#### Implementation
+
+- Replaced the fixed runtime mapping with a validated universe supplied to
+  `TickerLinker`. The production ingestion command loads every active
+  `STOCK`/`COMMON_STOCK` row from the main SQLite `symbols` table.
+- Added `CafeFCompanyCatalogProvider` for the public
+  `https://cafefnew.mediacdn.vn/Search/company.json` catalog. Only HOSE, HASTC
+  (HNX), and UPCOM company paths are accepted. Full company names and safely
+  simplified corporate names enrich the local ticker universe.
+- Uppercase ticker codes are case-sensitive and require explicit context: start
+  of a field, `mã`/`cổ phiếu`/`CP`, parentheses/hashtag, or `MÃ:`. This was
+  tightened from boundary-only matching after a real batch showed false links
+  for the valid tickers `USD` (currency amounts) and `CEO` (job title).
+  Catalog-derived company-name aliases remain case-insensitive. Title relevance
+  stays 1.0 and summary/content relevance stays 0.4.
+- CafeF catalog failure falls back to code matching for the complete SQLite
+  universe. An empty local and remote universe raises a clear error rather than
+  silently reverting to eight symbols or ingesting unlinked sentiment.
+- Duplicate URL/id rows now atomically refresh `news_tickers` links while
+  preserving the existing news and inference record. This lets current RSS
+  duplicates acquire mappings introduced by the new universe.
+- Fixed the direct-script import boundary in `scripts/run_news_once.py`; the
+  documented `py -3.12 scripts\run_news_once.py` form now adds the project root
+  consistently with the other executable scripts.
+- Added `NEWS_COMPANY_CATALOG_URL` to `.env.example`; the existing HTTP timeout
+  applies to RSS and catalog acquisition.
+
+#### Tests and runtime evidence
+
+- Focused News/Sentiment suite after false-positive regression coverage:
+  `13 passed in 0.67s`.
+- Full isolated regression: `642 passed in 9.69s`.
+- Isolated dependency check: `No broken requirements found`.
+- Read-only live catalog plus the real runtime SQLite universe built a linker
+  with 1,524 symbols and linked the previously unsupported `DGC` from the company
+  name `Hóa chất Đức Giang`.
+- End-to-end live acceptance used `DATABASE_URL=sqlite:///:memory:`,
+  `NEWS_DATABASE_PATH=:memory:` and the lexicon backend to avoid production
+  writes and a heavy model load. It fetched the real CafeF catalog/RSS and
+  reported `ticker_universe=2230 inserted=3 duplicates=0`, exit code 0.
+- A bounded production batch loaded the 1,524-symbol runtime universe and wrote
+  15 new items while relinking five duplicates. The stricter rerun then relinked
+  all 20 duplicates: final links were `EVF`, `FPT`, `SRF`, and `VHM`; false
+  `USD`/`CEO` links were removed. The database now contains 20 items, 17 using
+  PhoBERT and three retained explicit lexicon fallbacks.
+- The real runtime query path for `EVF`, a symbol outside the former eight-code
+  list, returned a one-article 24-hour Neutral sentiment view with explicit
+  `lexicon_fallback` provenance. No Vietcap request or credential output was
+  involved in that query.
+
+#### Honest boundary
+
+All symbols in the bot universe are now eligible for sentiment; this does not
+guarantee a sentiment result for every `/sentiment <MÃ>` call. A result still
+requires a CafeF RSS item that mentions the ticker or a catalog-derived company
+name and a completed ingestion run. The command path remains network-free.

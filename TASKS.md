@@ -43,7 +43,7 @@ market stream to resume after a forced transport interruption. This remains
 NOT TESTED until an active Vietnamese market session.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 20 operational follow-up — sector-sync notification durability (COMPLETE)**
+**Phase 21 operational follow-up — dynamic all-symbol news linking (COMPLETE)**
 
 ## Phase 0 — Repository bootstrap & planning
 - [x] Inspect repository structure
@@ -453,6 +453,22 @@ was fabricated from incomplete inputs.
     `FiinGroup/phobert-finetuned`, returned three probabilities summing to 1.
 - [x] Run focused, legacy, full-regression, and `pip check`
 - [x] Run bounded live CafeF/model acceptance or mark NOT TESTED
+- [x] STOP and report
+
+### Operational follow-up — dynamic all-symbol news linking
+
+- [x] Remove the fixed eight-ticker runtime mapping
+- [x] Build the ticker universe from active `STOCK`/`COMMON_STOCK` rows in SQLite
+- [x] Enrich company-name aliases from the public CafeF listed-company catalog
+- [x] Retain all-symbol code matching when the CafeF catalog is unavailable
+- [x] Reject an empty universe instead of silently producing unlinked sentiment
+- [x] Relink duplicate news rows without reinserting or replacing inference data
+- [x] Verify arbitrary symbols outside the old list (`DGC`, `KDH`, `VIX`)
+- [x] Verify the Telegram runtime query path with dynamically linked `EVF`
+- [x] Run a bounded live CafeF acceptance against in-memory databases
+  - PASS: 2,230 listed codes loaded, three RSS items ingested, no production write.
+- [x] Run full regression and dependency checks
+  - PASS: 642 tests; isolated `pip check` reports no broken requirements.
 - [x] STOP and report
 
 ## Explicitly out of V1

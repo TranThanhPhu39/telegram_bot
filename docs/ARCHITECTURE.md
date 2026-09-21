@@ -408,7 +408,25 @@ No single indicator should directly trigger a final Buy/Sell decision.
 WATCH → MONEY_FLOW → BREAKOUT → CONFIRMED → ACTIVE → EXIT
 
 ## News
-News is V2/bonus and must not block core bot delivery.
+News is optional context and must not block core bot delivery. The bounded
+ingestion command reads CafeF's securities RSS, classifies each item, runs the
+configured sentiment backend, and persists normalized results in the separate
+news SQLite database. Telegram queries only this repository and never fetch news
+on the command path.
+
+Ticker linking is dynamic. `scripts/run_news_once.py` loads all active
+`STOCK`/`COMMON_STOCK` symbols from the main SQLite catalog, then uses CafeF's
+public listed-company catalog to add full and simplified company-name aliases.
+Ticker codes are case-sensitive and require explicit context: start of field,
+`mã`/`cổ phiếu`/`CP`, parentheses/hashtag, or `MÃ:`. This prevents valid symbols
+such as `USD` and `CEO` from matching ordinary financial or job-title words.
+Catalog-derived company names are matched case-insensitively. Title matches
+receive primary relevance and summary/content matches receive lower relevance.
+If the CafeF catalog is unavailable, code matching for the complete SQLite
+universe remains available.
+If both sources are empty, ingestion fails explicitly instead of reverting to a
+small hard-coded list. Duplicate RSS URLs refresh ticker links atomically without
+replacing their stored inference record.
 
 ## ASMF end-of-day data boundary
 
