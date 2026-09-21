@@ -2679,3 +2679,123 @@ token/cookie/chat id.
 Thu thập BCTC/institutional flow thật và candlestick chart vẫn là hai
 follow-up riêng, không bị trộn vào iteration này. Phase 3–7 giữ nguyên
 PENDING.
+
+### 2026-09-21 08:25 +07:00 — Phase 3 pre-open live retry
+
+- Command: `py -3.12 scripts\test_realtime.py --hold-seconds 60 --min-updates 2 --raw-debug`.
+- The real Vietcap WebSocket connected (`transport=websocket`) and the client
+  emitted the exact FPT-only `w-match-price` subscription.
+- The 60-second observation received zero FPT events. The machine clock was
+  08:25 ICT, before the 09:00 matching-session open, so receive, protobuf decode,
+  normalized output, and changing-field validation remain NOT TESTED.
+- Phase 3 remains PENDING and its unchecked acceptance items stay unchanged.
+  Per the one-phase gate, Phase 4–7 live harnesses were not run from this
+  pre-open attempt; they require an active stream and remain PENDING.
+
+### 2026-09-20 — Candlestick chart follow-up
+
+Follow-up riêng, tách khỏi Phase 20 notification durability, đúng như đã ghi
+trong entry "Phase 20 sector-sync notification follow-up": "Candlestick charts
+... remain the next two explicit user-requested follow-ups."
+
+#### Kiến trúc
+
+    RuntimeBotDataService._history()  (đã có sẵn, dùng lại nguyên vẹn)
+      -> charts.candlestick.render_candlestick()  (không provider, không SQLite,
+         không strategy — chỉ nhận OHLCVBar + data.indicators.ema)
+      -> RuntimeBotDataService.candlestick_chart()  (acquisition boundary mới)
+      -> TelegramCommandService.chart()
+      -> telegram_bot/app.py: lệnh /chart + nút "📉 Biểu đồ nến"
+      -> Bot.send_photo (PNG bytes qua BytesIO, không lưu file tạm trên đĩa)
+
+`charts/candlestick.py` dùng Pillow (đã là dependency có sẵn cho OCR, không
+thêm thư viện mới — không dùng matplotlib/mplfinance) với font bitmap mặc định
+của Pillow để không phụ thuộc font hệ thống, đảm bảo output tái lập được trên
+mọi máy.
+
+#### Thiết kế renderer
+
+- Input: toàn bộ lịch sử hiện có (để EMA20/EMA50 có đủ warm-up), chỉ vẽ
+  `visible_count` phiên gần nhất (mặc định 90).
+- Validate nghiêm ngặt trước khi vẽ: tối thiểu 5 phiên, cùng symbol, cùng
+  timeframe, timestamp tăng nghiêm ngặt (strictly chronological), kích thước
+  ảnh hợp lệ, chu kỳ EMA dương. Vi phạm bất kỳ điều nào ném
+  `ChartRenderError` thay vì âm thầm vẽ sai.
+- Panel giá (nến + EMA20/EMA50) phía trên, panel volume phía dưới, cùng trục
+  x. Nến xanh/đỏ theo close so với open; wick riêng màu nhạt hơn thân nến.
+- `_visible_bars()` và `_validate_bars()` là hàm thuần (pure), test độc lập
+  không cần render ảnh.
+
+#### Acquisition boundary
+
+`RuntimeBotDataService.candlestick_chart(symbol)` dùng lại đúng `_history()`
+đã có (Vietcap trước, SQLite cache sau khi provider fail) — không tạo đường
+lấy dữ liệu thứ hai. Trả về `ChartRequestView` với đúng một trong hai trường
+`png_bytes` hoặc `error` được điền, không bao giờ cả hai, để caller không thể
+vô tình gửi ảnh cũ kèm thông báo lỗi mới.
+
+#### Telegram
+
+- `/chart FPT` gửi ảnh PNG kèm caption (symbol, timeframe, số phiên, giá đóng
+  cửa gần nhất, nguồn dữ liệu, độ mới).
+- Nút "📉 Biểu đồ nến" thêm vào keyboard hiện có của `/soi`, dùng chung
+  callback prefix `soi:chart:<symbol>`.
+- Lỗi (không đủ dữ liệu, chưa có lịch sử) trả về text thường, không bao giờ
+  gửi ảnh hỏng.
+- Không đổi ASMF/CL1, không đổi sector notification, không đổi portfolio.
+
+#### Test — bằng chứng thật
+
+Chạy trong sandbox không có `pytest`/`python-telegram-bot` thật (không có
+mạng), dùng harness tối giản tự viết để verify logic, kèm stub `telegram`
+đầy đủ cho riêng phần wiring app.py:
+
+- `tests/test_candlestick_chart.py`: 16 passed (render hợp lệ, kích thước
+  đúng yêu cầu, trim visible window đúng, EMA warm-up dùng full history, từ
+  chối <5 phiên, symbol/timeframe lẫn lộn, timestamp không tuần tự, trùng
+  timestamp, input rỗng, chu kỳ EMA không dương, kích thước quá nhỏ,
+  visible_count dưới ngưỡng, dải giá phẳng vẫn render được).
+- `tests/test_candlestick_runtime.py`: 5 passed (PNG hợp lệ + caption, lỗi
+  trung thực khi không có lịch sử, lỗi trung thực khi lịch sử quá ngắn,
+  fallback SQLite sau khi provider fail, không gọi provider thừa).
+- `tests/test_chart_command.py`: 4 passed (`/chart` trả ảnh chứ không phải
+  text, lỗi trả về text thay vì ảnh hỏng, nút inline "📉 Biểu đồ nến" hoạt
+  động, nút nằm đúng trong keyboard `/soi`).
+- Phát hiện và sửa: thêm `CommandHandler("chart", ...)` làm
+  `tests/test_telegram_bot.py::test_application_registers_all_required_commands`
+  fail vì tập lệnh kỳ vọng thiếu `"chart"`. Đã cập nhật assertion để bao gồm
+  lệnh mới (bảo vệ đúng hành vi thật, không phải sửa để né lỗi) — 9 passed
+  sau khi sửa.
+
+Ảnh mẫu render từ 200 phiên dữ liệu tổng hợp (không phải dữ liệu Vietcap
+thật) đã được xem trực quan để xác nhận layout đúng trước khi viết test.
+
+#### Test — bằng chứng thật, chạy cục bộ 2026-09-20
+
+py -3.12 -m pytest -q tests/test_candlestick_chart.py tests/test_candlestick_runtime.py tests/test_chart_command.py 25 passed in 4.87s
+
+py -3.12 -m pytest -q tests/test_telegram_bot.py 9 passed in 1.22s
+
+py -3.12 -m pytest -q 637 passed in 10.43s
+
+
+637 = 612 (baseline trước follow-up này) + 25 test mới. Không có test nào bị
+sửa để ép pass ngoài 1 assertion đã ghi ở trên (thêm "chart" vào expected
+command set — bảo vệ đúng hành vi mới, không phải né lỗi).
+
+py -3.12 -m pip check
+
+
+Cùng 8 conflict pre-existing đã ghi ở entry notification durability phía
+trên (`googleapis-common-protos`, `google-ai-generativelanguage`,
+`google-api-core`, `grpcio-status`, `proto-plus`, `pyppeteer`, `streamlit`),
+không liên quan `requirements.txt` của repo, không do follow-up này gây ra.
+
+#### Live evidence
+
+NOT TESTED. `/chart` chưa từng gửi ảnh thật qua Telegram Bot API; renderer đã
+verify bằng dữ liệu tổng hợp, chưa verify bằng lịch sử Vietcap thật.
+
+#### Ngoài phạm vi
+
+BCTC/institutional flow thu thập thật vẫn là follow-up riêng, chưa đụng tới.

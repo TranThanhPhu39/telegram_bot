@@ -41,7 +41,9 @@ from runtime.analysis import (
 )
 from portfolio.config import PortfolioConfig
 from runtime.portfolio_runtime import PortfolioRuntime
+from charts.candlestick import ChartRenderError, render_candlestick
 from runtime.views import (
+    ChartRequestView,
     DataQualityView,
     Freshness,
     FundamentalView,
@@ -135,6 +137,42 @@ class RuntimeBotDataService:
         )
         return usable < 5
     # ---------------------------------------------------------------- views
+
+    def candlestick_chart(
+        self, symbol: str, *, visible_count: int = 90
+    ) -> ChartRequestView:
+        """Render a candlestick PNG from the same history boundary as `/soi`.
+
+        Rendering lives entirely in `charts.candlestick`; this method only
+        acquires bars through the existing `_history` boundary and turns a
+        `ChartRenderError` into an honest Vietnamese message instead of a
+        broken image. It never touches strategy/ASMF decision logic.
+        """
+        symbol = symbol.strip().upper()
+        bars, source = self._history(symbol)
+        if not bars:
+            return ChartRequestView(
+                symbol=symbol, png_bytes=None,
+                caption="",
+                error=f"Chưa có dữ liệu lịch sử cho {symbol}. Nguồn: {source}",
+            )
+        try:
+            chart = render_candlestick(bars, visible_count=visible_count)
+        except ChartRenderError as error:
+            return ChartRequestView(
+                symbol=symbol, png_bytes=None,
+                caption="",
+                error=f"Không thể vẽ biểu đồ {symbol}: {error}",
+            )
+        freshness = self._data_quality(bars[-1].timestamp, source)
+        caption = (
+            f"{chart.symbol} · {chart.timeframe} · {chart.visible_bars} phiên\n"
+            f"Đóng cửa gần nhất: {chart.last_close:,.2f}\n"
+            f"Nguồn: {source} · {freshness.freshness.value}"
+        )
+        return ChartRequestView(
+            symbol=symbol, png_bytes=chart.png_bytes, caption=caption, error=None,
+        )
 
     def stock_analysis(self, symbol: str, strategy: str = "CL1") -> StockAnalysisView:
         """Build one complete view; a failing section never removes the others."""

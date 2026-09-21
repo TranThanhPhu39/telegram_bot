@@ -13,8 +13,10 @@
 ## PENDING LIVE VALIDATION
 **Phase 3 — Realtime Match Price: FPT only**
 
-Reason: market closed on Saturday 2026-09-19. Live receive/decode/validation
-must be rerun during an active Vietnamese market session.
+Reason: the latest live retry at 08:25 ICT on Monday 2026-09-21 connected and
+subscribed successfully but occurred before the matching session; it received
+zero FPT events in 60 seconds. Live receive/decode/validation must be rerun at
+or after the 09:00 market open.
 
 **Phase 4 — Realtime ACB + Market State**
 
@@ -540,3 +542,20 @@ was fabricated from incomplete inputs.
 
 Deferred: portfolio alerts, transaction ledger / realized P&L, beta-based VNINDEX stress, realtime
 pricing for valuation, Phase 24 valuation. Pending Phase 3–7 live validations remain PENDING.
+
+### Operational follow-up — candlestick chart
+- [x] Renderer thuần (Pillow, không thêm dependency), không provider/strategy
+- [x] Validate nghiêm ngặt: tối thiểu 5 phiên, cùng symbol/timeframe, tuần tự
+- [x] EMA20/EMA50 overlay dùng đúng warm-up từ full history
+- [x] Panel volume riêng, cùng trục x với nến
+- [x] `RuntimeBotDataService.candlestick_chart()` dùng lại `_history()` sẵn có
+- [x] `/chart FPT` + nút "📉 Biểu đồ nến" trong keyboard `/soi`
+- [x] Lỗi trả về text, không bao giờ gửi ảnh hỏng
+- [x] 25 test mới (16 renderer + 5 runtime + 4 Telegram wiring)
+- [x] Phát hiện và sửa hard-coded command set trong `test_telegram_bot.py`
+- [x] Full regression: 637 passed cục bộ trên `py -3.12`, 2026-09-20
+- [x] `pip check`: chạy xong; 8 conflict đều thuộc gói ngoài
+      `requirements.txt` của repo (không do follow-up này gây ra)
+- [ ] Live acceptance: gửi `/chart` thật qua Telegram với dữ liệu Vietcap thật
+  - NOT TESTED. Sandbox không có route tới Vietcap hoặc Telegram.
+- [x] STOP and report

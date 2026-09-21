@@ -215,6 +215,15 @@ but the server sent no `w-match-price` event during the 40-second observation.
 The test was run on Saturday, outside the normal trading week, so binary payload
 shape and live protobuf mapping are still NOT TESTED. Phase 3 remains open.
 
+### Phase 3 pre-open retry — 2026-09-21
+
+At 08:25 ICT on Monday, `scripts/test_realtime.py --hold-seconds 60
+--min-updates 2 --raw-debug` established a WebSocket connection and emitted the
+exact FPT-only subscription successfully. It received zero market events before
+the 09:00 matching-session open, so no payload was decoded and Phase 3 remains
+pending. This is connectivity/subscription evidence only, not live-stream
+acceptance evidence.
+
 ### Current frontend contract verification — 2026-09-19
 
 The public price-board bundle was fetched successfully from the import map:

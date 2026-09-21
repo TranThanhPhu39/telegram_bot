@@ -205,3 +205,15 @@ class StockAnalysisView:
     risks: tuple[str, ...] = field(default_factory=tuple)
     watch_items: tuple[str, ...] = field(default_factory=tuple)
     error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ChartRequestView:
+    """Outcome of a candlestick chart request: exactly one of the two fields
+    below is populated, never both, so callers cannot render a stale image
+    next to a fresh error message."""
+
+    symbol: str
+    png_bytes: bytes | None
+    caption: str
+    error: str | None = None

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol, Sequence
 
+from runtime.views import ChartRequestView
 from telegram_bot.portfolio_commands import PortfolioCommands
 
 class BotDataService(Protocol):
@@ -31,6 +32,7 @@ HELP_TEXT = (
     "/sentiment FPT - sentiment tin tức 24 giờ\n"
     "/tin FPT - các tin mới nhất\n"
     "/sector ACB - bối cảnh ngành\n"
+    "/chart FPT - biểu đồ nến kèm EMA20/EMA50\n"
     "/market - trạng thái thị trường\n"
     "/scan - danh sách quét kèm lý do\n"
     "/chienluoc - mô tả CL1 và ASMF\n"
@@ -150,6 +152,17 @@ class TelegramCommandService:
     def sector(self, arguments: Sequence[str]) -> str:
         name = _one_symbol(arguments, "/sector ACB")
         return self._optional("sector_overview", name)
+
+    def chart(self, arguments: Sequence[str]) -> ChartRequestView:
+        """Return a rendered candlestick chart; text stays out of this path."""
+        symbol = _one_symbol(arguments, "/chart FPT")
+        handler = getattr(self.data, "candlestick_chart", None)
+        if not callable(handler):
+            raise ValueError(UNSUPPORTED)
+        result = handler(symbol)
+        if not isinstance(result, ChartRequestView):
+            raise ValueError(UNSUPPORTED)
+        return result
 
     def _optional(self, method: str, argument: str) -> str:
         handler = getattr(self.data, method, None)

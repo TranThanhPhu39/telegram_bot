@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from io import BytesIO
 
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -34,7 +35,7 @@ LOGGER = logging.getLogger(__name__)
 TELEGRAM_MESSAGE_LIMIT = 3900
 
 CALLBACK_PREFIX = "soi"
-CALLBACK_ACTIONS = ("tech", "fund", "asmf", "why", "news", "sent", "market")
+CALLBACK_ACTIONS = ("tech", "fund", "asmf", "why", "news", "sent", "market", "chart")
 
 
 def load_telegram_token() -> str:
@@ -62,7 +63,10 @@ def build_symbol_keyboard(symbol: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("📰 Tin", callback_data=f"{CALLBACK_PREFIX}:news:{symbol}"),
                 InlineKeyboardButton("📊 Sentiment", callback_data=f"{CALLBACK_PREFIX}:sent:{symbol}"),
             ],
-            [InlineKeyboardButton("🌐 Market", callback_data=f"{CALLBACK_PREFIX}:market:{symbol}")],
+            [
+                InlineKeyboardButton("🌐 Market", callback_data=f"{CALLBACK_PREFIX}:market:{symbol}"),
+                InlineKeyboardButton("📉 Biểu đồ nến", callback_data=f"{CALLBACK_PREFIX}:chart:{symbol}"),
+            ],
         ]
     )
 
@@ -253,6 +257,27 @@ def build_application(
     async def strategies(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, commands.strategies())
 
+    async def reply_chart(update: Update, arguments) -> None:
+        """Deliver a candlestick PNG, or the honest text error in its place."""
+        if update.effective_message is None:
+            return
+        try:
+            result = commands.chart(arguments)
+        except ValueError as error:
+            await update.effective_message.reply_text(str(error))
+            return
+        if result.error is not None or result.png_bytes is None:
+            await update.effective_message.reply_text(
+                result.error or "Không thể tạo biểu đồ."
+            )
+            return
+        await update.effective_message.reply_photo(
+            photo=BytesIO(result.png_bytes), caption=result.caption,
+        )
+
+    async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await reply_chart(update, context.args)
+
     async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _reply_with_usage(update, lambda: commands.news(context.args))
 
@@ -281,14 +306,18 @@ def build_application(
         try:
             action, symbol = parse_callback(query.data)
         except ValueError as error:
-            text = str(error)
-        else:
-            watch = _watch_sector(update, symbol) if action == "asmf" else None
-            text = render_callback(
-                commands, action, symbol,
-                _private_user_id(update),
-            )
-            _remove_unneeded_watch(watch)
+            if query.message is not None:
+                await query.message.reply_text(str(error))
+            return
+        if action == "chart":
+            await reply_chart(update, [symbol])
+            return
+        watch = _watch_sector(update, symbol) if action == "asmf" else None
+        text = render_callback(
+            commands, action, symbol,
+            _private_user_id(update),
+        )
+        _remove_unneeded_watch(watch)
         if query.message is not None:
             for part in split_message(text):
                 await query.message.reply_text(part)
@@ -308,6 +337,7 @@ def build_application(
             CommandHandler("technical", technical),
             CommandHandler("fundamental", fundamental),
             CommandHandler("sector", sector),
+            CommandHandler("chart", chart),
             CallbackQueryHandler(on_callback),
         ]
     )

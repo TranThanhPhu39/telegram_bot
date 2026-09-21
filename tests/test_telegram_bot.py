@@ -105,7 +105,7 @@ def test_application_registers_all_required_commands() -> None:
         for handler in application.handlers[0]
         for command in getattr(handler, "commands", ())
     }
-    assert commands == {"start", "help", "soi", "scan", "market", "why", "performance", "chienluoc", "tin", "sentiment", "technical", "fundamental", "sector"} | {
+    assert commands == {"start", "help", "soi", "scan", "market", "why", "performance", "chienluoc", "tin", "sentiment", "technical", "fundamental", "sector", "chart"} | {
         "watchlist", "addwatch", "removewatch", "portfolio", "addholding", "removeholding",
         "risk", "size", "stress", "setrisk", "risksettings",
     }
