@@ -11,13 +11,11 @@
 > Pending live checks must remain unchecked and must not be reported as PASS.
 
 ## PENDING LIVE VALIDATION
-Code and offline tests are complete for Phases 24–26. The following checks need
-a machine with network access to VNStock/Yahoo/Vietcap/CafeF/Telegram (the
-sandbox used for development returns `host_not_allowed`); they remain unchecked
-and are NOT TESTED, not PASS:
+Code and offline tests are complete for Phases 24–26. Phase 24 live acceptance
+passed on 2026-09-21 after the VNStock 4.0.8/KBS compatibility follow-up. The
+following checks still need their external runtime conditions and remain
+unchecked; they are NOT TESTED, not PASS:
 
-- Phase 24: real VNStock fetch, real yfinance fallback, live promotion-safety check
-  → run `py -3.12 scripts/test_phase24_live.py`
 - Phase 22: `/soi`, `/market`, `/sentiment` during an active trading session,
   `/chart` real Vietcap → PNG → Telegram `send_photo`
   → run `py -3.12 scripts/test_phase26_telegram_live.py --send` during a session
@@ -617,11 +615,12 @@ pricing for valuation, Phase 24 valuation. Pending Phase 3–7 live validations 
 - [x] `.env.example` — hoàn tất ở Phase 25 (chỉ các key thật sự được đọc; có test)
 
 ### Live acceptance
-- [ ] VNStock fetch thật qua mạng cho ≥1 symbol
-  - NOT TESTED — 718 test đều dùng module giả lập; chưa có lần gọi API
-    thật. Cần `scripts/test_phase24_live.py` (Phase 26).
-- [ ] yfinance fallback thật
-  - NOT TESTED — cùng lý do.
+- [x] VNStock fetch thật qua mạng cho ≥1 symbol
+  - PASS 2026-09-21 — VNStock 4.0.8/KBS trả 4 kỳ thật cho FPT; ACB cũng trả
+    4 kỳ ở trạng thái PARTIAL.
+- [x] yfinance fallback thật
+  - PASS 2026-09-21 — FPT.VN trả 9 dòng thật, gồm 2026Q2 đến 2025Q3 trong
+    bốn kỳ gần nhất được in bởi harness.
 
 ### Chưa bắt đầu
 - [ ] Phase 25 — Market Coverage & Refresh Workers
@@ -682,14 +681,24 @@ Authorised to run back-to-back with Phase 26 in a single iteration (no STOP gate
 - [x] Bảo mật log: `runtime/redaction.py` (token bot, Bearer, Authorization/Cookie, giá trị env); `configure_logging()` ép httpx/httpcore về WARNING (URL Telegram chứa token); `error_reason` được redact trước khi lưu; test quét mã nguồn
 - [x] Strategy regression: không sửa CL1/ASMF/sentiment/bank/point-in-time; không test cũ nào bị đổi expected (chỉ pin version schema)
 - [x] Thêm fallback `vnstock.api.financial.Finance` cho vnstock 4.x (additive; requirements vẫn pin 3.2.6, path 3.2.6 không đổi)
+- [x] Phase 24 live-provider follow-up: nâng pin lên `vnstock==4.0.8`, ưu tiên
+      KBS rồi VCI, chuẩn hóa KBS wide semantic statements, thử nguồn tuần tự để
+      nguồn sau timeout không chặn nguồn trước, và sửa verdict refresh SUCCESS
+      thành AVAILABLE trong live harness
 
 ### Kết quả kiểm thử
 - [x] Full regression: **830 passed** (`python -m pytest -q`, Python 3.12.3, venv cách ly, 718 → 830)
 - [x] `pip check` trong venv cách ly đó (vnstock==3.2.6, yfinance==1.0, không có torch/transformers): “No broken requirements found”. KHÔNG khẳng định môi trường đầy đủ sạch; conflict cũ ở môi trường chung (Phase 24) chưa đo lại.
+- [x] Follow-up VNStock 4.0.8: **833 passed** trên full regression; focused
+      Phase 24/26 **91 passed**. `pip check` với dependency VNStock resolve đầy
+      đủ không có conflict mới; còn đúng 8 conflict đã biết của môi trường chung.
 
 ### Live acceptance
-- [ ] VNStock fetch thật ≥1 symbol — NOT TESTED (egress `host_not_allowed`)
-- [ ] yfinance fallback thật — NOT TESTED (cùng lý do)
+- [x] VNStock fetch thật ≥1 symbol — PASS 2026-09-21, KBS/FPT AVAILABLE 4 kỳ;
+      KBS/ACB PARTIAL 4 kỳ
+- [x] yfinance fallback thật — PASS 2026-09-21, FPT.VN PARTIAL 9 dòng
 - [ ] `/soi` `/market` `/sentiment` trong phiên giao dịch — NOT TESTED
 - [ ] `/chart` Vietcap thật → PNG → Telegram `send_photo` — NOT TESTED
-- [ ] Live promotion-safety với dữ liệu VNStock thật — NOT TESTED
+- [x] Live promotion-safety với dữ liệu VNStock thật — PASS 2026-09-21 trên
+      database tạm; FPT/ACB được stage, thiếu `public_date` không promote và
+      bank không được ghi vào `bank_financial_reports`

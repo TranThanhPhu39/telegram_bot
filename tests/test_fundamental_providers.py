@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+import importlib
 import types
 
 import pytest
@@ -18,7 +19,7 @@ from fundamentals.providers.base import (
     period_end_date,
 )
 from fundamentals.providers.provider_chain import ProviderChain
-from fundamentals.providers.vnstock_provider import VNStockProvider
+from fundamentals.providers.vnstock_provider import DEFAULT_SOURCE_PREFERENCE, VNStockProvider
 from fundamentals.providers.yfinance_provider import YFinanceProvider, candidate_tickers
 
 
@@ -153,10 +154,82 @@ def test_vnstock_falls_through_source_preference_when_one_source_is_unsupported(
     stock = types.SimpleNamespace(finance=_finance(
         income=[{"yearReport": 2026, "lengthReport": 2, "Revenue": 1.0, "Net Income": 1.0}],
     ))
-    # Only TCBS is registered; VCI (tried first) is simply absent from this release.
-    provider = VNStockProvider(module=_vnstock_module({"TCBS": stock}))
+    # Only VCI is registered; KBS (tried first) is simply absent from this release.
+    provider = VNStockProvider(module=_vnstock_module({"VCI": stock}))
     result = provider.fetch_financials("FPT")
-    assert result.provider_source == "TCBS"
+    assert result.provider_source == "VCI"
+
+
+def test_vnstock_default_sources_match_supported_v4_finance_backends() -> None:
+    assert DEFAULT_SOURCE_PREFERENCE == ("KBS", "VCI")
+
+
+def test_vnstock_normalizes_v4_kbs_wide_semantic_statements() -> None:
+    stock = types.SimpleNamespace(finance=_finance(
+        income=[
+            {"item": "Doanh thu thuần", "item_id": "revenue",
+             "2026-Q2": 1000.0, "2026-Q1": 900.0},
+            {"item": "Lợi nhuận sau thuế", "item_id": "net_profit",
+             "2026-Q2": 120.0, "2026-Q1": 100.0},
+            {"item": "Lợi nhuận thuộc công ty mẹ",
+             "item_id": "profit_after_tax_for_shareholders_of_parent_company",
+             "2026-Q2": 110.0, "2026-Q1": 95.0},
+        ],
+        balance=[
+            # KBS can include empty group headings with the same semantic ID.
+            {"item": "Tài sản", "item_id": "total_assets",
+             "2026-Q2": None, "2026-Q1": None},
+            {"item": "Tổng cộng tài sản", "item_id": "total_assets",
+             "2026-Q2": 5000.0, "2026-Q1": 4800.0},
+            {"item": "Vốn chủ sở hữu", "item_id": "owners_equity_2",
+             "2026-Q2": 2000.0, "2026-Q1": 1900.0},
+            {"item": "Vay ngắn hạn",
+             "item_id": "short_term_borrowings_and_financial_leases",
+             "2026-Q2": 300.0, "2026-Q1": 280.0},
+            {"item": "Vay dài hạn",
+             "item_id": "long_term_borrowings_and_financial_leases",
+             "2026-Q2": 400.0, "2026-Q1": 390.0},
+        ],
+    ))
+    provider = VNStockProvider(
+        module=_vnstock_module({"KBS": stock}), source_preference=("KBS", "VCI")
+    )
+
+    result = provider.fetch_financials("FPT")
+
+    assert result.status is ProviderStatus.AVAILABLE
+    assert result.provider_source == "KBS"
+    assert [row.period for row in result.statements] == ["2026Q1", "2026Q2"]
+    latest = result.statements[-1]
+    assert latest.get("revenue") == 1000.0
+    assert latest.get("net_income") == 120.0
+    assert latest.get("net_income_parent") == 110.0
+    assert latest.get("total_assets") == 5000.0
+    assert latest.get("total_equity") == 2000.0
+    assert latest.get("short_term_debt") == 300.0
+    assert latest.public_date is None
+
+
+def test_vnstock_does_not_construct_later_source_after_first_source_succeeds() -> None:
+    calls = []
+    stock = types.SimpleNamespace(finance=_finance(
+        income=[{"yearReport": 2026, "lengthReport": 2, "Revenue": 1.0}],
+    ))
+
+    class Factory:
+        def stock(self, symbol=None, source=None):
+            calls.append(source)
+            if source == "VCI":
+                raise AssertionError("later source must remain lazy")
+            return stock
+
+    provider = VNStockProvider(
+        module=types.SimpleNamespace(Vnstock=Factory), source_preference=("KBS", "VCI")
+    )
+    result = provider.fetch_financials("FPT")
+
+    assert result.provider_source == "KBS"
+    assert calls == ["KBS"]
 
 
 def test_vnstock_missing_when_endpoint_raises_for_every_source() -> None:
@@ -189,7 +262,15 @@ def test_vnstock_partial_when_required_canonical_fields_are_missing() -> None:
     assert result.status is ProviderStatus.PARTIAL
 
 
-def test_vnstock_not_installed_returns_missing_without_raising() -> None:
+def test_vnstock_not_installed_returns_missing_without_raising(monkeypatch) -> None:
+    real_import = importlib.import_module
+
+    def unavailable(name, *args, **kwargs):
+        if name == "vnstock":
+            raise ModuleNotFoundError("vnstock")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", unavailable)
     provider = VNStockProvider(module=None)
     result = provider.fetch_financials("FPT")
     assert result.status is ProviderStatus.MISSING
@@ -364,8 +445,7 @@ def test_chain_requires_at_least_one_provider() -> None:
 
 
 def test_vnstock_4_api_financial_finance_is_used_when_legacy_entry_points_are_absent(monkeypatch) -> None:
-    """Phase 26 live finding: vnstock 4.x has no top-level Vnstock()/Finance."""
-    import importlib
+    """Support vnstock builds that expose Finance only under vnstock.api."""
     from types import SimpleNamespace
 
     built = []

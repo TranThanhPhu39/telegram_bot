@@ -67,7 +67,8 @@ def test_live_rows_without_public_date_are_staged_but_not_promoted(tmp_path) -> 
     assert violations == []
     assert conn.execute("SELECT COUNT(*) FROM automated_financial_statements").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM financial_reports").fetchone()[0] == 0   # correctness over coverage
-    assert records[0].rows == 1
+    assert records[0].rows == 1 and records[0].status == "AVAILABLE"
+    assert provider_verdict(records)[0] == PASS
 
 
 def test_promotion_safety_detects_violations(tmp_path) -> None:

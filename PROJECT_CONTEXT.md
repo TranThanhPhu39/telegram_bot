@@ -46,11 +46,10 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 7 forced-interruption live validation — COMPLETE. At 10:06 ICT on
-2026-09-21, FPT delivered a valid tick before an intentional WebSocket close;
-Socket.IO then reconnected as connection generation 2, restored the desired FPT
-subscription, and delivered distinct valid ticks afterward. Phases 3–7 now all
-have active-session acceptance evidence.
+Phase 26 remains open only for its remaining external live checks. The Phase 24
+provider follow-up is complete: VNStock 4.0.8/KBS, yfinance fallback, and live
+promotion safety all passed on 2026-09-21. Phase 22 active-session acceptance and
+the Phase 25 worker-in-real-bot check remain NOT TESTED.
 
 ## 4. Completed
 
@@ -125,11 +124,10 @@ have active-session acceptance evidence.
 
 ## 5. Currently Working On
 
-The requested README operational-status refresh is complete. It documents the
-actual startup path, Telegram commands, arbitrary-symbol behavior, data-source
-boundaries, live Phase 3–7 evidence, and the remaining BCTC, institutional-flow,
-sector/news coverage, and candlestick live-acceptance limitations. No runtime
-code or behavior changed in this documentation-only iteration.
+The Phase 24 live-provider compatibility follow-up is complete. The project now
+pins VNStock 4.0.8, reads its real KBS wide semantic financial statements, keeps
+yfinance as the strict fallback, and retains all point-in-time/bank promotion
+safety rules. No later phase was started.
 
 ## 6. Files Created / Modified
 
@@ -3224,3 +3222,58 @@ bên ngoài**. Lịch sử các phase trước không đổi.
 Chỉ là blocker bên ngoài: cần mạng tới VNStock/Yahoo/Vietcap/CafeF/Telegram, credential Vietcap,
 `TEST_TELEGRAM_CHAT_ID`, và phiên giao dịch mở cho acceptance của Phase 22. Chạy
 `scripts/test_phase24_live.py` và `scripts/test_phase26_telegram_live.py --send` trên máy có mạng.
+
+---
+
+## 2026-09-21 — Phase 24 live-provider compatibility follow-up
+
+### Confirmed failure
+
+- The installed `vnstock==3.2.6` VCI financial path timed out after 30 seconds
+  against `trading.vietcap.com.vn`; its TCBS financial endpoints returned HTTP
+  404 for FPT and ACB. The old adapter therefore returned MISSING.
+- yfinance remained healthy and returned real FPT.VN rows, but that could not
+  satisfy the separate VNStock acceptance criterion.
+- VNStock 4.0.8 changed the usable community-edition source set to KBS/VCI and
+  KBS returned real data in a semantic wide layout: `item`, `item_id`, then
+  columns such as `2026-Q2`, `2026-Q1`, `2025-Q4`, and `2025-Q3`.
+
+### Implementation
+
+- `requirements.txt` now pins `vnstock==4.0.8`.
+- `VNStockProvider` defaults to `KBS,VCI`, tries one source end-to-end before
+  constructing the next source, and prefers the non-deprecated top-level
+  `Finance` adapter when available.
+- Added an evidence-backed semantic-ID map for the canonical statement fields
+  and a wide-to-period normalizer. Unknown IDs remain ignored; no Vietnamese
+  label is guessed.
+- Importing VNStock now defaults `VNSTOCK_DISABLE_AGENT_SETUP=1` so a data
+  provider cannot write project/global assistant configuration as a side effect.
+- Provider diagnostics retain source/operation/exception type without exposing
+  request payloads or secrets.
+- The live promotion harness now maps refresh `SUCCESS` to provider
+  `AVAILABLE`; previously a successful staged refresh was mislabeled
+  INCONCLUSIVE even when rows existed and safety checks had no violations.
+- `.env.example` now documents `VNSTOCK_SOURCE_PREFERENCE=KBS,VCI`.
+
+### Verification
+
+- Focused Phase 24/26 tests: `91 passed`.
+- Full regression with VNStock 4.0.8, vnai 2.6.0 and resolved transitive
+  dependencies on Python 3.12: `833 passed`.
+- `pip check` after resolving the VNStock dependency set showed no new VNStock
+  conflict. The same eight pre-existing shared-environment conflicts remain
+  (protobuf consumers, pyppeteer urllib3/websockets, and streamlit protobuf).
+- Bounded live acceptance on a temporary SQLite database:
+  - VNStock/KBS FPT: AVAILABLE, 4 rows, 2026Q2 through 2025Q3.
+  - VNStock/KBS ACB: PARTIAL, 4 rows, 2026Q2 through 2025Q3.
+  - yfinance FPT.VN: PARTIAL, 9 rows.
+  - Promotion safety: PASS; rows without `public_date` were staged but not
+    promoted, and the bank canonical table remained untouched.
+  - Final harness verdict: `Phase 24 live acceptance: PASS`.
+
+### Remaining external validation
+
+Phase 24 is closed. Phase 22 active-session Telegram commands and the Phase 25
+coverage worker inside the real bot process remain NOT TESTED; this follow-up did
+not broaden into either task.

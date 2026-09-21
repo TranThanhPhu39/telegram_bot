@@ -361,6 +361,21 @@ not silently pass or fail. The result can be applied after the Phase 14 liquidit
 screen, with configurable treatment of insufficient data, or exposed purely as
 context. It is not imported by `SignalEngine` and cannot directly create a signal.
 
+## Automated financial-statement acquisition
+
+Slow-moving statement acquisition is isolated under `fundamentals.providers`.
+The primary adapter uses VNStock 4.0.8 with KBS before VCI; it converts KBS's
+semantic wide format (one metric per row and one reporting period per column)
+into provider-independent `StatementRow` values. Sources are constructed and
+queried sequentially, so a later VCI timeout cannot delay a successful KBS
+response. yfinance remains a strict fallback when VNStock is missing or errors.
+
+All automated statements first enter staging with provider/source provenance.
+Rows without a real `public_date` are never promoted into the canonical
+point-in-time tables, and automated bank statements are never promoted because
+their cumulative-versus-standalone convention has not been established. This
+keeps acquisition coverage separate from ASMF evidence safety.
+
 ## Runtime bot orchestration
 
 `runtime.bot_service.RuntimeBotDataService` is the concrete `BotDataService` used

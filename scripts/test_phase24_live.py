@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 
 from data.database import connect_database
 from data.migrations import bootstrap_schema
-from fundamentals.providers.vnstock_provider import VNStockProvider
+from fundamentals.providers.vnstock_provider import DEFAULT_SOURCE_PREFERENCE, VNStockProvider
 from fundamentals.providers.yfinance_provider import YFinanceProvider
 from runtime.acceptance import (
     EXIT_CODES, FAIL, NOT_TESTED, PASS, overall, probe_host, provider_verdict, run_chain_refresh_acceptance,
@@ -50,7 +50,10 @@ def main(argv=None) -> int:
     configure_logging()
     import os
 
-    vn = VNStockProvider(source_preference=parse_source_preference(os.getenv("VNSTOCK_SOURCE_PREFERENCE")) or ("VCI", "TCBS", "MAS"))
+    vn = VNStockProvider(
+        source_preference=parse_source_preference(os.getenv("VNSTOCK_SOURCE_PREFERENCE"))
+        or DEFAULT_SOURCE_PREFERENCE
+    )
     yf = YFinanceProvider()
     verdicts: dict[str, str] = {}
     hosts = {"VNStock live fetch": "https://trading.vietcap.com.vn",

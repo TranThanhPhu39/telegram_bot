@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterable, Sequence
 from datetime import date, datetime, timezone
 import importlib
 import logging
+import os
 
 from fundamentals.providers.base import (
     BANK_FIELDS,
@@ -34,7 +35,7 @@ LOGGER = logging.getLogger(__name__)
 
 #: Backends vnstock exposes for Vietnamese equities, most complete first. The
 #: adapter only uses the ones the installed release actually accepts.
-DEFAULT_SOURCE_PREFERENCE = ("VCI", "TCBS", "MAS")
+DEFAULT_SOURCE_PREFERENCE = ("KBS", "VCI")
 
 #: Column aliases seen across vnstock releases and Vietnamese/English schemas,
 #: mapped onto the canonical field names. Matching is case-insensitive on a
@@ -82,6 +83,30 @@ PERIOD_ALIASES = ("period", "reportperiod", "yearperiod", "quarter", "lengthrepo
 YEAR_ALIASES = ("year", "yearreport", "nam")
 QUARTER_ALIASES = ("quarter", "lengthreport", "quy")
 PUBLIC_DATE_ALIASES = ("publicdate", "publisheddate", "announcementdate", "publisheddatetime", "ngaycongbo")
+
+# vnstock 4.x KBS returns tidy *metrics* but wide *periods*: one row per
+# semantic item_id and one column per reporting period (for example 2026-Q2).
+# Keep this mapping deliberately small and evidence-backed by the live response;
+# unknown semantic IDs are ignored rather than guessed from Vietnamese labels.
+WIDE_STATEMENT_IDS: dict[str, tuple[str, ...]] = {
+    "revenue": ("revenue",),
+    "gross_profit": ("grossprofit",),
+    "operating_profit": ("operatingprofit",),
+    "net_income": ("netprofit", "netincome"),
+    "net_income_parent": ("profitaftertaxforshareholdersofparentcompany",),
+    "total_assets": ("totalassets",),
+    "total_equity": ("ownersequity2", "ownersequity3", "totalequity", "equity"),
+    "total_liabilities": ("totalliabilities",),
+    "cash": ("cashandcashequivalents",),
+    "short_term_debt": ("shorttermborrowingsandfinancialleases",),
+    "long_term_debt": ("longtermborrowingsandfinancialleases",),
+    "operating_cash_flow": ("operatingcashflow",),
+    "capex": ("paymentforfixedassetsconstructionsandotherlongtermassets",),
+    "net_interest_income": ("netinterestincome",),
+    "net_profit": ("netprofit", "netincome"),
+    "equity": ("ownersequity2", "ownersequity3", "totalequity", "equity"),
+    "gross_loans": ("grossloans", "loanstocustomers"),
+}
 
 
 def _normalize_label(label: object) -> str:
@@ -164,6 +189,10 @@ class VNStockProvider(FundamentalProvider):
         if not self._module_loaded:
             self._module_loaded = True
             try:
+                # vnstock 4.x otherwise starts a background helper that may
+                # write AGENTS.md and global assistant configuration on import.
+                # A data adapter must not mutate the repository or user profile.
+                os.environ.setdefault("VNSTOCK_DISABLE_AGENT_SETUP", "1")
                 self._module = importlib.import_module("vnstock")
             except Exception as error:  # pragma: no cover - depends on install
                 LOGGER.info("vnstock unavailable: %s", type(error).__name__)
@@ -173,63 +202,90 @@ class VNStockProvider(FundamentalProvider):
     def available(self) -> bool:
         return self._load_module() is not None
 
-    def _finance_handles(self, symbol: str) -> list[tuple[str, object]]:
+    def _finance_handles(
+        self,
+        symbol: str,
+        *,
+        sources: Sequence[str] | None = None,
+        diagnostics: list[str] | None = None,
+    ) -> list[tuple[str, object]]:
         """Return ``(source_label, finance_object)`` candidates, best first."""
         module = self._load_module()
         if module is None:
             return []
+        selected_sources = self._source_preference if sources is None else tuple(sources)
         handles: list[tuple[str, object]] = []
+        finance_class = getattr(module, "Finance", None)
+        if finance_class is not None:
+            for source in selected_sources:
+                try:
+                    handles.append((source, finance_class(symbol=symbol, source=source)))
+                except Exception as error:
+                    if diagnostics is not None:
+                        diagnostics.append(f"{source}.Finance:{type(error).__name__}")
+                    continue
         factory = getattr(module, "Vnstock", None)
-        if factory is not None:
-            for source in self._source_preference:
+        if factory is not None and not handles:
+            for source in selected_sources:
                 try:
                     stock = factory().stock(symbol=symbol, source=source)
-                except Exception:
+                except Exception as error:
+                    if diagnostics is not None:
+                        diagnostics.append(f"{source}.Vnstock:{type(error).__name__}")
                     continue
                 finance = getattr(stock, "finance", None)
                 if finance is not None:
                     handles.append((source, finance))
-        finance_class = getattr(module, "Finance", None)
-        if finance_class is not None and not handles:
-            for source in self._source_preference:
-                try:
-                    handles.append((source, finance_class(symbol=symbol, source=source)))
-                except Exception:
-                    continue
-        if not handles:
+        if not handles and finance_class is None and factory is None:
             # vnstock 4.x moved the finance client to ``vnstock.api.financial``
             # (source first, symbol second, keyword-only usage is safest).
             api_class = self._load_api_finance_class()
             if api_class is not None:
-                for source in self._source_preference:
+                for source in selected_sources:
                     try:
                         handles.append((source, api_class(
                             source=source.lower(), symbol=symbol, period=self._period,
                             get_all=True, show_log=False,
                         )))
                     except Exception as error:
+                        if diagnostics is not None:
+                            diagnostics.append(f"{source}.api.Finance:{type(error).__name__}")
                         LOGGER.debug("vnstock api Finance(%s) failed: %s", source, type(error).__name__)
         return handles
 
     @staticmethod
     def _load_api_finance_class() -> object | None:
         try:
+            os.environ.setdefault("VNSTOCK_DISABLE_AGENT_SETUP", "1")
             return getattr(importlib.import_module("vnstock.api.financial"), "Finance", None)
         except Exception:
             return None
 
-    def _call_statement(self, finance: object, method: str) -> object | None:
+    def _call_statement(
+        self,
+        finance: object,
+        method: str,
+        *,
+        source: str,
+        diagnostics: list[str],
+    ) -> object | None:
         handler = getattr(finance, method, None)
         if not callable(handler):
+            diagnostics.append(f"{source}.{method}:unsupported")
             return None
+        type_errors = 0
         for kwargs in ({"period": self._period}, {"period": self._period, "lang": "en"}, {}):
             try:
                 return handler(**kwargs)
             except TypeError:
+                type_errors += 1
                 continue
             except Exception as error:
+                diagnostics.append(f"{source}.{method}:{type(error).__name__}")
                 LOGGER.debug("vnstock %s failed: %s", method, type(error).__name__)
                 return None
+        if type_errors:
+            diagnostics.append(f"{source}.{method}:incompatible-signature")
         return None
 
     # ------------------------------------------------------------ financials
@@ -241,47 +297,60 @@ class VNStockProvider(FundamentalProvider):
                 symbol, "FINANCIALS", self.name,
                 reason="vnstock is not installed", attempted=("import vnstock",),
             )
-        try:
-            handles = self._finance_handles(symbol)
-        except Exception as error:
-            return ProviderResult.failed(
-                symbol, "FINANCIALS", self.name,
-                f"{type(error).__name__} while building vnstock handles",
-            )
-        if not handles:
+        diagnostics: list[str] = []
+        found_handle = False
+
+        # Probe one source at a time. Some vnstock clients perform network work
+        # in their constructor, so eagerly constructing every source made a
+        # healthy first source wait for a later VCI timeout.
+        for requested_source in self._source_preference:
+            try:
+                handles = self._finance_handles(
+                    symbol, sources=(requested_source,), diagnostics=diagnostics
+                )
+            except Exception as error:
+                diagnostics.append(f"{requested_source}.handle:{type(error).__name__}")
+                continue
+            for source, finance in handles:
+                found_handle = True
+                merged: dict[str, dict[str, float | None]] = {}
+                public_dates: dict[str, date | None] = {}
+                for method in ("income_statement", "balance_sheet", "cash_flow"):
+                    attempted.append(f"{source}.{method}")
+                    frame = self._call_statement(
+                        finance, method, source=source, diagnostics=diagnostics
+                    )
+                    if frame is None:
+                        continue
+                    try:
+                        self._absorb_statement(frame, merged, public_dates)
+                    except Exception as error:
+                        diagnostics.append(f"{source}.{method}.parse:{type(error).__name__}")
+                        LOGGER.debug("vnstock parse failed: %s", type(error).__name__)
+                rows = self._build_statement_rows(symbol, merged, public_dates)
+                if rows:
+                    complete = all(
+                        row.get("revenue") is not None and row.get("total_equity") is not None
+                        for row in rows
+                    )
+                    return ProviderResult(
+                        symbol=symbol, dataset="FINANCIALS", provider=self.name,
+                        status=ProviderStatus.AVAILABLE if complete else ProviderStatus.PARTIAL,
+                        provider_source=source, retrieved_at=datetime.now(timezone.utc),
+                        statements=rows, attempted=tuple(attempted),
+                    )
+
+        if not found_handle:
             return ProviderResult.missing(
                 symbol, "FINANCIALS", self.name,
-                reason="no usable vnstock entry point for this release",
+                reason=("no usable vnstock entry point for this release"
+                        + (f" ({'; '.join(diagnostics)})" if diagnostics else "")),
                 attempted=("Vnstock().stock().finance", "Finance()"),
             )
-
-        for source, finance in handles:
-            merged: dict[str, dict[str, float | None]] = {}
-            public_dates: dict[str, date | None] = {}
-            for method in ("income_statement", "balance_sheet", "cash_flow"):
-                attempted.append(f"{source}.{method}")
-                frame = self._call_statement(finance, method)
-                if frame is None:
-                    continue
-                try:
-                    self._absorb_statement(frame, merged, public_dates)
-                except Exception as error:
-                    LOGGER.debug("vnstock parse failed: %s", type(error).__name__)
-            rows = self._build_statement_rows(symbol, merged, public_dates)
-            if rows:
-                complete = all(
-                    row.get("revenue") is not None and row.get("total_equity") is not None
-                    for row in rows
-                )
-                return ProviderResult(
-                    symbol=symbol, dataset="FINANCIALS", provider=self.name,
-                    status=ProviderStatus.AVAILABLE if complete else ProviderStatus.PARTIAL,
-                    provider_source=source, retrieved_at=datetime.now(timezone.utc),
-                    statements=rows, attempted=tuple(attempted),
-                )
         return ProviderResult.missing(
             symbol, "FINANCIALS", self.name,
-            reason="vnstock returned no usable statement rows",
+            reason=("vnstock returned no usable statement rows"
+                    + (f" ({'; '.join(diagnostics)})" if diagnostics else "")),
             attempted=tuple(attempted),
         )
 
@@ -296,6 +365,8 @@ class VNStockProvider(FundamentalProvider):
             return
         rows = _flatten_columns(rows)
         columns = list(rows[0].keys()) if rows else columns
+        if self._absorb_wide_statement(columns, rows, merged):
+            return
         period_column = _match_column(columns, PERIOD_ALIASES)
         year_column = _match_column(columns, YEAR_ALIASES)
         quarter_column = _match_column(columns, QUARTER_ALIASES)
@@ -320,6 +391,40 @@ class VNStockProvider(FundamentalProvider):
                     bucket[field_name] = value
             if public_column is not None and period not in public_dates:
                 public_dates[period] = _coerce_date(row.get(public_column))
+
+    @staticmethod
+    def _absorb_wide_statement(
+        columns: Sequence[str],
+        rows: Sequence[dict[str, object]],
+        merged: dict[str, dict[str, float | None]],
+    ) -> bool:
+        """Absorb vnstock 4.x KBS semantic rows with periods as columns."""
+        item_id_column = _match_column(columns, ("itemid", "semanticid"))
+        period_columns = tuple(
+            (column, normalize_period(column))
+            for column in columns
+            if normalize_period(column) is not None
+        )
+        if item_id_column is None or not period_columns:
+            return False
+
+        semantic_to_fields: dict[str, list[str]] = {}
+        for field_name, semantic_ids in WIDE_STATEMENT_IDS.items():
+            for semantic_id in semantic_ids:
+                semantic_to_fields.setdefault(semantic_id, []).append(field_name)
+        for row in rows:
+            field_names = semantic_to_fields.get(_normalize_label(row.get(item_id_column)))
+            if not field_names:
+                continue
+            for column, period in period_columns:
+                value = clean_number(row.get(column))
+                if value is None or period is None:
+                    continue
+                bucket = merged.setdefault(period, {})
+                for field_name in field_names:
+                    if bucket.get(field_name) is None:
+                        bucket[field_name] = value
+        return True
 
     def _build_statement_rows(
         self,

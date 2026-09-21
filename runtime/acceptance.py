@@ -157,6 +157,13 @@ def run_chain_refresh_acceptance(
     """Real refresh into a TEMP database, then verify promotion safety."""
     records: list[ProviderRecord] = []
     names: list[str] = []
+    refresh_status = {
+        "SUCCESS": "AVAILABLE",
+        "PARTIAL": "PARTIAL",
+        "MISSING": "MISSING",
+        "FAILED": "ERROR",
+        "SKIPPED_FRESH": "STALE",
+    }
     for index, (symbol, exchange) in enumerate(symbols):
         if index:
             sleep(delay)
@@ -169,7 +176,7 @@ def run_chain_refresh_acceptance(
         cov = outcome.coverage
         records.append(ProviderRecord(
             outcome.provider or "-", outcome.provider_source, symbol, "FINANCIALS",
-            outcome.result.value, outcome.rows_stored,
+            refresh_status[outcome.result.value], outcome.rows_stored,
             tuple(sorted({r["period"] for r in load_automated_statements(connection, symbol)}, reverse=True)),
             None if cov is None else datetime.fromtimestamp(cov.last_attempt_at, timezone.utc).isoformat(timespec="seconds"),
             None if outcome.error_reason is None else safe_reason(outcome.error_reason, limit=160),
