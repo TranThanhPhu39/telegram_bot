@@ -11,36 +11,7 @@
 > Pending live checks must remain unchecked and must not be reported as PASS.
 
 ## PENDING LIVE VALIDATION
-**Phase 3 — Realtime Match Price: FPT only**
-
-Reason: the latest live retry at 08:25 ICT on Monday 2026-09-21 connected and
-subscribed successfully but occurred before the matching session; it received
-zero FPT events in 60 seconds. Live receive/decode/validation must be rerun at
-or after the 09:00 market open.
-
-**Phase 4 — Realtime ACB + Market State**
-
-Reason: live attempts on 2026-09-19 failed at the WebSocket handshake with
-HTTP 503 before subscription. Simultaneous live FPT + ACB delivery must be
-rerun during an active Vietnamese market session.
-
-**Phase 5 — Index stream**
-
-Reason: offline implementation and tests are complete, but VNINDEX realtime
-acceptance remains NOT TESTED. `scripts/test_realtime_index.py` must report
-`[PASS]` during an active Vietnamese market session.
-
-**Phase 6 — Bid/Ask**
-
-Reason: offline implementation and tests are complete, but realtime order-book
-acceptance remains NOT TESTED. `scripts/test_realtime_bidask.py` must report
-`[PASS]` during an active Vietnamese market session.
-
-**Phase 7 — Reliability**
-
-Reason: offline implementation is complete, but acceptance requires a real
-market stream to resume after a forced transport interruption. This remains
-NOT TESTED until an active Vietnamese market session.
+None. Phases 3–7 have active-session acceptance evidence.
 
 ## ACTIVE IMPLEMENTATION PHASE
 **Phase 21 operational follow-up — dynamic all-symbol news linking (COMPLETE)**
@@ -93,14 +64,16 @@ Acceptance:
 
 ## Phase 3 — Realtime Match Price: FPT only
 - [x] Subscribe only FPT to `w-match-price`
-- [ ] Receive binary event
-- [ ] Decode using MatchPrice protobuf
-- [ ] Print normalized FPT tick
-- [ ] Validate price/volume fields
-- [ ] STOP and report
+- [x] Receive binary event
+- [x] Decode using MatchPrice protobuf
+- [x] Print normalized FPT tick
+- [x] Validate price/volume fields
+- [x] STOP and report
 
 Acceptance:
 - Valid changing FPT realtime ticks observed
+  - PASS at 09:42 ICT on 2026-09-21: two distinct 244-byte live frames decoded
+    as FPT ticks at 66,300 and 66,400 with positive match/accumulated volumes.
 
 ---
 
@@ -109,51 +82,52 @@ Acceptance:
 - [x] Prevent duplicate symbol subscriptions
 - [x] Create normalized `TradeTick`
 - [x] Create latest market-state cache
-- [ ] Test FPT + ACB simultaneously
-  - Offline harness and handler tests PASS; live attempts on 2026-09-19 failed
-    at WebSocket handshake with HTTP 503 before subscription.
-- [ ] STOP and report
+- [x] Test FPT + ACB simultaneously
+  - PASS at 09:44 ICT on 2026-09-21: two distinct normalized live ticks were
+    observed for each symbol and both `ACB` and `FPT` were present in the cache.
+- [x] STOP and report
 
 Acceptance:
 - FPT and ACB update correctly in normalized form
+  - PASS: `distinct_ticks={'FPT': 2, 'ACB': 2}` and
+    `cached_symbols=['ACB', 'FPT']`.
 
 ---
 
 ## Phase 5 — Index stream
 - [x] Subscribe VNINDEX
-  - Offline only: `index` event registration and the exact
-    `{"symbols":["VNINDEX"]}` JSON-string emission are unit-tested. Live
-    emission over a real session is NOT TESTED.
+  - Live subscription emitted `event=index` with the exact
+    `{"symbols":["VNINDEX"]}` JSON-string payload.
 - [x] Decode `IndexMessage`
-  - Offline only: binary decode and malformed-payload rejection are
-    unit-tested against the vendored schema. Live frames are NOT TESTED.
+  - Live decoding accepted two distinct 148-byte binary frames.
 - [x] Normalize `IndexSnapshot`
 - [x] Validate breadth fields
-- [ ] STOP and report
+- [x] STOP and report
 
 Acceptance:
 - VNINDEX realtime state available
-  - NOT TESTED. Requires `scripts/test_realtime_index.py` to report `[PASS]`
-    during an active Vietnamese market session.
+  - PASS at 09:47 ICT on 2026-09-21: two distinct live VNINDEX snapshots were
+    normalized and cached. Breadth was `132/63/110` (advance/unchanged/decline),
+    while total volume and total value changed between snapshots.
 
 ---
 
 ## Phase 6 — Bid/Ask
 - [x] Subscribe FPT + ACB to `w-bid-ask`
-  - Offline only: `w-bid-ask` listener registration and the exact
-    `{"symbols":["FPT","ACB"]}` JSON-string emission are unit-tested. Live
-    emission over a real session is NOT TESTED.
+  - Live subscription emitted `event=w-bid-ask` with the exact
+    `{"symbols":["FPT","ACB"]}` JSON-string payload.
 - [x] Decode `BidAskMessage`
-  - Offline only: binary decode and malformed-payload rejection are
-    unit-tested against the vendored schema. Live frames are NOT TESTED.
+  - Live decoding accepted realtime binary order-book frames; the first observed
+    frame was 169 bytes.
 - [x] Normalize `OrderBook`
 - [x] Validate bid/ask levels
-- [ ] STOP and report
+- [x] STOP and report
 
 Acceptance:
 - Valid order book updates decoded
-  - NOT TESTED. Requires `scripts/test_realtime_bidask.py` to report `[PASS]`
-    during an active Vietnamese market session.
+  - PASS at 09:51 ICT on 2026-09-21: four distinct FPT books and two distinct
+    ACB books were normalized and cached; every printed book contained three
+    bid levels and three ask levels.
 
 ---
 
@@ -164,10 +138,14 @@ Acceptance:
 - [x] No duplicate listeners
 - [x] Decode error handling
 - [x] Raw debug mode
-- [ ] STOP and report
+- [x] STOP and report
 
 Acceptance:
 - Stream resumes after forced interruption
+  - PASS at 10:06 ICT on 2026-09-21: FPT produced a valid tick before the
+    forced WebSocket close, Socket.IO reconnected as connection generation 2,
+    automatically restored the FPT subscription, and delivered distinct valid
+    ticks afterward.
 
 ---
 

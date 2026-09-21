@@ -46,11 +46,11 @@ Vietcap-specific transport, event names, protobuf classes, and decoding remain u
 
 ## 3. Current Development Phase
 
-Phase 20 operational follow-up — sector-sync completion notifications — COMPLETE.
-Chats requesting `/soi ... ASMF`, `/sector`, or the ASMF inline action now receive
-a deduplicated incomplete/ready notification from the background worker and an
-actionable `Xem lại ASMF` button. Phase 23 remains complete. Phases 3–7 remain
-pending live validation and may not be reported as PASS.
+Phase 7 forced-interruption live validation — COMPLETE. At 10:06 ICT on
+2026-09-21, FPT delivered a valid tick before an intentional WebSocket close;
+Socket.IO then reconnected as connection generation 2, restored the desired FPT
+subscription, and delivered distinct valid ticks afterward. Phases 3–7 now all
+have active-session acceptance evidence.
 
 ## 4. Completed
 
@@ -115,17 +115,20 @@ pending live validation and may not be reported as PASS.
 - [x] Selectable CL1 and honest partial-data ASMF strategy runtime implemented
 - [x] Point-in-time ASMF sector/BCTC/institutional-flow foundation implemented
 - [x] Bank-specific financial schema and ASMF quality score implemented
-- [ ] Binary `w-match-price` event received from Vietcap
-- [ ] Realtime FPT message decoded and validated
-- [ ] Two distinct valid FPT ticks observed
+- [x] Binary `w-match-price` event received from Vietcap
+- [x] Realtime FPT message decoded and validated
+- [x] Two distinct valid FPT ticks observed
+- [x] Simultaneous FPT + ACB live ticks normalized into latest market state
+- [x] Two distinct VNINDEX snapshots with breadth and liquidity cached live
+- [x] Distinct FPT + ACB bid/ask books normalized and cached live
+- [x] Forced WebSocket interruption recovered with automatic FPT resubscription
 
 ## 5. Currently Working On
 
-The requested sector-notification follow-up is complete and stopped at its
-acceptance boundary. The next requested work must be handled as separate phases:
-populate real point-in-time BCTC/institutional-flow data, then add candlestick
-chart presentation. Provider availability and newly listed stocks with short
-history continue to fail closed. Phases 3–7 retain pending live-validation status.
+Phase 7 live acceptance is complete and this iteration stops at that phase gate.
+There are no remaining pending live validations in Phases 3–7. The candlestick
+implementation exists with offline coverage, but its real Vietcap/Telegram
+acceptance was not mixed into this Phase 7 iteration and remains NOT TESTED.
 
 ## 6. Files Created / Modified
 
@@ -421,13 +424,23 @@ Dependencies: `python-socketio` and its synchronous client transport stack.
 
 Status: automatic reconnect, explicit backoff, restoration of desired subscriptions,
 single listener registration, and bounded raw debug metadata are unit-tested.
-Forced-interruption recovery remains NOT TESTED.
+Forced WebSocket interruption and automatic FPT stream recovery passed live at
+10:06 ICT on 2026-09-21. Namespace readiness during the library's reconnect
+callback ordering is handled explicitly.
 
 ### `scripts/inspect_connection.py`
 
 Purpose: human-readable connection smoke test with configurable hold time, timeout, and Engine.IO logs.
 
 Status: direct script entry point verified; 35-second live smoke test passed without subscriptions.
+
+### `scripts/test_realtime_reconnect.py`
+
+Purpose: bounded Phase 7 harness that requires a valid FPT tick before an
+intentional WebSocket interruption, a new Socket.IO connection generation, and
+a valid FPT tick after automatic subscription restoration.
+
+Status: live acceptance PASS at 10:06 ICT on 2026-09-21.
 
 ### `scripts/__init__.py`
 
@@ -439,7 +452,8 @@ Status: created.
 
 Purpose: verifies path normalization, WebSocket-only connection arguments, reconnect configuration, lifecycle handlers, idempotent disconnect, all stream registrations/subscriptions, duplicate suppression, and reset after disconnect without network access.
 
-Status: all client tests pass as part of the 140-test suite.
+Status: all 34 client tests pass; the complete regression suite passes with
+646 tests.
 
 Raw debug behavior: disabled by default. When enabled, it logs only event name,
 payload type, payload size, sequence number, limit, and whether the limit was
@@ -547,15 +561,16 @@ payloads, invalid trades, and unexpected symbols; live invocation remains NOT TE
 
 Purpose: subscribes only FPT to `w-match-price`, records first-event metadata, decodes and validates messages, prints normalized field labels, and requires two distinct valid ticks for success.
 
-Status: live subscription emission confirmed; Saturday test received zero events and exited incomplete.
+Status: PASS live at 09:42 ICT on 2026-09-21. Two distinct 244-byte FPT frames
+were decoded and validated; the observed prices changed from 66,300 to 66,400.
 
 ### `scripts/test_realtime_market_state.py`
 
 Purpose: bounded Phase 4 acceptance harness for FPT + ACB through the full
 decode-to-cache path. Requires two distinct valid ticks per symbol by default.
 
-Status: entry point and acceptance tracker unit-tested. Two live attempts failed
-at WebSocket handshake with HTTP 503 before subscription.
+Status: PASS live at 09:44 ICT on 2026-09-21. The harness observed two distinct
+normalized ticks for both FPT and ACB and cached both symbols concurrently.
 
 ### `tests/test_decoder.py`
 
@@ -1546,6 +1561,22 @@ three observed values before request construction.
 - Did not implement Phase 6 bid/ask, reconnect, REST, database, indicators,
   signals, or Telegram.
 
+### 2026-09-21 — Phase 5 index-stream live acceptance
+
+- Ran `py -3.12 scripts\test_realtime_index.py --hold-seconds 45
+  --min-updates-per-symbol 2 --raw-debug` during the active market session.
+- Connected and emitted `event=index` with
+  `payload={"symbols":["VNINDEX"]}`.
+- Received and decoded two distinct 148-byte binary frames.
+- Snapshot 1: `VNINDEX=1811.06`, change `-4.60` (`-0.25%`), total volume
+  `83,738,115`, total value `2,193,652`, breadth `132/63/110`, ceiling `1`,
+  floor `3`.
+- Snapshot 2 retained the same index and breadth values while total volume rose
+  to `83,978,523` and total value rose to `2,200,332`.
+- Harness reported `[PASS] distinct_snapshots={'VNINDEX': 2}
+  cached_indices=['VNINDEX']` and exited with code `0`.
+- Phase 5 acceptance is PASS. Phase 6 remains the next pending live validation.
+
 ### 2026-09-19 — Phase 6 bid-ask offline task group
 
 - Began Phase 6 offline implementation under explicit user authorization while
@@ -1566,6 +1597,22 @@ three observed values before request construction.
 - Did not attempt live bid-ask validation; Phase 6 acceptance stays NOT TESTED.
 - Did not implement Phase 7 reconnect, REST, database, indicators, signals,
   or Telegram.
+
+### 2026-09-21 — Phase 6 bid-ask live acceptance
+
+- Ran `py -3.12 scripts\test_realtime_bidask.py --hold-seconds 45
+  --min-updates-per-symbol 2 --raw-debug` during the active market session.
+- Connected and emitted `event=w-bid-ask` with
+  `payload={"symbols":["FPT","ACB"]}`.
+- Received realtime binary order-book events; the first observed frame was
+  169 bytes.
+- Normalized four distinct FPT books and two distinct ACB books. Every printed
+  book contained three bid levels and three ask levels.
+- Representative best quotes were FPT `66,000 x 55,700` bid and
+  `66,100 x 55,700` ask; ACB `22,200 x 700` bid and `22,250 x 46,500` ask.
+- Harness reported `[PASS] distinct_books={'FPT': 4, 'ACB': 2}
+  cached_symbols=['ACB', 'FPT']` and exited with code `0`.
+- Phase 6 acceptance is PASS. Phase 7 remains the next pending live validation.
 
 ### 2026-09-19 — Phase 7 reconnect-handling task group
 
@@ -1620,6 +1667,27 @@ three observed values before request construction.
 - Exposed validated raw-debug flags in all four realtime acceptance scripts.
 - Passed 30 client tests, all four CLI help audits, and 140 total tests.
 - Left Phase 7 acceptance open because forced-interruption stream recovery is NOT TESTED.
+
+### 2026-09-21 — Phase 7 forced-interruption live acceptance
+
+- Added read-only connection-generation and disconnect counters plus a bounded
+  `interrupt_transport` diagnostic operation to the Vietcap realtime client.
+- Added `scripts/test_realtime_reconnect.py` to require a valid FPT tick before
+  interruption, a completed reconnect, automatic subscription restoration, and
+  a valid FPT tick afterward.
+- The first live run reproduced a race: `python-socketio` invoked the namespace
+  `connect` callback before setting its coarse `connected` flag, so the existing
+  subscription guard rejected restoration.
+- Updated namespace readiness detection to accept `/` in the Socket.IO namespace
+  map during the callback and added a regression test for the real library order.
+- Passed 34 focused client tests and the complete 646-test regression suite.
+- Final live run received FPT at connection generation 1, forced one WebSocket
+  interruption, reconnected as generation 2, automatically emitted the FPT
+  subscription again, and received distinct valid FPT ticks afterward.
+- Harness reported `[PASS] stream_resumed=True subscription_restored=True
+  connections=2 disconnects=1 cached_symbols=['FPT']
+  before_after_distinct=True` and exited with code `0`.
+- Phase 7 acceptance is PASS; Phases 3–7 have no remaining live-validation gate.
 
 ### 2026-09-19 — Phase 8 quote-endpoint task group
 

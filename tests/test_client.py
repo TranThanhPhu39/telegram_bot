@@ -15,6 +15,7 @@ class FakeSocketClient:
     def __init__(self) -> None:
         self.connected = False
         self.sid = "test-sid"
+        self.eio = FakeEngineIOClient()
         self.handlers: dict[str, Callable[..., None]] = {}
         self.on_calls: list[tuple[str, Callable[..., None]]] = []
         self.connect_calls: list[tuple[str, dict[str, Any]]] = []
@@ -43,6 +44,19 @@ class FakeSocketClient:
 
     def sleep(self, seconds: float) -> None:
         del seconds
+
+
+class FakeWebSocket:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class FakeEngineIOClient:
+    def __init__(self) -> None:
+        self.ws = FakeWebSocket()
 
 
 @pytest.mark.parametrize(
@@ -220,6 +234,41 @@ def test_disconnect_is_idempotent() -> None:
     client.disconnect()
 
     assert socket_client.disconnect_calls == 1
+
+
+def test_lifecycle_counters_track_connect_and_disconnect_events() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+
+    assert client.connection_generation == 0
+    assert client.disconnect_count == 0
+
+    client.connect()
+    client.disconnect()
+    client.connect()
+
+    assert client.connection_generation == 2
+    assert client.disconnect_count == 1
+
+
+def test_interrupt_transport_closes_websocket_without_clean_disconnect() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+    client.connect()
+
+    client.interrupt_transport()
+
+    assert socket_client.eio.ws.close_calls == 1
+    assert socket_client.disconnect_calls == 0
+
+
+def test_interrupt_transport_requires_connection() -> None:
+    client = VietcapRealtimeClient(  # type: ignore[arg-type]
+        socket_client=FakeSocketClient()
+    )
+
+    with pytest.raises(ConnectionError, match="Connect before interrupting"):
+        client.interrupt_transport()
 
 
 def test_match_price_subscription_requires_connection() -> None:
@@ -403,6 +452,24 @@ def test_all_three_stream_subscriptions_restore_after_reconnect() -> None:
         ("w-match-price", '{"symbols":["FPT","ACB"]}'),
         ("index", '{"symbols":["VNINDEX"]}'),
         ("w-bid-ask", '{"symbols":["FPT","ACB"]}'),
+    ]
+
+
+def test_subscription_restores_during_socketio_connect_callback_ordering() -> None:
+    socket_client = FakeSocketClient()
+    client = VietcapRealtimeClient(socket_client=socket_client)  # type: ignore[arg-type]
+    client.connect()
+    client.subscribe_match_price(("FPT",))
+    socket_client.emit_calls.clear()
+
+    socket_client.connected = False
+    socket_client.handlers["disconnect"]("transport error")
+    socket_client.namespaces = {"/": "reconnected-sid"}
+    socket_client.handlers["connect"]()
+
+    assert client.connected is True
+    assert socket_client.emit_calls == [
+        ("w-match-price", '{"symbols":["FPT"]}')
     ]
 
 

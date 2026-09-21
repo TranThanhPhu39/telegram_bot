@@ -52,6 +52,39 @@ unit-tested. Three simulated reconnect cycles also confirm reconnect does not
 register duplicate lifecycle or market-data listeners. These offline tests are not
 yet evidence that streams resume after a real interruption.
 
+### Phase 7 active-session acceptance — 2026-09-21
+
+The first live forced-interruption run exposed a real callback-ordering race in
+`python-socketio==5.17.0`: during a reconnect, the default namespace is inserted
+into `Client.namespaces` before the application `connect` callback runs, while
+the coarse `Client.connected` flag is set only after that callback returns. The
+old subscription guard therefore rejected restoration inside the callback even
+though the namespace was ready.
+
+The client now treats the default namespace as connected when `/` is present in
+the library namespace map. The final command was:
+
+```powershell
+py -3.12 scripts\test_realtime_reconnect.py --stage-timeout 45 --raw-debug
+```
+
+Observed sequence:
+
+- connection generation 1 subscribed to `w-match-price` for FPT and received a
+  valid normalized tick
+- the harness closed the underlying WebSocket without requesting a clean client
+  disconnect
+- one disconnect was observed, followed by connection generation 2
+- the FPT subscription was automatically emitted again from the reconnect
+  callback
+- generation 2 delivered valid FPT ticks and updated `LatestMarketState`
+- the post-reconnect tick identity differed from the pre-interruption identity
+- harness result: `[PASS] stream_resumed=True subscription_restored=True`, exit
+  code `0`
+
+This completes Phase 7 acceptance. Together with the earlier active-session
+results, Phases 3–7 now have live acceptance evidence.
+
 Malformed binary frames for `w-match-price`, `index`, and `w-bid-ask` are wrapped
 as explicit decoder errors and rejected by their pipeline boundaries. Offline
 tests confirm a rejected frame does not mutate state or prevent the immediately
@@ -224,6 +257,22 @@ the 09:00 matching-session open, so no payload was decoded and Phase 3 remains
 pending. This is connectivity/subscription evidence only, not live-stream
 acceptance evidence.
 
+### Phase 3 active-session acceptance — 2026-09-21
+
+At 09:42 ICT, `scripts/test_realtime.py --hold-seconds 45 --min-updates 2
+--raw-debug` connected over WebSocket and emitted the exact FPT-only subscription.
+The server delivered two distinct 244-byte `w-match-price` frames. Python decoded
+both with `pricePackage.MatchPriceMessage`, validated the schema-supported
+price/volume constraints, and printed normalized FPT observations:
+
+- `2026-09-21T02:42:19.647Z`: price 66,300; match volume 100;
+  accumulated volume 1,278,600.
+- `2026-09-21T02:42:22.503Z`: price 66,400; match volume 100;
+  accumulated volume 1,278,700.
+
+The harness exited `0` with `[PASS]`. This supersedes the earlier weekend and
+pre-open zero-event results for Phase 3. It does not prove Phase 4–7 acceptance.
+
 ### Current frontend contract verification — 2026-09-19
 
 The public price-board bundle was fetched successfully from the import map:
@@ -284,6 +333,25 @@ connection/subscription because the WebSocket handshake returned HTTP 503. The
 response reported an upstream connection refusal. Consequently, combined event
 delivery, binary decoding, and live cache updates remain NOT TESTED.
 
+### Phase 4 active-session acceptance — 2026-09-21
+
+At 09:44 ICT, `scripts/test_realtime_market_state.py --hold-seconds 45
+--min-updates-per-symbol 2 --raw-debug` connected over WebSocket, subscribed to
+the exact combined `{"symbols":["FPT","ACB"]}` payload, and received live binary
+events for both symbols. The full pipeline decoded the protobuf frames,
+normalized them to immutable `TradeTick` values, and updated
+`LatestMarketState`.
+
+Observed acceptance summary:
+
+- FPT: two distinct normalized ticks.
+- ACB: two distinct normalized ticks.
+- Cache snapshot: `['ACB', 'FPT']`.
+- Harness result: `[PASS]`, exit code `0`.
+
+This supersedes the earlier HTTP 503 attempts for Phase 4. It does not establish
+VNINDEX, bid/ask, or forced-reconnect acceptance for Phases 5–7.
+
 ### Phase 5 index-stream offline coverage — 2026-09-19
 
 Implemented from the vendored `price.proto` and the event table above:
@@ -331,6 +399,30 @@ through decode, normalization, and `LatestIndexState`, and requires two distinct
 valid snapshots before reporting PASS. Only its offline logic is tested. Live
 VNINDEX delivery, binary payload shape, and `time` format remain NOT TESTED.
 
+### Phase 5 active-session acceptance — 2026-09-21
+
+Command:
+
+```powershell
+py -3.12 scripts\test_realtime_index.py --hold-seconds 45 --min-updates-per-symbol 2 --raw-debug
+```
+
+Observed during the active Vietnamese market session:
+
+- connected and subscribed with `event=index` and
+  `payload={"symbols":["VNINDEX"]}`
+- received two distinct 148-byte binary index frames
+- both normalized snapshots reported `VNINDEX=1811.06`, change `-4.60`
+  (`-0.25%`), and breadth `132/63/110` (advance/unchanged/decline)
+- total volume changed from `83,738,115` to `83,978,523`; total value changed
+  from `2,193,652` to `2,200,332`
+- `LatestIndexState` contained `VNINDEX`
+- harness result: `[PASS] distinct_snapshots={'VNINDEX': 2}`, exit code `0`
+
+This live evidence completes Phase 5 acceptance and supersedes the offline-only
+status above. It does not establish bid/ask or forced-reconnect acceptance for
+Phases 6–7.
+
 ### Phase 6 bid-ask offline coverage — 2026-09-19
 
 Implemented from the vendored `price.proto` and the event table above:
@@ -373,6 +465,31 @@ binary events through decode, normalization, and `LatestOrderBookState`, and
 requires two distinct valid books per symbol before reporting PASS. Only its
 offline logic is tested. Live delivery, real binary payload shape, actual depth,
 and level ordering remain NOT TESTED.
+
+### Phase 6 active-session acceptance — 2026-09-21
+
+Command:
+
+```powershell
+py -3.12 scripts\test_realtime_bidask.py --hold-seconds 45 --min-updates-per-symbol 2 --raw-debug
+```
+
+Observed during the active Vietnamese market session:
+
+- connected and subscribed with `event=w-bid-ask` and
+  `payload={"symbols":["FPT","ACB"]}`
+- received realtime binary order-book events; the first observed frame was
+  169 bytes
+- normalized four distinct FPT books and two distinct ACB books
+- every printed book contained three bid levels and three ask levels
+- representative best quotes were FPT `66,000 x 55,700` bid /
+  `66,100 x 55,700` ask and ACB `22,200 x 700` bid /
+  `22,250 x 46,500` ask
+- `LatestOrderBookState` contained both ACB and FPT
+- harness result: `[PASS] distinct_books={'FPT': 4, 'ACB': 2}`, exit code `0`
+
+This live evidence completes Phase 6 acceptance and supersedes the offline-only
+status above. It does not establish forced-reconnect acceptance for Phase 7.
 
 ## Historical REST
 

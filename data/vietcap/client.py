@@ -96,6 +96,9 @@ class VietcapRealtimeClient:
         self._raw_debug_event_limit = raw_debug_event_limit
         self._raw_debug_event_counts: dict[str, int] = {}
         self._raw_debug_lock = Lock()
+        self._connection_generation = 0
+        self._disconnect_count = 0
+        self._lifecycle_lock = Lock()
         self._socket.on("connect", self._on_connect)
         self._socket.on("disconnect", self._on_disconnect)
         self._socket.on("connect_error", self._on_connect_error)
@@ -103,7 +106,22 @@ class VietcapRealtimeClient:
     @property
     def connected(self) -> bool:
         """Whether the default Socket.IO namespace is connected."""
-        return bool(self._socket.connected)
+        if self._socket.connected:
+            return True
+        namespaces = getattr(self._socket, "namespaces", None)
+        return isinstance(namespaces, dict) and "/" in namespaces
+
+    @property
+    def connection_generation(self) -> int:
+        """Number of successful namespace connections in this client lifetime."""
+        with self._lifecycle_lock:
+            return self._connection_generation
+
+    @property
+    def disconnect_count(self) -> int:
+        """Number of observed namespace disconnect events."""
+        with self._lifecycle_lock:
+            return self._disconnect_count
 
     def connect(
         self, timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS
@@ -157,6 +175,26 @@ class VietcapRealtimeClient:
     def sleep(self, seconds: float) -> None:
         """Wait while allowing the Socket.IO client to service heartbeats."""
         self._socket.sleep(seconds)
+
+    def interrupt_transport(self) -> None:
+        """Close the active WebSocket without requesting a clean disconnect.
+
+        This is intended for bounded resilience drills. The resulting transport
+        error leaves Socket.IO responsible for reconnecting and restoring desired
+        subscriptions.
+        """
+        if not self.connected:
+            raise ConnectionError("Connect before interrupting the transport")
+        if self._socket.transport() != "websocket":
+            raise RuntimeError("Transport interruption requires WebSocket")
+
+        engineio_client = getattr(self._socket, "eio", None)
+        websocket = getattr(engineio_client, "ws", None)
+        if websocket is None:
+            raise RuntimeError("Active WebSocket transport is unavailable")
+
+        logger.warning("Forcing Vietcap WebSocket transport interruption")
+        websocket.close()
 
     def on_match_price(self, handler: Callable[[object], None]) -> None:
         """Register the callback for binary match-price events."""
@@ -281,10 +319,14 @@ class VietcapRealtimeClient:
         self._bid_ask_subscription = subscription
 
     def _on_connect(self) -> None:
+        with self._lifecycle_lock:
+            self._connection_generation += 1
         logger.info("Socket.IO namespace connected")
         self._restore_subscriptions()
 
     def _on_disconnect(self, reason: object | None = None) -> None:
+        with self._lifecycle_lock:
+            self._disconnect_count += 1
         self._match_price_subscription = None
         self._index_subscription = None
         self._bid_ask_subscription = None
