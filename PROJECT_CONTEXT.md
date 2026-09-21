@@ -125,10 +125,11 @@ have active-session acceptance evidence.
 
 ## 5. Currently Working On
 
-Phase 7 live acceptance is complete and this iteration stops at that phase gate.
-There are no remaining pending live validations in Phases 3–7. The candlestick
-implementation exists with offline coverage, but its real Vietcap/Telegram
-acceptance was not mixed into this Phase 7 iteration and remains NOT TESTED.
+The requested README operational-status refresh is complete. It documents the
+actual startup path, Telegram commands, arbitrary-symbol behavior, data-source
+boundaries, live Phase 3–7 evidence, and the remaining BCTC, institutional-flow,
+sector/news coverage, and candlestick live-acceptance limitations. No runtime
+code or behavior changed in this documentation-only iteration.
 
 ## 6. Files Created / Modified
 

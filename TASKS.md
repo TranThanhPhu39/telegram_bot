@@ -16,6 +16,15 @@ None. Phases 3–7 have active-session acceptance evidence.
 ## ACTIVE IMPLEMENTATION PHASE
 **Phase 21 operational follow-up — dynamic all-symbol news linking (COMPLETE)**
 
+### Documentation follow-up — README operational status (COMPLETE)
+
+- [x] Document installation, configuration and bot startup
+- [x] Document Telegram commands and maintenance scripts
+- [x] Separate arbitrary-symbol support from actual data coverage
+- [x] Record live Phase 3–7 status and remaining live gaps
+- [x] Document BCTC, institutional-flow, sector and sentiment boundaries
+- [x] STOP and report
+
 ## Phase 0 — Repository bootstrap & planning
 - [x] Inspect repository structure
 - [x] Inspect Python version and dependencies
