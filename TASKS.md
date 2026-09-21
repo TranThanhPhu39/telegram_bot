@@ -622,9 +622,11 @@ pricing for valuation, Phase 24 valuation. Pending Phase 3–7 live validations 
   - PASS 2026-09-21 — FPT.VN trả 9 dòng thật, gồm 2026Q2 đến 2025Q3 trong
     bốn kỳ gần nhất được in bởi harness.
 
-### Chưa bắt đầu
-- [ ] Phase 25 — Market Coverage & Refresh Workers
-- [ ] Phase 26 — Live Acceptance, Reliability & Production Hardening
+### Trạng thái tiếp theo
+
+- Phase 25 — CODE + TESTS COMPLETE.
+- Phase 26 — CODE + TESTS COMPLETE — pending external live validation.
+- Xem các section Phase 25–26 bên dưới để biết bằng chứng và live gaps còn lại.
 
 ## Phase 25 — Market Coverage & Refresh Workers
 Authorised to run back-to-back with Phase 26 in a single iteration (no STOP gate between them).
@@ -702,3 +704,60 @@ Authorised to run back-to-back with Phase 26 in a single iteration (no STOP gate
 - [x] Live promotion-safety với dữ liệu VNStock thật — PASS 2026-09-21 trên
       database tạm; FPT/ACB được stage, thiếu `public_date` không promote và
       bank không được ghi vào `bank_financial_reports`
+
+
+## Operational follow-up — Bot UX, Scanner & Sentiment
+
+### Issue 1 — Latest-five ticker sentiment
+- [ ] Replace strict 24h ticker sentiment with newest up-to-5 relevant articles
+- [ ] Default maximum article age: 30 days
+- [ ] `/tin`, `/sentiment`, `/soi` share one canonical selection path
+- [ ] Zero eligible articles remains MISSING, not Neutral
+- [ ] Preserve severe-negative ASMF blocker recency independently
+- [ ] Add deterministic tests
+
+### Issue 2 — Market-wide background scanner
+- [ ] `/scan` no longer derives universe from `BOT_WATCH_SYMBOLS`
+- [ ] Universe comes from active HOSE/HNX/UPCoM common stocks in SQLite
+- [ ] Full-market scan runs in background, not Telegram command path
+- [ ] Persist scan snapshot in SQLite
+- [ ] `/scan` reads latest snapshot
+- [ ] Add strategy-aware CL1/ASMF views without inventing new strategy rules
+- [ ] Add liquidity configuration and tests
+
+### Issue 3 — Realtime breadth in Telegram market context
+- [ ] Connect realtime VNINDEX breadth to `/market`
+- [ ] Preserve historical trend-only fallback when realtime breadth is unavailable
+- [ ] Distinguish General Market Context from ASMF Market Filter
+
+### Issue 4 — `/soi` compact dashboard
+- [ ] Reduce overview to concise high-value information
+- [ ] Move detailed Technical/Fundamental/ASMF/Why/News/Sentiment/Market behind buttons
+- [ ] Preserve direct text commands
+- [ ] Avoid duplicate content between overview and detail
+
+### Issue 5 — Telegram callback UX
+- [ ] Text callbacks edit/update existing message where technically suitable
+- [ ] Avoid unnecessary new messages
+- [ ] Preserve separate photo behavior for `/chart`
+
+### Issue 6 — `/why` deduplication
+- [ ] Do not render identical data-quality limitations twice
+- [ ] Show each missing-data explanation once
+- [ ] Preserve layer status separately from explanatory notes
+
+### Issue 7 — ASMF score presentation
+- [ ] Keep underlying ASMF score unchanged
+- [ ] Label score explicitly as evidence score, not probability/confidence
+- [ ] Show true core-layer coverage separately
+- [ ] Show sentiment as optional context separately
+
+### Issue 8 — General Market vs ASMF Market wording
+- [ ] Rename to `General Market Context`
+- [ ] Rename ASMF layer to `ASMF Market Filter`
+- [ ] Explain that they use different inputs
+
+### Live acceptance still pending
+- [ ] `/soi`, `/market`, `/sentiment` during active session
+- [ ] `/chart` real Vietcap → PNG → Telegram send_photo
+- [ ] Coverage worker inside real bot process with live providers

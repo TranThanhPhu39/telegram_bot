@@ -51,6 +51,38 @@ provider follow-up is complete: VNStock 4.0.8/KBS, yfinance fallback, and live
 promotion safety all passed on 2026-09-21. Phase 22 active-session acceptance and
 the Phase 25 worker-in-real-bot check remain NOT TESTED.
 
+## Current Open Operational Issues
+
+The following are not unfinished Phase 25/26 core implementation items.
+They are post-Phase-26 operational/UX follow-ups:
+
+1. Ticker sentiment still uses a strict 24-hour query path; target behavior is
+   newest up-to-5 relevant articles within a configurable maximum age.
+
+2. `/scan` still behaves as a configured-watchlist scan rather than a
+   persisted full-market background scanner snapshot.
+
+3. Telegram `/market` does not yet consume realtime VNINDEX breadth from
+   `LatestIndexState`; it falls back to trend-only historical context.
+
+4. `/soi` remains more verbose than intended and overlaps with button detail views.
+
+5. Text callbacks create additional messages rather than updating the existing
+   dashboard where possible.
+
+6. `/why` can repeat identical data-quality notes.
+
+7. ASMF score presentation has been improved but layer-coverage semantics remain
+   potentially confusing.
+
+8. General market context and ASMF Market Filter need clearer labels because
+   they use different inputs.
+
+External live validation still pending:
+- active-session `/soi`, `/market`, `/sentiment`;
+- real Vietcap → PNG → Telegram `/chart`;
+- Phase 25 coverage worker inside the production-like bot process.
+
 ## 4. Completed
 
 - [x] Phase 0 repository bootstrap and planning
@@ -3111,10 +3143,8 @@ conflict mới nào.**
 vnstock==3.2.6 yfinance==1.0
 
 
-`.env.example` chưa có các key `FUNDAMENTAL_PRIMARY_PROVIDER`,
-`FUNDAMENTAL_REFRESH_INTERVAL`, `INSTITUTIONAL_REFRESH_INTERVAL`,
-`VNSTOCK_SOURCE_PREFERENCE`, `YFINANCE_ENABLED` — sẽ thêm ở Phase 25 vì lúc
-đó mới có `runtime/coverage_worker.py` đọc các key này.
+Historical note: at Phase 24 completion these keys were still deferred.
+They were subsequently added/validated during Phase 25.
 
 #### Live evidence
 
@@ -3128,11 +3158,11 @@ alias đã viết hay không). Cần một live acceptance script
 (`scripts/test_phase24_live.py`, thuộc Phase 26) chạy thật với 1 symbol
 thật để đóng gap này.
 
-#### Ngoài phạm vi / chưa làm
+#### Historical state at Phase 24 completion
 
-Phase 25 (Market Coverage & Refresh Workers) và Phase 26 (Live Acceptance,
-Reliability & Production Hardening) chưa bắt đầu. EPS/P/E/P/B vẫn chỉ đến
-từ CSV boundary cũ.
+At the time this Phase 24 entry was written, Phase 25 and Phase 26 had not yet started.
+This statement is historical only. Both phases were subsequently implemented;
+see `Phase 25 & 26 — Coverage Workers, Live Acceptance & Hardening` below.
 
 ---
 
@@ -3180,6 +3210,19 @@ bên ngoài**. Lịch sử các phase trước không đổi.
   để sự cố ngắn không thành mất dữ liệu cả tuần.
 - Scripts: `sync_fundamentals.py`, `sync_institutional_flow.py`, `sync_market_coverage.py`,
   `coverage_report.py`, dùng chung `scripts/coverage_cli.py` → cùng engine với worker.
+
+  ### Scanner architecture gap
+
+Current Phase 25 coverage orchestration maintains dataset coverage.
+It does not make `/scan` a full-market asynchronous scanner.
+
+Target:
+
+SQLite symbol universe
+→ background history/liquidity pre-screen
+→ CL1/ASMF evaluation
+→ persisted scan snapshot
+→ `/scan` reads snapshot only
 
 ### Phase 26 — hardening
 
@@ -3277,3 +3320,14 @@ Chỉ là blocker bên ngoài: cần mạng tới VNStock/Yahoo/Vietcap/CafeF/Te
 Phase 24 is closed. Phase 22 active-session Telegram commands and the Phase 25
 coverage worker inside the real bot process remain NOT TESTED; this follow-up did
 not broaden into either task.
+### Ticker sentiment target semantics
+
+Ticker sentiment should no longer be defined by a strict 24-hour window.
+
+Target:
+- select the newest up-to-5 relevant articles;
+- exclude articles older than `SENTIMENT_MAX_AGE_DAYS` (default 30);
+- then apply the existing relevance/time-decay aggregation;
+- `/tin`, `/sentiment`, `/soi` should use the same selected set;
+- zero eligible articles = MISSING, never synthetic Neutral;
+- severe-negative ASMF blocker retains its own stricter recency requirement.
