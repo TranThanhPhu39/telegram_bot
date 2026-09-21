@@ -248,7 +248,7 @@ def build_application(
         await reply(update, text, markup)
 
     async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await reply(update, commands.scan())
+        await reply(update, commands.scan(context.args))
 
     async def market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, commands.market())
@@ -336,8 +336,20 @@ def build_application(
         )
         _remove_unneeded_watch(watch)
         if query.message is not None:
-            for part in split_message(text):
-                await query.message.reply_text(part)
+            parts = split_message(text)
+            markup = build_symbol_keyboard(symbol)
+            if hasattr(query, "edit_message_text") and callable(query.edit_message_text):
+                try:
+                    await query.edit_message_text(parts[0], reply_markup=markup)
+                    for part in parts[1:]:
+                        await query.message.reply_text(part, reply_markup=markup)
+                    return
+                except Exception:
+                    pass
+            for index, part in enumerate(parts):
+                await query.message.reply_text(
+                    part, reply_markup=markup if index == len(parts) - 1 else None
+                )
 
     application.add_handlers(
         [

@@ -173,6 +173,36 @@ def test_callbacks_reject_garbage_without_crashing() -> None:
     assert texts and all("Traceback" not in t for t in texts)
 
 
+def test_text_callback_edits_existing_message() -> None:
+    app = app_for(Data())
+    cb = next(h for h in app.handlers[0] if h.__class__.__name__ == "CallbackQueryHandler")
+    edited: list[str] = []
+    replied: list[str] = []
+
+    async def edit_message_text(text, reply_markup=None):
+        edited.append(text)
+
+    async def reply_text(text, reply_markup=None):
+        replied.append(text)
+
+    async def answer():
+        return None
+
+    query = SimpleNamespace(
+        data="soi:tech:FPT", answer=answer, edit_message_text=edit_message_text,
+        message=SimpleNamespace(reply_text=reply_text, reply_photo=None),
+    )
+    update = SimpleNamespace(
+        callback_query=query, effective_message=query.message,
+        effective_user=SimpleNamespace(id=1), effective_chat=SimpleNamespace(id=1, type="private"),
+    )
+    asyncio.run(cb.callback(update, SimpleNamespace()))
+    assert len(edited) == 1
+    assert "TECH FPT" in edited[0]
+    assert len(replied) == 0  # No spam replies!
+
+
+
 # ---------------------------------------------------- missing-data semantics
 def test_missing_or_unreachable_history_is_unavailable_not_a_crash() -> None:
     for client in (FakeClient(EMPTY), _failing_client()):

@@ -85,8 +85,8 @@ class HistoricalClient(Protocol):
 
 
 class NewsService(Protocol):
-    def latest_news(self, ticker: str, limit: int = 5): ...
-    def ticker_sentiment(self, ticker: str, hours: int = 24): ...
+    def latest_news(self, ticker: str, limit: int = 5, **kwargs): ...
+    def ticker_sentiment(self, ticker: str, **kwargs): ...
     def severe_negative(self, ticker: str, **kwargs): ...
 
 
@@ -104,6 +104,7 @@ class RuntimeBotDataService:
         now: Callable[[], float] = time.time,
         fundamentals_csv_path: str | None = None,
         sector_history_requester: Callable[[str], bool] | None = None,
+        index_state: object | None = None,
     ) -> None:
         self.client = client
         self.connection = connection
@@ -113,6 +114,7 @@ class RuntimeBotDataService:
         self.now = now
         self.fundamentals_csv_path = fundamentals_csv_path
         self.sector_history_requester = sector_history_requester
+        self.index_state = index_state
         bootstrap_schema(connection)
         self.portfolio = PortfolioRuntime(
            connection, self._history, lambda: self.now(), PortfolioConfig.from_env() 
@@ -242,7 +244,19 @@ class RuntimeBotDataService:
 
     def market_overview(self) -> str:
         bars, source = self._history("VNINDEX")
-        market = build_market_view(bars)
+        breadth = None
+        liquidity = None
+        if self.index_state is not None and hasattr(self.index_state, "get"):
+            snapshot = self.index_state.get("VNINDEX")
+            if snapshot is not None:
+                breadth = (
+                    f"{int(snapshot.advances)} tăng ({int(snapshot.ceiling_count)} trần) / "
+                    f"{int(snapshot.declines)} giảm ({int(snapshot.floor_count)} sàn) / "
+                    f"{int(snapshot.unchanged)} tham chiếu"
+                )
+                if snapshot.total_value > 0:
+                    liquidity = f"{snapshot.total_value / 1e9:,.0f} tỷ ({snapshot.total_volume:,.0f} CP)"
+        market = build_market_view(bars, breadth=breadth, liquidity=liquidity)
         if market is None:
             return f"Chưa có dữ liệu lịch sử VNINDEX. Nguồn: {source}"
         quality = self._data_quality(bars[-1].timestamp, source)
@@ -271,15 +285,34 @@ class RuntimeBotDataService:
 
     def scan_results(self) -> tuple[str, ...]:
         """Preserved contract: ordered ticker tuple for backward compatibility."""
-        histories = {item.symbol: self._history(item.symbol)[0] for item in self.instruments}
-        config = ScannerConfig(20, 0.0, 0.0, min(20, len(self.instruments)) or 1)
+        instruments = self.instruments
+        if not instruments:
+            from runtime.market_universe import load_market_universe
+            market_syms = load_market_universe(self.connection)
+            instruments = tuple(
+                ScannerInstrument(s.symbol, s.exchange or "HOSE", "STOCK")
+                for s in market_syms
+            )
+        histories = {item.symbol: self._history(item.symbol)[0] for item in instruments}
+        config = ScannerConfig(20, 0.0, 0.0, min(20, len(instruments)) or 1)
         screened = daily_prescreen(
-            self.instruments, histories, config, as_of_timestamp=int(self.now()) + 1
+            instruments, histories, config, as_of_timestamp=int(self.now()) + 1
         )
         return realtime_watch_universe(screened, config)
 
-    def scan_overview(self) -> str:
-        """Explain why each screened symbol is on the watch list."""
+    def scan_overview(self, strategy: str = "CL1") -> str:
+        """Explain why each screened symbol is on the watch list, reading latest snapshot from SQLite when available."""
+        strategy_upper = strategy.strip().upper() if strategy else "CL1"
+        from runtime.scanner_worker import load_latest_scan_snapshot, save_scan_snapshot
+        snapshot = load_latest_scan_snapshot(self.connection, strategy=strategy_upper)
+        if snapshot is not None and snapshot.rows:
+            return format_scan(
+                snapshot.rows,
+                as_of=snapshot.as_of_date,
+                scanned_at=snapshot.scanned_at,
+                total_universe=snapshot.total_universe,
+                strategy=strategy_upper,
+            )
         symbols = self.scan_results()
         if not symbols:
             return "Chưa có mã đạt bộ lọc."
@@ -291,13 +324,35 @@ class RuntimeBotDataService:
             strategy_view = None
             status = None
             if bars:
-                try:
-                    strategy_view = build_strategy_view(evaluate_cl1(bars))
-                except ValueError:
-                    strategy_view = None
+                if strategy_upper == "ASMF":
+                    try:
+                        asmf_res, _ = self._evaluate_asmf(bars, benchmark)
+                        strategy_view = build_strategy_view(asmf_res)
+                    except Exception:
+                        strategy_view = None
+                else:
+                    try:
+                        strategy_view = build_strategy_view(evaluate_cl1(bars))
+                    except ValueError:
+                        strategy_view = None
                 status = self._fundamental_status(symbol, bars[-1].timestamp)
             rows.append(build_scan_row(symbol, technical, strategy_view, True, status))
-        return format_scan(tuple(rows))
+        try:
+            from datetime import datetime, timezone
+            cur_ts = int(self.now())
+            as_of_d = datetime.fromtimestamp(cur_ts, timezone.utc).strftime("%Y-%m-%d")
+            save_scan_snapshot(
+                self.connection,
+                strategy=strategy_upper,
+                as_of_date=as_of_d,
+                scanned_at=cur_ts,
+                total_universe=len(symbols),
+                screened_count=len(rows),
+                rows=rows,
+            )
+        except Exception:
+            pass
+        return format_scan(tuple(rows), strategy=strategy_upper)
 
     def sector_overview(self, name: str) -> str:
         return format_sector(self.sector_view(name))
@@ -477,7 +532,7 @@ class RuntimeBotDataService:
         if self.news_service is None:
             return SentimentView(available=False, note=NEWS_UNAVAILABLE)
         try:
-            aggregate = self.news_service.ticker_sentiment(symbol.strip().upper(), 24)
+            aggregate = self.news_service.ticker_sentiment(symbol.strip().upper())
         except Exception:
             return SentimentView(available=False, note=NEWS_UNAVAILABLE)
         return build_sentiment_view(aggregate)

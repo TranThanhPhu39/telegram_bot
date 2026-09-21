@@ -99,7 +99,7 @@ def test_soi_renders_every_supported_section() -> None:
     add_fundamentals(runtime)
     text = runtime.symbol_overview("FPT")
     for marker in ("GIÁ", "KỸ THUẬT", "HỖ TRỢ / KHÁNG CỰ", "THỊ TRƯỜNG",
-                   "Chiến lược CL1", "CƠ BẢN", "TIN 24H", "DỮ LIỆU"):
+                   "Chiến lược CL1", "CƠ BẢN", "SENTIMENT", "DỮ LIỆU"):
         assert marker in text
     assert "Phiên dữ liệu" not in text or "Dữ liệu phiên" in text
 

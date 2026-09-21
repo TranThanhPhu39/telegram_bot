@@ -174,7 +174,7 @@ def format_why(view: StockAnalysisView, interpretations: Sequence[str]) -> str:
         limitations.extend(view.technical.missing)
     if limitations:
         blocks.append("Giới hạn dữ liệu:\n" + "\n".join(f"- {item}" for item in dict.fromkeys(limitations)))
-    blocks.append(_data_quality_block(view))
+    blocks.append(format_data_quality(view.data_quality, include_notes=False))
     blocks.append("Đây là context lịch sử; không phải khuyến nghị mua/bán.")
     return "\n\n".join(blocks)
 
@@ -222,9 +222,9 @@ def format_fundamental(view: StockAnalysisView) -> str:
 def format_sentiment(symbol: str, view: SentimentView | None) -> str:
     if view is None or not view.available:
         note = (view.note if view is not None and view.note else "News sentiment unavailable.")
-        return f"📰 {symbol} — SENTIMENT 24H\n{note}"
+        return f"📰 {symbol} — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)\n{note}"
     lines = [
-        f"📰 {symbol} — SENTIMENT 24H",
+        f"📰 {symbol} — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)",
         f"Nhãn tổng hợp: {view.label}",
         f"Score: {view.score:+.2f} (thang -1..+1, có giảm trọng số theo thời gian)",
         f"Model confidence: {number(view.model_confidence)} (độ tin cậy của bộ phân loại, "
@@ -272,10 +272,25 @@ def format_sector(view: SectorView | None) -> str:
     return "\n".join(lines)
 
 
-def format_scan(rows: Sequence[ScanRowView]) -> str:
+def format_scan(
+    rows: Sequence[ScanRowView],
+    *,
+    as_of: str | None = None,
+    scanned_at: int | None = None,
+    total_universe: int | None = None,
+    strategy: str = "CL1",
+) -> str:
     if not rows:
         return "Chưa có mã đạt bộ lọc."
-    lines = ["🔎 KẾT QUẢ QUÉT"]
+    header = f"🔎 KẾT QUẢ QUÉT — CHIẾN LƯỢC {strategy}" if strategy != "CL1" else "🔎 KẾT QUẢ QUÉT"
+    lines = [header]
+    if total_universe is not None or as_of is not None:
+        info = []
+        if total_universe is not None:
+            info.append(f"Toàn thị trường: {len(rows)}/{total_universe} mã đạt lọc")
+        if as_of is not None:
+            info.append(f"Ngày: {as_of}")
+        lines.append(" | ".join(info))
     for index, row in enumerate(rows, start=1):
         lines.append(
             f"{index}. {row.symbol}\n"
@@ -316,11 +331,24 @@ def _market_summary(market: MarketContextView) -> str:
 def _strategy_block(strategy) -> str:
     lines = [f"🎯 Chiến lược {strategy.name}: {strategy.state}"]
     if strategy.score is not None:
-        lines.append(f"Điểm hiện có: {strategy.score:.1f}/100 (chưa hiệu chuẩn lịch sử)")
+        lines.append(f"Điểm bằng chứng (Evidence score): {strategy.score:.1f}/100 (tổng hợp điểm, không phải xác suất)")
     if strategy.evidence_total:
         lines.append(f"Độ phủ bằng chứng: {strategy.evidence_covered}/{strategy.evidence_total}")
     if strategy.layers:
-        lines.append("Tầng: " + " | ".join(f"{i.name}={i.status.value}" for i in strategy.layers))
+        def _layer_label(item):
+            name = "ASMF Market Filter" if strategy.name == "ASMF" and item.name == "Market" else item.name
+            return f"{name}={item.status.value}"
+        if strategy.name == "ASMF":
+            core_layers = [i for i in strategy.layers if i.name != "Sentiment"]
+            sentiment_layers = [i for i in strategy.layers if i.name == "Sentiment"]
+            core_covered = sum(1 for i in core_layers if i.status.value != "MISSING")
+            lines.append(f"Độ phủ tầng cốt lõi: {core_covered}/{len(core_layers)} tầng")
+            lines.append("Tầng: " + " | ".join(_layer_label(i) for i in strategy.layers))
+            if sentiment_layers:
+                s = sentiment_layers[0]
+                lines.append(f"Lớp bổ trợ (Sentiment context): {s.status.value}" + (f" ({s.detail})" if s.detail else ""))
+        else:
+            lines.append("Tầng: " + " | ".join(_layer_label(i) for i in strategy.layers))
     if strategy.positive:
         lines.append("Đạt: " + "; ".join(strategy.positive))
     if strategy.negative:
@@ -358,7 +386,7 @@ def _fundamental_block(fundamental, *, compact: bool = False) -> str:
 
 
 def _sentiment_block(sentiment: SentimentView, *, compact: bool = False) -> str:
-    return "📰 TIN 24H\n" + _sentiment_line(sentiment)
+    return "📰 SENTIMENT (5 TIN MỚI NHẤT)\n" + _sentiment_line(sentiment)
 
 
 def _sentiment_line(sentiment: SentimentView) -> str:
@@ -377,7 +405,7 @@ def _data_quality_block(view: StockAnalysisView) -> str:
     return format_data_quality(view.data_quality)
 
 
-def format_data_quality(quality) -> str:
+def format_data_quality(quality, *, include_notes: bool = True) -> str:
     lines = ["🕒 DỮ LIỆU"]
     label = FRESHNESS_LABELS.get(quality.freshness, quality.freshness.value)
     if quality.staleness_days:
@@ -391,8 +419,9 @@ def format_data_quality(quality) -> str:
         )
     if quality.news_source:
         lines.append(f"Nguồn tin: {quality.news_source} (mới nhất {_time(quality.news_latest_at)})")
-    for note in quality.notes:
-        lines.append(f"- {note}")
+    if include_notes:
+        for note in quality.notes:
+            lines.append(f"- {note}")
     return "\n".join(lines)
 
 

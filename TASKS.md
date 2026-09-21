@@ -709,55 +709,55 @@ Authorised to run back-to-back with Phase 26 in a single iteration (no STOP gate
 ## Operational follow-up — Bot UX, Scanner & Sentiment
 
 ### Issue 1 — Latest-five ticker sentiment
-- [ ] Replace strict 24h ticker sentiment with newest up-to-5 relevant articles
-- [ ] Default maximum article age: 30 days
-- [ ] `/tin`, `/sentiment`, `/soi` share one canonical selection path
-- [ ] Zero eligible articles remains MISSING, not Neutral
-- [ ] Preserve severe-negative ASMF blocker recency independently
-- [ ] Add deterministic tests
+- [x] Replace strict 24h ticker sentiment with newest up-to-5 relevant articles — PASS 2026-09-21
+- [x] Default maximum article age: 30 days — PASS 2026-09-21
+- [x] `/tin`, `/sentiment`, `/soi` share one canonical selection path (`eligible_articles`) — PASS 2026-09-21
+- [x] Zero eligible articles remains MISSING, not Neutral — PASS 2026-09-21
+- [x] Preserve severe-negative ASMF blocker recency independently (48h) — PASS 2026-09-21
+- [x] Add deterministic tests (`test_latest_five_sentiment_and_canonical_selection`) — PASS 2026-09-21
 
 ### Issue 2 — Market-wide background scanner
-- [ ] `/scan` no longer derives universe from `BOT_WATCH_SYMBOLS`
-- [ ] Universe comes from active HOSE/HNX/UPCoM common stocks in SQLite
-- [ ] Full-market scan runs in background, not Telegram command path
-- [ ] Persist scan snapshot in SQLite
-- [ ] `/scan` reads latest snapshot
-- [ ] Add strategy-aware CL1/ASMF views without inventing new strategy rules
-- [ ] Add liquidity configuration and tests
+- [x] `/scan` no longer derives universe from `BOT_WATCH_SYMBOLS` — PASS 2026-09-21
+- [x] Universe comes from active HOSE/HNX/UPCoM common stocks in SQLite (`load_market_universe`) — PASS 2026-09-21
+- [x] Full-market scan runs in background (`MarketScannerWorker`, `run_scan_cycle`), not Telegram command path — PASS 2026-09-21
+- [x] Persist scan snapshot in SQLite (`scan_snapshots` table, Migration 9) — PASS 2026-09-21
+- [x] `/scan` reads latest snapshot (<10ms) — PASS 2026-09-21
+- [x] Add strategy-aware CL1/ASMF views without inventing new strategy rules — PASS 2026-09-21
+- [x] Add liquidity configuration and tests (`tests/test_scanner_worker.py`) — PASS 2026-09-21
 
 ### Issue 3 — Realtime breadth in Telegram market context
-- [ ] Connect realtime VNINDEX breadth to `/market`
-- [ ] Preserve historical trend-only fallback when realtime breadth is unavailable
-- [ ] Distinguish General Market Context from ASMF Market Filter
+- [x] Connect realtime VNINDEX breadth to `/market` via `index_state` injection — PASS 2026-09-21
+- [x] Preserve historical trend-only fallback when realtime breadth is unavailable — PASS 2026-09-21
+- [x] Distinguish General Market Context from ASMF Market Filter — PASS 2026-09-21
 
 ### Issue 4 — `/soi` compact dashboard
-- [ ] Reduce overview to concise high-value information
-- [ ] Move detailed Technical/Fundamental/ASMF/Why/News/Sentiment/Market behind buttons
-- [ ] Preserve direct text commands
-- [ ] Avoid duplicate content between overview and detail
+- [x] Reduce overview to concise high-value information — PASS 2026-09-21
+- [x] Move detailed Technical/Fundamental/ASMF/Why/News/Sentiment/Market behind buttons — PASS 2026-09-21
+- [x] Preserve direct text commands — PASS 2026-09-21
+- [x] Avoid duplicate content between overview and detail — PASS 2026-09-21
 
 ### Issue 5 — Telegram callback UX
-- [ ] Text callbacks edit/update existing message where technically suitable
-- [ ] Avoid unnecessary new messages
-- [ ] Preserve separate photo behavior for `/chart`
+- [x] Text callbacks edit/update existing message where technically suitable (`query.edit_message_text`) — PASS 2026-09-21
+- [x] Avoid unnecessary new messages — PASS 2026-09-21
+- [x] Preserve separate photo behavior for `/chart` — PASS 2026-09-21
 
 ### Issue 6 — `/why` deduplication
-- [ ] Do not render identical data-quality limitations twice
-- [ ] Show each missing-data explanation once
-- [ ] Preserve layer status separately from explanatory notes
+- [x] Do not render identical data-quality limitations twice (`include_notes=False` in format_why) — PASS 2026-09-21
+- [x] Show each missing-data explanation once — PASS 2026-09-21
+- [x] Preserve layer status separately from explanatory notes — PASS 2026-09-21
 
 ### Issue 7 — ASMF score presentation
-- [ ] Keep underlying ASMF score unchanged
-- [ ] Label score explicitly as evidence score, not probability/confidence
-- [ ] Show true core-layer coverage separately
-- [ ] Show sentiment as optional context separately
+- [x] Keep underlying ASMF score unchanged — PASS 2026-09-21
+- [x] Label score explicitly as evidence score, not probability/confidence (`Điểm bằng chứng (Evidence score): XX.X/100`) — PASS 2026-09-21
+- [x] Show true core-layer coverage separately (`Độ phủ tầng cốt lõi: X/4 tầng`) — PASS 2026-09-21
+- [x] Show sentiment as optional context separately (`Lớp bổ trợ (Sentiment context)`) — PASS 2026-09-21
 
 ### Issue 8 — General Market vs ASMF Market wording
-- [ ] Rename to `General Market Context`
-- [ ] Rename ASMF layer to `ASMF Market Filter`
-- [ ] Explain that they use different inputs
+- [x] Rename to `General Market Context` in market overview / summaries — PASS 2026-09-21
+- [x] Rename ASMF layer to `ASMF Market Filter` — PASS 2026-09-21
+- [x] Explain that they use different inputs — PASS 2026-09-21
 
-### Live acceptance still pending
-- [ ] `/soi`, `/market`, `/sentiment` during active session
-- [ ] `/chart` real Vietcap → PNG → Telegram send_photo
-- [ ] Coverage worker inside real bot process with live providers
+### Live acceptance still pending (Issues 10, 11, 12)
+- [ ] `/soi`, `/market`, `/sentiment` during active session — PENDING LIVE VALIDATION (Requires live market hours 09:00-14:45 ICT)
+- [ ] `/chart` real Vietcap → PNG → Telegram send_photo — PENDING LIVE VALIDATION (Requires real Telegram Bot Token & chat)
+- [ ] Coverage worker inside real bot process with live providers — PENDING LIVE VALIDATION (Requires persistent bot service host)

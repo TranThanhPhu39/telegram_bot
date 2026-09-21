@@ -211,7 +211,7 @@ def test_migration_six_preserves_existing_database_contents(tmp_path) -> None:
 
     connection = connect_database(database_url)
     try:
-        assert bootstrap_schema(connection) == LATEST_SCHEMA_VERSION == 8
+        assert bootstrap_schema(connection) == LATEST_SCHEMA_VERSION == 9
         tables = {
             row["name"] for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"

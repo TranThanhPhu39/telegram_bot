@@ -172,3 +172,58 @@ def test_catalog_failure_falls_back_to_all_sqlite_symbols():
     assert linker.link(NewsItem(
         "fallback", "x", "https://x/fallback", NOW, "KDH tăng giá",
     )).tickers == ("KDH",)
+
+
+def test_latest_five_sentiment_and_canonical_selection(tmp_path):
+    repository = SQLiteNewsRepository(tmp_path / "news_canonical.db")
+    service = SentimentQueryService(repository)
+
+    # 1. Zero eligible articles returns None (MISSING, not Neutral)
+    assert service.ticker_sentiment("FPT", now=NOW) is None
+    assert service.eligible_articles("FPT", now=NOW) == ()
+    assert service.latest_news("FPT", now=NOW) == ()
+
+    # 2. Add 7 articles with different ages for FPT:
+    # 3 days ago (positive), 5 days ago (positive), 10 days ago (negative),
+    # 20 days ago (positive), 25 days ago (positive), 28 days ago (negative),
+    # 32 days ago (should be excluded by max_age_days=30)
+    ages_days = [3, 5, 10, 20, 25, 28, 32]
+    for idx, d in enumerate(ages_days):
+        published = NOW - timedelta(days=d)
+        is_neg = (idx % 2 == 1)
+        repository.save(item(
+            f"fpt-{idx}",
+            title=f"FPT tin số {idx}",
+            published=published,
+            negative=0.8 if is_neg else 0.1,
+            confidence=0.9,
+            primary="FPT",
+        ))
+
+    # 3. eligible_articles should return exactly the newest 5 (ages 3, 5, 10, 20, 25)
+    eligible = service.eligible_articles("FPT", limit=5, max_age_days=30, now=NOW)
+    assert len(eligible) == 5
+    assert eligible[0].id == "fpt-0"  # 3 days ago
+    assert eligible[1].id == "fpt-1"  # 5 days ago
+    assert eligible[2].id == "fpt-2"  # 10 days ago
+    assert eligible[3].id == "fpt-3"  # 20 days ago
+    assert eligible[4].id == "fpt-4"  # 25 days ago
+
+    # 4. latest_news shares the exact same selection path
+    news = service.latest_news("FPT", limit=5, max_age_days=30, now=NOW)
+    assert [x.id for x in news] == [x.id for x in eligible]
+
+    # 5. ticker_sentiment computes on these 5 articles
+    agg = service.ticker_sentiment("FPT", now=NOW)
+    assert agg is not None
+    assert agg.article_count == 5
+    assert agg.hours == 30 * 24
+
+    # 6. severe_negative still checks 48 hours independently
+    # None of the FPT articles above are <= 48h
+    assert service.severe_negative("FPT", now=NOW) is None
+    # Add a severe negative article at 24h
+    repository.save(item("fpt-urgent", event="LEGAL", negative=0.9, confidence=0.95,
+                         published=NOW - timedelta(hours=24), primary="FPT"))
+    assert service.severe_negative("FPT", now=NOW) is not None
+

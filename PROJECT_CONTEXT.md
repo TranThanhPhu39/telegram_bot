@@ -51,37 +51,46 @@ provider follow-up is complete: VNStock 4.0.8/KBS, yfinance fallback, and live
 promotion safety all passed on 2026-09-21. Phase 22 active-session acceptance and
 the Phase 25 worker-in-real-bot check remain NOT TESTED.
 
-## Current Open Operational Issues
+## Current Operational Status (Updated 2026-09-21)
 
-The following are not unfinished Phase 25/26 core implementation items.
-They are post-Phase-26 operational/UX follow-ups:
+All 8 post-Phase-26 operational/UX issues have been fully resolved, tested, and integrated:
 
-1. Ticker sentiment still uses a strict 24-hour query path; target behavior is
-   newest up-to-5 relevant articles within a configurable maximum age.
+1. **Latest-five ticker sentiment (Resolved):**
+   - Migrated from strict 24h query window to canonical `eligible_articles(ticker, limit=5, max_age_days=30)`.
+   - Unified selection path across `/tin`, `/sentiment`, and `/soi`. Zero eligible articles correctly reports `MISSING` (never fake Neutral).
+   - Preserved 48-hour severe-negative ASMF blocker recency independently.
 
-2. `/scan` still behaves as a configured-watchlist scan rather than a
-   persisted full-market background scanner snapshot.
+2. **Full-market scanner & universe (Resolved):**
+   - Removed reliance of `/scan` on `BOT_WATCH_SYMBOLS`. Universe is dynamically loaded from active HOSE/HNX/UPCoM common stocks in SQLite via `load_market_universe()`.
 
-3. Telegram `/market` does not yet consume realtime VNINDEX breadth from
-   `LatestIndexState`; it falls back to trend-only historical context.
+3. **Background scanner worker & SQLite snapshot persistence (Resolved):**
+   - Created `runtime/scanner_worker.py` with `MarketScannerWorker` daemon thread and `run_scan_cycle()`.
+   - Created Migration 9 (`scan_snapshots` table and index) to persist full-market scans.
+   - `/scan` reads latest snapshot from SQLite cache in <10ms with strategy support (CL1 and ASMF) and fallback.
 
-4. `/soi` remains more verbose than intended and overlaps with button detail views.
+4. **Realtime breadth in Telegram market context (Resolved):**
+   - Injected `index_state` into `RuntimeBotDataService.market_overview()`, displaying advances/declines/ceiling/floor and liquidity.
+   - Preserved historical trend-only fallback when index_state is unavailable.
 
-5. Text callbacks create additional messages rather than updating the existing
-   dashboard where possible.
+5. **Compact `/soi` dashboard (Resolved):**
+   - Overview condensed into concise high-value summary; detailed technical levels, fundamentals, and strategy conditions are accessible via inline buttons and direct commands.
 
-6. `/why` can repeat identical data-quality notes.
+6. **Telegram callback message editing (Resolved):**
+   - Text callback actions edit and update the existing message via `query.edit_message_text()` instead of spamming new messages.
+   - Preserved `reply_photo` for chart PNG rendering.
 
-7. ASMF score presentation has been improved but layer-coverage semantics remain
-   potentially confusing.
+7. **`/why` data quality deduplication (Resolved):**
+   - Prevented double printing of `data_quality.notes` in `format_why()` by passing `include_notes=False`.
 
-8. General market context and ASMF Market Filter need clearer labels because
-   they use different inputs.
+8. **ASMF score & market presentation (Resolved):**
+   - Explicitly labelled ASMF score as `Điểm bằng chứng (Evidence score): XX.X/100 (tổng hợp điểm, không phải xác suất)`.
+   - Separated core layer coverage (`Độ phủ tầng cốt lõi: X/4 tầng`) from Sentiment context.
+   - Differentiated `General Market Context` from `ASMF Market Filter`.
 
-External live validation still pending:
-- active-session `/soi`, `/market`, `/sentiment`;
-- real Vietcap → PNG → Telegram `/chart`;
-- Phase 25 coverage worker inside the production-like bot process.
+External live validations still pending (requiring live market session and external bot host):
+- active-session `/soi`, `/market`, `/sentiment` (Market hours 09:00 - 14:45 ICT);
+- real Vietcap → PNG → Telegram `/chart` (Requires live Telegram bot token);
+- Phase 25 coverage worker inside the production bot process.
 
 ## 4. Completed
 

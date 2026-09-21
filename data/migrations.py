@@ -38,6 +38,8 @@ from data.schema import (
     SYMBOL_DATA_COVERAGE_V8_DROP_INDEX_SQL,
     SYMBOL_DATA_COVERAGE_V8_DROP_SQL,
     SYMBOL_DATA_COVERAGE_V8_RENAME_SQL,
+    SCAN_SNAPSHOTS_TABLE_SQL,
+    SCAN_SNAPSHOTS_INDEX_SQL,
 )
 
 SCHEMA_MIGRATIONS_TABLE_SQL = """
@@ -143,6 +145,14 @@ MIGRATIONS = (
             SYMBOL_DATA_COVERAGE_V8_DROP_SQL,
             SYMBOL_DATA_COVERAGE_V8_RENAME_SQL,
             SYMBOL_DATA_COVERAGE_STATUS_INDEX_SQL,
+        ),
+    ),
+    Migration(
+        version=9,
+        name="scanner_snapshots",
+        statements=(
+            SCAN_SNAPSHOTS_TABLE_SQL,
+            SCAN_SNAPSHOTS_INDEX_SQL,
         ),
     ),
 )

@@ -114,10 +114,16 @@ class TelegramCommandService:
             result = self.data.symbol_overview(symbol, strategy)
         return result if result is not None else f"Chưa có dữ liệu cho {symbol}."
 
-    def scan(self) -> str:
+    def scan(self, arguments: Sequence[str] | None = None) -> str:
+        strategy = "CL1"
+        if arguments and len(arguments) > 0 and arguments[0].strip().upper() in {"CL1", "ASMF"}:
+            strategy = arguments[0].strip().upper()
         detailed = getattr(self.data, "scan_overview", None)
         if callable(detailed):
-            return detailed()
+            try:
+                return detailed(strategy=strategy)
+            except TypeError:
+                return detailed()
         symbols = tuple(self.data.scan_results())
         return "Chưa có mã đạt bộ lọc." if not symbols else "Watchlist: " + ", ".join(symbols)
 

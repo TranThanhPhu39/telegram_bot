@@ -153,7 +153,7 @@ def test_v8_preserves_v7_rows_and_accepts_new_datasets(tmp_path, monkeypatch) ->
                      "VALUES ('FPT','NEWS','READY',1)")
     conn.rollback()
 
-    assert migrations.bootstrap_schema(conn) == 8
+    assert migrations.bootstrap_schema(conn) == 9
     row = load_coverage(conn, "FPT", "FINANCIALS")
     assert (row.status, row.provider, row.attempts, row.last_success_at) == ("READY", "VNStock", 3, 100)
     for dataset in COVERAGE_DATASETS:
@@ -166,7 +166,7 @@ def test_v8_preserves_v7_rows_and_accepts_new_datasets(tmp_path, monkeypatch) ->
                          "AND name='idx_symbol_data_coverage_status'").fetchone()
     assert index is not None
     assert conn.execute("SELECT name FROM sqlite_master WHERE name='symbol_data_coverage_v8'").fetchone() is None
-    assert migrations.bootstrap_schema(conn) == 8   # idempotent
+    assert migrations.bootstrap_schema(conn) == 9   # idempotent
 
 
 def test_v8_is_atomic_when_a_step_fails(tmp_path, monkeypatch) -> None:
@@ -185,4 +185,4 @@ def test_v8_is_atomic_when_a_step_fails(tmp_path, monkeypatch) -> None:
     assert "symbol_data_coverage" in names and "symbol_data_coverage_v8" not in names
     assert conn.execute("SELECT status FROM symbol_data_coverage").fetchone()[0] == "READY"
     assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 7
-    assert migrations.bootstrap_schema(conn) == 8   # and recovers cleanly
+    assert migrations.bootstrap_schema(conn) == 9   # and recovers cleanly
