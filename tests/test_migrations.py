@@ -44,7 +44,7 @@ def test_bootstrap_creates_versioned_schema_in_dependency_order(tmp_path) -> Non
     try:
         version = bootstrap_schema(connection)
 
-        assert version == LATEST_SCHEMA_VERSION == 7
+        assert version == LATEST_SCHEMA_VERSION == 8
         assert EXPECTED_TABLES <= table_names(connection)
         migrations = connection.execute(
             "SELECT version, name, applied_at FROM schema_migrations"
@@ -55,6 +55,7 @@ def test_bootstrap_creates_versioned_schema_in_dependency_order(tmp_path) -> Non
             (5, "portfolio_exact_decimals"),
             (6, "sector_sync_notifications"),
             (7, "automated_fundamentals_coverage"),
+            (8, "market_coverage_datasets"),
         ]
         assert all(row["applied_at"] > 0 for row in migrations)
     finally:
@@ -68,13 +69,13 @@ def test_bootstrap_is_idempotent_and_preserves_data() -> None:
         connection.execute("INSERT INTO symbols (symbol) VALUES ('FPT')")
         connection.commit()
 
-        assert bootstrap_schema(connection) == 7
+        assert bootstrap_schema(connection) == 8
         assert connection.execute(
             "SELECT symbol FROM symbols"
         ).fetchone()["symbol"] == "FPT"
         assert connection.execute(
             "SELECT COUNT(*) FROM schema_migrations"
-        ).fetchone()[0] == 7
+        ).fetchone()[0] == 8
     finally:
         connection.close()
 
@@ -87,7 +88,7 @@ def test_file_schema_version_survives_reopen(tmp_path) -> None:
 
     second = connect_database(database_url)
     try:
-        assert bootstrap_schema(second) == 7
+        assert bootstrap_schema(second) == 8
         assert EXPECTED_TABLES <= table_names(second)
     finally:
         second.close()

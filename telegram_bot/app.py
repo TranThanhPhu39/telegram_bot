@@ -14,6 +14,7 @@ from io import BytesIO
 
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import TelegramError
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -22,6 +23,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
+from runtime.redaction import redact_secrets
 from telegram_bot.commands import TelegramCommandService
 from telegram_bot.portfolio_handlers import build_portfolio_handlers
 from telegram_bot.sector_notifications import (
@@ -31,6 +33,9 @@ from telegram_bot.sector_notifications import (
 
 
 LOGGER = logging.getLogger(__name__)
+
+GENERIC_ERROR_TEXT = "Đã xảy ra lỗi tạm thời, vui lòng thử lại sau."
+CHART_SEND_ERROR_TEXT = "Không thể gửi biểu đồ lúc này, vui lòng thử lại sau."
 
 TELEGRAM_MESSAGE_LIMIT = 3900
 
@@ -266,14 +271,26 @@ def build_application(
         except ValueError as error:
             await update.effective_message.reply_text(str(error))
             return
+        except Exception as error:  # upstream/provider failure must not kill the bot
+            LOGGER.error("Chart command failed: %s", redact_secrets(f"{type(error).__name__}: {error}"))
+            await update.effective_message.reply_text(GENERIC_ERROR_TEXT)
+            return
         if result.error is not None or result.png_bytes is None:
             await update.effective_message.reply_text(
                 result.error or "Không thể tạo biểu đồ."
             )
             return
-        await update.effective_message.reply_photo(
-            photo=BytesIO(result.png_bytes), caption=result.caption,
-        )
+        try:
+            await update.effective_message.reply_photo(
+                photo=BytesIO(result.png_bytes), caption=result.caption,
+            )
+        except TelegramError as error:
+            # Never leave the user with silence, never leak the request URL/token.
+            LOGGER.error("Chart delivery failed: %s", redact_secrets(f"{type(error).__name__}: {error}"))
+            try:
+                await update.effective_message.reply_text(CHART_SEND_ERROR_TEXT)
+            except TelegramError:
+                LOGGER.error("Chart failure notice could not be delivered")
 
     async def chart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply_chart(update, context.args)
@@ -342,6 +359,22 @@ def build_application(
         ]
     )
     application.add_handlers(build_portfolio_handlers(commands, reply))
+
+    async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Last line of defence: log redacted, apologise once, keep polling."""
+        error = context.error
+        LOGGER.error(
+            "Unhandled Telegram handler error: %s",
+            redact_secrets(f"{type(error).__name__}: {error}"),
+        )
+        message = getattr(update, "effective_message", None)
+        if message is not None:
+            try:
+                await message.reply_text(GENERIC_ERROR_TEXT)
+            except Exception:
+                LOGGER.error("Error notice could not be delivered")
+
+    application.add_error_handler(on_error)
     return application
 
 

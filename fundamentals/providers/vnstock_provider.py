@@ -196,7 +196,27 @@ class VNStockProvider(FundamentalProvider):
                     handles.append((source, finance_class(symbol=symbol, source=source)))
                 except Exception:
                     continue
+        if not handles:
+            # vnstock 4.x moved the finance client to ``vnstock.api.financial``
+            # (source first, symbol second, keyword-only usage is safest).
+            api_class = self._load_api_finance_class()
+            if api_class is not None:
+                for source in self._source_preference:
+                    try:
+                        handles.append((source, api_class(
+                            source=source.lower(), symbol=symbol, period=self._period,
+                            get_all=True, show_log=False,
+                        )))
+                    except Exception as error:
+                        LOGGER.debug("vnstock api Finance(%s) failed: %s", source, type(error).__name__)
         return handles
+
+    @staticmethod
+    def _load_api_finance_class() -> object | None:
+        try:
+            return getattr(importlib.import_module("vnstock.api.financial"), "Finance", None)
+        except Exception:
+            return None
 
     def _call_statement(self, finance: object, method: str) -> object | None:
         handler = getattr(finance, method, None)

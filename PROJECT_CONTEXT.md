@@ -3135,3 +3135,92 @@ thật để đóng gap này.
 Phase 25 (Market Coverage & Refresh Workers) và Phase 26 (Live Acceptance,
 Reliability & Production Hardening) chưa bắt đầu. EPS/P/E/P/B vẫn chỉ đến
 từ CSV boundary cũ.
+
+---
+
+## Phase 25 & 26 — Coverage Workers, Live Acceptance & Hardening (2026-09-21)
+
+Chạy liền một iteration theo uỷ quyền tường minh của người dùng (không có STOP
+gate giữa hai phase). Trạng thái: **CODE + TESTS COMPLETE — chờ live validation
+bên ngoài**. Lịch sử các phase trước không đổi.
+
+### Phase 25 — kiến trúc
+
+- `runtime/market_universe.py`: universe từ SQLite `symbols` (active, `STOCK`/`COMMON_STOCK`,
+  HOSE/HSX/HNX/UPCOM hoặc exchange NULL). Lý do cho NULL: `asmf_data/vietcap_sectors.py` và cache
+  lịch sử chèn `symbols` không kèm exchange, nên loại NULL sẽ làm universe rỗng trên DB thật.
+  HSX được đổi thành HOSE khi gửi cho provider.
+- **Migration v8 `market_coverage_datasets`**: v7 chặn `symbol_data_coverage.dataset` bằng CHECK
+  (FINANCIALS/INSTITUTIONAL) mà SQLite không ALTER được → rebuild (tạo bảng mới, copy, drop, rename,
+  index lại). Đây là trường hợp “schema không đủ biểu diễn” mà đề bài cho phép. v1–v7 không bị sửa.
+- **Sửa runner**: `bootstrap_schema` nay chạy `BEGIN` tường minh trước mỗi migration. Trước đó DDL
+  autocommit từng câu, nên migration nhiều bước lỗi giữa chừng sẽ để schema nửa vời. Đã kiểm chứng
+  bằng đột biến: bỏ dòng này thì `test_v8_is_atomic_when_a_step_fails` fail.
+- `fundamentals/coverage_store.py` mở rộng (additive): `record_attempt` (đường ghi duy nhất, redact
+  reason), `record_attempts_bulk`, `mark_in_progress[_bulk]`, `mark_stale`, `effective_status`,
+  `coverage_counts`. `record_coverage` giữ nguyên chữ ký, uỷ quyền cho `record_attempt`.
+- `runtime/coverage_worker.py`: engine + worker (xem docstring đầu file). Chỉ điều phối; mọi dataset
+  đi qua thành phần đã sở hữu nó. `SectorHistorySynchronizer` được thêm 2 phương thức công khai
+  (`fetch_history`, `refresh_symbol_history`); `_fetch_with_retry` giữ hành vi cũ (6 test sector pass).
+- `runtime/news_refresh.py` + `SQLiteNewsRepository.ticker_article_counts`: news chạy định kỳ, model
+  sentiment dựng đúng 1 lần/process, kết nối SQLite tạo trong thread worker (sqlite3 gắn với thread).
+- `runtime/coverage_config.py` (validate env), `coverage_factory.py` (dựng từ env, gắn listener sector),
+  `coverage_report.py`, `redaction.py`, `acceptance.py`.
+- Cấu hình thật sự được đọc: `COVERAGE_WORKER_ENABLED, COVERAGE_DATASETS, COVERAGE_BATCH_SIZE (20),
+  COVERAGE_WORKER_INTERVAL (600), COVERAGE_STARTUP_DELAY, COVERAGE_REQUEST_DELAY, COVERAGE_MAX_RETRIES,
+  COVERAGE_RETRY_BACKOFF, COVERAGE_ERROR_COOLDOWN, COVERAGE_MISSING_COOLDOWN, COVERAGE_SECTOR_REQUESTS_PER_CYCLE,
+  FUNDAMENTAL_REFRESH_INTERVAL, INSTITUTIONAL_REFRESH_INTERVAL, MARKET_HISTORY_REFRESH_INTERVAL,
+  NEWS_REFRESH_INTERVAL, NEWS_INGEST_LIMIT, VNSTOCK_SOURCE_PREFERENCE, YFINANCE_ENABLED`
+  (`FUNDAMENTAL_PRIMARY_PROVIDER` không được thêm vì không có mã nào đọc nó). Test đảm bảo mọi key
+  trong `.env.example` đều được đọc. Mặc định 20 mã/600s ≈ 2.900 lượt/ngày, đủ giữ ~1.500 mã fresh.
+- Vòng đời: `scripts/run_telegram_bot.py` gọi `start_coverage_worker_from_env(sector_worker)` (chỉ spawn
+  thread, chu kỳ đầu sau `COVERAGE_STARTUP_DELAY`), và dừng worker trong `finally`.
+- Rate limit/backoff: delay giữa call, backoff mũ khi ERROR, dừng retry khi thấy 429, circuit breaker
+  3 lỗi liên tiếp/dataset/chu kỳ, cooldown MISSING/ERROR liên chu kỳ.
+- **Phát hiện live**: `vnstock` 3.2.6 nuốt lỗi mạng (log ERROR rồi trả rỗng) nên adapter trả MISSING
+  khi mạng bị chặn. Vì vậy cooldown MISSING mặc định chỉ 3 ngày (cấu hình được) thay vì cả 7 ngày,
+  để sự cố ngắn không thành mất dữ liệu cả tuần.
+- Scripts: `sync_fundamentals.py`, `sync_institutional_flow.py`, `sync_market_coverage.py`,
+  `coverage_report.py`, dùng chung `scripts/coverage_cli.py` → cùng engine với worker.
+
+### Phase 26 — hardening
+
+- `telegram_bot/app.py`: lỗi `reply_photo` nay có fallback text (trước đó không bắt); error handler
+  toàn cục; tất cả log qua `redact_secrets`. `configure_logging()` ép `httpx`/`httpcore` về WARNING
+  (URL Telegram chứa token) và gắn `SecretRedactingFilter`; bot trước đó không cấu hình logging.
+- Điều chưa đổi (ghi nhận): `/soi`, `/chart` vẫn gọi Vietcap đồng bộ qua `_history()` — hành vi cũ,
+  không nằm trong danh sách cấm (VNStock/Yahoo/CafeF/full-market).
+- `fundamentals/providers/vnstock_provider.py`: thêm fallback `vnstock.api.financial.Finance` cho
+  vnstock 4.x (phát hiện khi cài 4.0.8: không còn `Vnstock`/`Finance` cấp cao). Path 3.2.6 (pin trong
+  requirements) không đổi. Parse dữ liệu thật của 4.x chưa xác minh.
+- Live harness: `scripts/test_phase24_live.py`, `scripts/test_phase26_telegram_live.py`; logic ở
+  `runtime/acceptance.py` (test offline). Probe host để phân biệt bị chặn với không có dữ liệu.
+
+### Bằng chứng kiểm thử (chạy thật)
+
+- Full regression: **830 passed** (`python -m pytest -q`, Python 3.12.3, venv cách ly). Baseline 718.
+  File mới: universe 6, coverage states 14, coverage worker 34, config/report/CLI 16, phase26 hardening 26,
+  phase26 acceptance 15, +1 test vnstock 4.x trong `test_fundamental_providers.py`.
+- Test cũ không bị sửa expected; chỉ 3 test pin schema version 7→8 (`test_migrations.py`,
+  `test_portfolio_schema.py`, `test_sector_notification_persistence.py`) và thêm tên migration v8.
+- `pip check` (venv cách ly, vnstock==3.2.6, yfinance==1.0, không có torch/transformers): “No broken
+  requirements found”. Đây KHÔNG phải môi trường đầy đủ của dự án; không kết luận gì về 8 conflict cũ
+  của môi trường chung.
+- Môi trường dev mô phỏng bị chặn egress: `x-deny-reason: host_not_allowed` cho Yahoo, Vietcap, CafeF.
+
+### Live results
+
+| Check | Kết quả |
+|---|---|
+| VNStock fetch thật | NOT TESTED (host bị chặn; vnstock 3.2.6 trả rỗng) |
+| yfinance fallback thật | NOT TESTED |
+| Live promotion-safety | NOT TESTED |
+| `/soi` `/market` `/sentiment` trong phiên | NOT TESTED (cũng cần phiên giao dịch mở) |
+| `/chart` Vietcap → PNG → Telegram | NOT TESTED |
+| Worker thread thật + vnstock thật, mạng chặn | Smoke: 1 chu kỳ, MISSING, dừng sạch, không crash |
+
+### Blocker còn lại
+
+Chỉ là blocker bên ngoài: cần mạng tới VNStock/Yahoo/Vietcap/CafeF/Telegram, credential Vietcap,
+`TEST_TELEGRAM_CHAT_ID`, và phiên giao dịch mở cho acceptance của Phase 22. Chạy
+`scripts/test_phase24_live.py` và `scripts/test_phase26_telegram_live.py --send` trên máy có mạng.

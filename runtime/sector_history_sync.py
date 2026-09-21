@@ -44,6 +44,13 @@ class SectorSyncResult:
         return self.downloaded + self.cached
 
 
+@dataclass(frozen=True, slots=True)
+class HistoryFetch:
+    bars: tuple[OHLCVBar, ...]
+    #: True when every attempt raised; False for a clean (possibly empty) answer.
+    errored: bool
+
+
 class SectorHistorySynchronizer:
     """Populate SQLite independently from Telegram command execution."""
 
@@ -137,6 +144,16 @@ class SectorHistorySynchronizer:
         return tuple(results)
 
     def _fetch_with_retry(self, symbol: str) -> tuple[OHLCVBar, ...]:
+        return self.fetch_history(symbol).bars
+
+    def fetch_history(self, symbol: str) -> "HistoryFetch":
+        """Fetch one symbol's daily history with the configured retry/backoff.
+
+        Distinguishes a clean empty answer (``errored=False`` — Vietcap has no
+        bars for the symbol) from every attempt failing (``errored=True``), which
+        the Phase 25 coverage worker records as MISSING versus ERROR.
+        """
+        errored = False
         for attempt in range(self.retry_attempts):
             try:
                 payload = self.client.get_gap_chart(
@@ -149,15 +166,24 @@ class SectorHistorySynchronizer:
                     ) if bar.symbol == symbol
                 )
                 if bars:
-                    return bars
+                    return HistoryFetch(bars, False)
+                errored = False
             except (VietcapRestError, ValueError):
+                errored = True
                 logger.warning(
                     "Sector history fetch failed",
                     extra={"symbol": symbol, "attempt": attempt + 1},
                 )
             if attempt + 1 < self.retry_attempts:
                 self.sleep(self.retry_base_seconds * (2 ** attempt))
-        return ()
+        return HistoryFetch((), errored)
+
+    def refresh_symbol_history(self, symbol: str) -> "HistoryFetch":
+        """Fetch and persist one symbol's daily history (idempotent upsert)."""
+        fetched = self.fetch_history(symbol.strip().upper())
+        if fetched.bars:
+            self._store(fetched.bars)
+        return fetched
 
     def _cached_bar_count(self, symbol: str) -> int:
         row = self.connection.execute(

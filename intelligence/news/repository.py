@@ -138,6 +138,20 @@ class SQLiteNewsRepository:
             row["event_type"], row["event_importance"], sentiment,
         )
 
+    def ticker_article_counts(self, since: datetime) -> dict[str, int]:
+        """Read-only: distinct articles per linked ticker published since ``since``.
+
+        Used by the Phase 25 coverage worker to tell "no relevant news in the
+        window" (MISSING) from "news exists" (READY). It never infers sentiment.
+        """
+        rows = self.connection.execute(
+            "SELECT t.ticker AS ticker, COUNT(DISTINCT n.id) AS articles "
+            "FROM news_tickers t JOIN news_items n ON n.id=t.news_id "
+            "WHERE n.published_at >= ? GROUP BY t.ticker",
+            (_utc(since),),
+        ).fetchall()
+        return {row["ticker"]: int(row["articles"]) for row in rows}
+
     def latest_for_ticker(self, ticker: str, limit: int = 5) -> tuple[NewsItem, ...]:
         rows = self.connection.execute(
             "SELECT n.id FROM news_items n JOIN news_tickers t ON t.news_id=n.id "

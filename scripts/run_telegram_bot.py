@@ -10,6 +10,8 @@ from telegram_bot.commands import TelegramCommandService
 from telegram_bot.sector_notification_store import SQLiteNotificationStore
 from telegram_bot.sector_notifications import SectorSyncNotificationBroker
 from runtime.bot_service import build_runtime_service_from_env
+from runtime.coverage_factory import start_coverage_worker_from_env
+from runtime.redaction import configure_logging
 from runtime.sector_history_sync import start_sector_history_background_sync
 
 
@@ -34,6 +36,7 @@ def build_sector_notification_broker() -> SectorSyncNotificationBroker:
 
 if __name__ == "__main__":
     load_dotenv()
+    configure_logging()
     service = build_runtime_service_from_env()
     sector_worker = start_sector_history_background_sync(
         tuple(item.symbol for item in service.instruments),
@@ -50,7 +53,14 @@ if __name__ == "__main__":
     service.set_sector_history_requester(sector_worker.request)
     sector_notifications = build_sector_notification_broker()
     sector_worker.add_listener(sector_notifications.publish)
+    # Phase 25: market-wide coverage refresh. Starting it only spawns a daemon
+    # thread (its first cycle runs after COVERAGE_STARTUP_DELAY), so bot startup
+    # never waits on a full-market refresh. It reuses the sector worker for
+    # sector histories and records that worker's results as coverage.
+    coverage_worker = start_coverage_worker_from_env(sector_worker)
     try:
         run_polling(TelegramCommandService(service), sector_notifications)
     finally:
+        if coverage_worker is not None:
+            coverage_worker.stop(timeout=10.0)
         sector_worker.stop(timeout=10.0)

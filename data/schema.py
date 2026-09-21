@@ -491,3 +491,51 @@ SYMBOL_DATA_COVERAGE_STATUS_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_symbol_data_coverage_status
     ON symbol_data_coverage(dataset, status)
 """
+
+# --- Migration v8 (Phase 25) --------------------------------------------------
+# v7 restricted symbol_data_coverage.dataset to FINANCIALS/INSTITUTIONAL with a
+# CHECK constraint, which SQLite cannot alter in place. Phase 25 tracks three
+# more datasets in the SAME table (no competing coverage table), so v8 rebuilds
+# it: create-new, copy every row unchanged, drop-old, rename, re-index. The
+# migration runner wraps the sequence in a single transaction.
+SYMBOL_DATA_COVERAGE_V8_TABLE_SQL = """
+CREATE TABLE symbol_data_coverage_v8 (
+    symbol TEXT NOT NULL,
+    dataset TEXT NOT NULL,
+    status TEXT NOT NULL,
+    provider TEXT,
+    provider_source TEXT,
+    error_reason TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at INTEGER,
+    last_success_at INTEGER,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (symbol, dataset),
+    FOREIGN KEY (symbol) REFERENCES symbols(symbol) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CHECK (symbol = upper(trim(symbol))),
+    CHECK (dataset IN (
+        'FINANCIALS', 'INSTITUTIONAL', 'MARKET_HISTORY', 'SECTOR_HISTORY', 'NEWS'
+    )),
+    CHECK (status IN (
+        'NEVER_ATTEMPTED', 'READY', 'PARTIAL', 'MISSING', 'STALE', 'ERROR', 'IN_PROGRESS'
+    )),
+    CHECK (typeof(attempts) = 'integer' AND attempts >= 0),
+    CHECK (typeof(updated_at) = 'integer' AND updated_at > 0)
+) WITHOUT ROWID
+"""
+
+SYMBOL_DATA_COVERAGE_V8_COPY_SQL = """
+INSERT INTO symbol_data_coverage_v8 (
+    symbol, dataset, status, provider, provider_source, error_reason,
+    attempts, last_attempt_at, last_success_at, updated_at
+) SELECT
+    symbol, dataset, status, provider, provider_source, error_reason,
+    attempts, last_attempt_at, last_success_at, updated_at
+FROM symbol_data_coverage
+"""
+
+SYMBOL_DATA_COVERAGE_V8_DROP_INDEX_SQL = "DROP INDEX IF EXISTS idx_symbol_data_coverage_status"
+SYMBOL_DATA_COVERAGE_V8_DROP_SQL = "DROP TABLE symbol_data_coverage"
+SYMBOL_DATA_COVERAGE_V8_RENAME_SQL = (
+    "ALTER TABLE symbol_data_coverage_v8 RENAME TO symbol_data_coverage"
+)

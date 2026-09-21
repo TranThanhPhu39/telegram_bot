@@ -33,6 +33,11 @@ from data.schema import (
     AUTOMATED_FINANCIAL_STATEMENTS_SYMBOL_INDEX_SQL,
     SYMBOL_DATA_COVERAGE_TABLE_SQL,
     SYMBOL_DATA_COVERAGE_STATUS_INDEX_SQL,
+    SYMBOL_DATA_COVERAGE_V8_TABLE_SQL,
+    SYMBOL_DATA_COVERAGE_V8_COPY_SQL,
+    SYMBOL_DATA_COVERAGE_V8_DROP_INDEX_SQL,
+    SYMBOL_DATA_COVERAGE_V8_DROP_SQL,
+    SYMBOL_DATA_COVERAGE_V8_RENAME_SQL,
 )
 
 SCHEMA_MIGRATIONS_TABLE_SQL = """
@@ -128,6 +133,18 @@ MIGRATIONS = (
             SYMBOL_DATA_COVERAGE_STATUS_INDEX_SQL,
         ),
     ),
+    Migration(
+        version=8,
+        name="market_coverage_datasets",
+        statements=(
+            SYMBOL_DATA_COVERAGE_V8_TABLE_SQL,
+            SYMBOL_DATA_COVERAGE_V8_COPY_SQL,
+            SYMBOL_DATA_COVERAGE_V8_DROP_INDEX_SQL,
+            SYMBOL_DATA_COVERAGE_V8_DROP_SQL,
+            SYMBOL_DATA_COVERAGE_V8_RENAME_SQL,
+            SYMBOL_DATA_COVERAGE_STATUS_INDEX_SQL,
+        ),
+    ),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
@@ -160,6 +177,12 @@ def bootstrap_schema(connection: sqlite3.Connection) -> int:
         for migration in MIGRATIONS:
             if migration.version in applied_versions:
                 continue
+            # DDL outside an open transaction autocommits statement by statement,
+            # which would let a failed multi-step migration (e.g. a table
+            # rebuild) leave a half-applied schema. Open the transaction
+            # explicitly so the whole migration commits or rolls back together.
+            if not connection.in_transaction:
+                connection.execute("BEGIN")
             for statement in migration.statements:
                 connection.execute(statement)
             connection.execute(

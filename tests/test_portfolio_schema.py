@@ -25,7 +25,7 @@ def tables(connection):
 
 def test_user_watchlist_and_holdings_tables_are_created() -> None:
     connection = fresh()
-    assert LATEST_SCHEMA_VERSION == 7
+    assert LATEST_SCHEMA_VERSION == 8
     assert {"users", "watchlist", "portfolio_holdings"} <= tables(connection)
     columns = {r["name"] for r in connection.execute("PRAGMA table_info(users)")}
     assert columns == {
@@ -47,8 +47,8 @@ def test_repeat_migration_is_idempotent_and_preserves_existing_data() -> None:
     connection.execute("INSERT INTO symbols(symbol) VALUES ('FPT')")
     connection.execute("INSERT INTO users(telegram_user_id) VALUES (7)")
     connection.commit()
-    assert bootstrap_schema(connection) == 7
-    assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 7
+    assert bootstrap_schema(connection) == 8
+    assert connection.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 8
     assert connection.execute("SELECT symbol FROM symbols").fetchone()[0] == "FPT"
     assert connection.execute("SELECT telegram_user_id FROM users").fetchone()[0] == 7
 
@@ -62,7 +62,7 @@ def test_upgrade_from_version_3_keeps_old_rows(tmp_path) -> None:
     for table in ("portfolio_holdings", "watchlist", "users"):
         connection.execute(f"DROP TABLE {table}")
     connection.commit()
-    assert bootstrap_schema(connection) == 7
+    assert bootstrap_schema(connection) == 8
     assert "users" in tables(connection)
     assert connection.execute("SELECT symbol FROM symbols").fetchone()[0] == "ACB"
 
@@ -87,7 +87,7 @@ def test_upgrade_from_version_4_backfills_exact_decimal_text() -> None:
     )
     connection.commit()
 
-    assert bootstrap_schema(connection) == 7
+    assert bootstrap_schema(connection) == 8
     user = connection.execute("SELECT * FROM users WHERE telegram_user_id=1").fetchone()
     holding = connection.execute("SELECT * FROM portfolio_holdings").fetchone()
     assert user["default_risk_per_trade_decimal"] == "1.25"

@@ -11,10 +11,20 @@
 > Pending live checks must remain unchecked and must not be reported as PASS.
 
 ## PENDING LIVE VALIDATION
-None. Phases 3–7 have active-session acceptance evidence.
+Code and offline tests are complete for Phases 24–26. The following checks need
+a machine with network access to VNStock/Yahoo/Vietcap/CafeF/Telegram (the
+sandbox used for development returns `host_not_allowed`); they remain unchecked
+and are NOT TESTED, not PASS:
+
+- Phase 24: real VNStock fetch, real yfinance fallback, live promotion-safety check
+  → run `py -3.12 scripts/test_phase24_live.py`
+- Phase 22: `/soi`, `/market`, `/sentiment` during an active trading session,
+  `/chart` real Vietcap → PNG → Telegram `send_photo`
+  → run `py -3.12 scripts/test_phase26_telegram_live.py --send` during a session
+- Phase 25: coverage worker running inside the real bot process against live providers
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 24 — Automated Fundamentals & Institutional Data (CODE + TESTS COMPLETE — live acceptance pending Phase 26)**
+**Phase 26 — Live Acceptance, Reliability & Production Hardening — CODE + TESTS COMPLETE — pending external live validation** (Phase 25 — Market Coverage & Refresh Workers — CODE + TESTS COMPLETE; both run in one authorised iteration)
 ### Documentation follow-up — README operational status (COMPLETE)
 
 - [x] Document installation, configuration and bot startup
@@ -604,7 +614,7 @@ pricing for valuation, Phase 24 valuation. Pending Phase 3–7 live validations 
 
 ### Config
 - [x] `requirements.txt`: `vnstock==3.2.6`, `yfinance==1.0` (version thật đã cài)
-- [ ] `.env.example` — dời sang Phase 25
+- [x] `.env.example` — hoàn tất ở Phase 25 (chỉ các key thật sự được đọc; có test)
 
 ### Live acceptance
 - [ ] VNStock fetch thật qua mạng cho ≥1 symbol
@@ -616,3 +626,70 @@ pricing for valuation, Phase 24 valuation. Pending Phase 3–7 live validations 
 ### Chưa bắt đầu
 - [ ] Phase 25 — Market Coverage & Refresh Workers
 - [ ] Phase 26 — Live Acceptance, Reliability & Production Hardening
+
+## Phase 25 — Market Coverage & Refresh Workers
+Authorised to run back-to-back with Phase 26 in a single iteration (no STOP gate between them).
+
+### Universe & coverage model
+- [x] Universe đọc từ bảng SQLite `symbols` mỗi chu kỳ (`runtime/market_universe.py`), không hard-code ticker
+  - active + `STOCK`/`COMMON_STOCK` + HOSE/HSX/HNX/UPCOM **hoặc exchange NULL** (bảng thật để NULL vì importer sector không ghi exchange)
+- [x] Tái sử dụng `symbol_data_coverage` (không tạo bảng thứ hai)
+- [x] Migration **v8 `market_coverage_datasets`**: CHECK cũ chỉ cho FINANCIALS/INSTITUTIONAL nên phải rebuild bảng; thêm MARKET_HISTORY/SECTOR_HISTORY/NEWS; copy nguyên hàng cũ
+- [x] Migration runner nay mở transaction tường minh trước mỗi migration (trước đó DDL autocommit → rebuild lỗi giữa chừng sẽ bỏ schema nửa vời); test atomic fail khi bỏ dòng này
+- [x] Trạng thái: NEVER_ATTEMPTED (không có hàng) / IN_PROGRESS / READY / PARTIAL / MISSING / STALE / ERROR; `attempts`, `last_attempt_at`, `last_success_at`, provider/source, reason đã redact
+- [x] `last_success_at` được giữ nguyên sau ERROR/MISSING
+
+### Worker
+- [x] `runtime/coverage_worker.py`: `MarketCoverageEngine` (một chu kỳ đồng bộ, có giới hạn) + `MarketCoverageWorker` (1 daemon thread, dừng qua `Event`)
+- [x] Ủy quyền, không chứa parsing: FINANCIALS→`refresh_financials`, INSTITUTIONAL→`refresh_institutional_flow`, MARKET_HISTORY→`SectorHistorySynchronizer.refresh_symbol_history`, SECTOR_HISTORY→`SectorHistorySyncWorker` hiện có (chỉ *yêu cầu* + ghi kết quả qua listener), NEWS→`NewsRefreshRunner` bọc pipeline CafeF/PhoBERT hiện có
+- [x] Batch giới hạn (`COVERAGE_BATCH_SIZE`), thứ tự xác định: chưa thử trước → thử lâu nhất → theo alphabet
+- [x] Bỏ qua dữ liệu còn fresh; `force=True` bỏ qua
+- [x] Lỗi 1 symbol/dataset không dừng batch; ghi ERROR; commit từng ghi
+- [x] Retry `COVERAGE_MAX_RETRIES` + backoff mũ `COVERAGE_RETRY_BACKOFF`; delay giữa provider call; circuit breaker sau 3 FAILED liên tiếp; phát hiện 429 → không retry
+- [x] Cooldown liên chu kỳ: MISSING chờ `min(interval, COVERAGE_MISSING_COOLDOWN)`; ERROR chờ `COVERAGE_ERROR_COOLDOWN`
+- [x] IN_PROGRESS có lease 30 phút → restart sau crash tự thu hồi; chạy lại không tạo hàng trùng
+- [x] Sector: worker hiện có KHÔNG bị sửa hành vi; tối đa `COVERAGE_SECTOR_REQUESTS_PER_CYCLE` request/chu kỳ, mỗi sector 1 request
+- [x] News: lịch `NEWS_REFRESH_INTERVAL` (lưu qua DB nên restart-safe); PhoBERT chỉ nạp một lần/process; không có news ⇒ MISSING, không phải Neutral
+- [x] Khởi động không chờ refresh toàn thị trường; dừng sạch trong `finally` của `scripts/run_telegram_bot.py`
+- [x] Telegram/`bot_service` không import vnstock/yfinance/worker/news pipeline (test AST)
+
+### Scripts & report
+- [x] `scripts/sync_fundamentals.py`, `sync_institutional_flow.py`, `sync_market_coverage.py` (`--symbol --limit --force --dry-run [--datasets]`), một lượt rồi thoát
+- [x] `scripts/coverage_report.py` (+ `--symbol`, `--dataset --status`), số liệu từ DB, STALE tính theo tuổi
+- [x] `.env.example` cập nhật
+
+### Tests (chạy thật 2026-09-21)
+- [x] `test_market_universe.py` 6, `test_coverage_states.py` 14 (gồm migration v8 giữ dữ liệu + atomic), `test_coverage_worker.py` 34, `test_coverage_config_report.py` 16
+- [x] Cập nhật cộng thêm: pin schema version 7→8 trong 3 test cũ
+
+### Chưa xác nhận
+- [ ] Worker chạy trong tiến trình bot thật với provider thật
+  - NOT TESTED — môi trường dev không có mạng tới Telegram/Vietcap/VNStock/Yahoo. Đã smoke thật (thread thật + vnstock 3.2.6 thật, mạng bị chặn) qua `start_coverage_worker_from_env`: 1 chu kỳ, dừng sạch, không crash.
+
+## Phase 26 — Live Acceptance, Reliability & Production Hardening
+
+### Live harness (bounded, DB tạm, không in secret)
+- [x] `scripts/test_phase24_live.py` — VNStock + yfinance thật, in provider/source/symbol/status/rows/periods/retrieved_at, kiểm tra không promote khi thiếu `public_date`, bank không auto-promote; verdict PASS/FAIL/NOT TESTED/INCONCLUSIVE, có probe host để phân biệt “bị chặn” với “không có dữ liệu”
+- [x] `scripts/test_phase26_telegram_live.py` — `/soi` (CL1+ASMF), `/market`, `/sentiment`, `/chart` qua command service thật trên **bản sao DB tạm**; `--send` gửi qua bot bằng `TEST_TELEGRAM_CHAT_ID` (chỉ từ env); không polling
+- [x] Mẫu symbol đa dạng chọn theo metadata (HOSE/HNX/UPCoM, bank, non-bank ngoài `BOT_WATCH_SYMBOLS`, lịch sử ngắn) + FPT/ACB
+- [x] Thân script chạy end-to-end offline với Vietcap giả (DB production không bị đổi)
+
+### Hardening (test offline)
+- [x] Thiếu/timeout lịch sử → “Chưa có dữ liệu”, không crash; lịch sử ngắn → EMA50/MA200 `N/A` (không 0); thiếu fundamentals → `Fundamental data missing`, ASMF fail-closed; không có news → unavailable, không Neutral
+- [x] CafeF timeout, PhoBERT model dựng đúng 1 lần, VNStock/Yahoo lỗi, Vietcap timeout + SQLite cache
+- [x] SQLite: 3 writer song song không mất/trùng (integrity_check ok); DB bị khóa → chu kỳ không crash, hồi phục sau khi mở khóa
+- [x] Telegram: tham số sai/thiếu/dài, chữ thường + khoảng trắng, chunk 4096, lỗi gửi ảnh → fallback text (trước đây không bắt lỗi), error handler toàn cục, callback rác, private/group (group không có holdings/P&L)
+- [x] Bảo mật log: `runtime/redaction.py` (token bot, Bearer, Authorization/Cookie, giá trị env); `configure_logging()` ép httpx/httpcore về WARNING (URL Telegram chứa token); `error_reason` được redact trước khi lưu; test quét mã nguồn
+- [x] Strategy regression: không sửa CL1/ASMF/sentiment/bank/point-in-time; không test cũ nào bị đổi expected (chỉ pin version schema)
+- [x] Thêm fallback `vnstock.api.financial.Finance` cho vnstock 4.x (additive; requirements vẫn pin 3.2.6, path 3.2.6 không đổi)
+
+### Kết quả kiểm thử
+- [x] Full regression: **830 passed** (`python -m pytest -q`, Python 3.12.3, venv cách ly, 718 → 830)
+- [x] `pip check` trong venv cách ly đó (vnstock==3.2.6, yfinance==1.0, không có torch/transformers): “No broken requirements found”. KHÔNG khẳng định môi trường đầy đủ sạch; conflict cũ ở môi trường chung (Phase 24) chưa đo lại.
+
+### Live acceptance
+- [ ] VNStock fetch thật ≥1 symbol — NOT TESTED (egress `host_not_allowed`)
+- [ ] yfinance fallback thật — NOT TESTED (cùng lý do)
+- [ ] `/soi` `/market` `/sentiment` trong phiên giao dịch — NOT TESTED
+- [ ] `/chart` Vietcap thật → PNG → Telegram `send_photo` — NOT TESTED
+- [ ] Live promotion-safety với dữ liệu VNStock thật — NOT TESTED

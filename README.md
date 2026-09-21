@@ -122,7 +122,22 @@ py -3.12 scripts\run_telegram_bot.py
 ```
 
 Tiến trình này khởi tạo runtime, SQLite migrations, Telegram polling, sector
-history worker và notification dispatcher. Dừng bằng `Ctrl+C`.
+history worker, coverage worker (Phase 25) và notification dispatcher. Dừng
+bằng `Ctrl+C`.
+
+### Coverage worker và script quản trị (Phase 25)
+
+Worker nền làm mới fundamentals, institutional flow, lịch sử giá, sector history
+và news theo từng batch nhỏ cho các mã trong bảng `symbols`. Lệnh Telegram chỉ
+đọc dữ liệu đã lưu, không gọi VNStock/Yahoo/CafeF. Cấu hình ở `.env.example`
+(`COVERAGE_*`, `*_REFRESH_INTERVAL`; tắt bằng `COVERAGE_WORKER_ENABLED=false`).
+
+```powershell
+py -3.12 scripts\sync_fundamentals.py --symbol FPT --force
+py -3.12 scripts\sync_institutional_flow.py --limit 10
+py -3.12 scripts\sync_market_coverage.py --dry-run
+py -3.12 scripts\coverage_report.py
+```
 
 ## Nạp news và sentiment
 
@@ -166,6 +181,15 @@ py -3.12 scripts\test_realtime_market_state.py --hold-seconds 45 --min-updates-p
 py -3.12 scripts\test_realtime_index.py --hold-seconds 45 --min-updates-per-symbol 2 --raw-debug
 py -3.12 scripts\test_realtime_bidask.py --hold-seconds 45 --min-updates-per-symbol 2 --raw-debug
 py -3.12 scripts\test_realtime_reconnect.py --stage-timeout 45 --raw-debug
+```
+
+Acceptance có giới hạn của Phase 24/26 (dùng DB tạm, không polling, kết quả
+`PASS`/`FAIL`/`NOT TESTED`; `--send` cần `TELEGRAM_BOT_TOKEN` và
+`TEST_TELEGRAM_CHAT_ID`):
+
+```powershell
+py -3.12 scripts\test_phase24_live.py
+py -3.12 scripts\test_phase26_telegram_live.py --send
 ```
 
 Chỉ chạy các harness thị trường trong phiên giao dịch nếu muốn kiểm tra dữ liệu

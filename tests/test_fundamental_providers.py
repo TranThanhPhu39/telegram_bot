@@ -361,3 +361,27 @@ def test_chain_survives_an_adapter_that_raises() -> None:
 def test_chain_requires_at_least_one_provider() -> None:
     with pytest.raises(ValueError, match="at least one provider"):
         ProviderChain([])
+
+
+def test_vnstock_4_api_financial_finance_is_used_when_legacy_entry_points_are_absent(monkeypatch) -> None:
+    """Phase 26 live finding: vnstock 4.x has no top-level Vnstock()/Finance."""
+    import importlib
+    from types import SimpleNamespace
+
+    built = []
+
+    class Finance:
+        def __init__(self, source, symbol, period="quarter", get_all=True, show_log=False):
+            built.append((source, symbol, period))
+
+        def income_statement(self, **kwargs):
+            return []
+
+    fake_api = SimpleNamespace(Finance=Finance)
+    real = importlib.import_module
+    monkeypatch.setattr(importlib, "import_module",
+                        lambda name, *a, **k: fake_api if name == "vnstock.api.financial" else real(name, *a, **k))
+    provider = VNStockProvider(module=SimpleNamespace(), source_preference=("VCI",))
+    handles = provider._finance_handles("FPT")
+    assert [label for label, _ in handles] == ["VCI"]
+    assert built == [("vci", "FPT", "quarter")]
