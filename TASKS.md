@@ -761,3 +761,15 @@ Authorised to run back-to-back with Phase 26 in a single iteration (no STOP gate
 - [ ] `/soi`, `/market`, `/sentiment` during active session — PENDING LIVE VALIDATION (Requires live market hours 09:00-14:45 ICT)
 - [ ] `/chart` real Vietcap → PNG → Telegram send_photo — PENDING LIVE VALIDATION (Requires real Telegram Bot Token & chat)
 - [ ] Coverage worker inside real bot process with live providers — PENDING LIVE VALIDATION (Requires persistent bot service host)
+## Phase 27 — Market Context & Sector Performance Chart (COMPLETE)
+- [x] Create charts/sector_chart.py rendering Top % Sector Performance Chart via headless Matplotlib
+- [x] Extend MarketContextView in 
+untime/views.py with Hurst, Volatility Percentile, MA status, and Sector rankings
+- [x] Update 
+untime/analysis.py to calculate Hurst exponent on 100 sessions and 20-session rolling realized volatility percentile
+- [x] Implement MA50 & MA200 trend stability classification
+- [x] Update 
+untime/bot_service.py with sector_performance_chart() and integrate sector rankings in market_overview()
+- [x] Format /market in 	elegram_bot/formatters.py matching national standard visual layout and disclaimer
+- [x] Support /chart MARKET and inline callback soi:mchart:VNINDEX in 	elegram_bot/app.py
+- [x] Add unit & integration tests (	ests/test_sector_chart.py, 	ests/test_market_context_advanced.py) — 852/852 tests PASS

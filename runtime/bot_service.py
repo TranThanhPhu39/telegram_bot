@@ -42,6 +42,7 @@ from runtime.analysis import (
 from portfolio.config import PortfolioConfig
 from runtime.portfolio_runtime import PortfolioRuntime
 from charts.candlestick import ChartRenderError, render_candlestick
+from charts.sector_chart import SectorSeries, render_sector_performance_chart
 from runtime.views import (
     ChartRequestView,
     DataQualityView,
@@ -176,6 +177,128 @@ class RuntimeBotDataService:
             symbol=symbol, png_bytes=chart.png_bytes, caption=caption, error=None,
         )
 
+    def sector_performance_chart(
+        self, *, visible_count: int = 20
+    ) -> ChartRequestView:
+        """Render the Top % Sector Performance Chart into ChartRequestView."""
+        as_of_dt = datetime.fromtimestamp(self.now(), VIETNAM_TIMEZONE)
+        as_of = as_of_dt.date()
+        series_list, _, _, _ = self._compute_sector_performance(as_of, lookback=visible_count)
+        if len(series_list) < 2:
+            return ChartRequestView(
+                symbol="MARKET",
+                png_bytes=None,
+                caption="",
+                error="Chưa đủ dữ liệu ngành để vẽ biểu đồ so sánh biến động.",
+            )
+
+        vnindex_bars, _ = self._history("VNINDEX")
+        if len(vnindex_bars) >= visible_count:
+            dates = [
+                datetime.fromtimestamp(b.timestamp, VIETNAM_TIMEZONE).strftime("%d/%m")
+                for b in vnindex_bars[-visible_count:]
+            ]
+        else:
+            base_date = as_of_dt - timedelta(days=int(visible_count * 1.5))
+            dates = [
+                (base_date + timedelta(days=i)).strftime("%d/%m")
+                for i in range(visible_count)
+            ]
+
+        top_5_series = series_list[:5]
+        as_of_text = as_of_dt.strftime("%d-%m-%Y %H:%M")
+        try:
+            png_bytes = render_sector_performance_chart(top_5_series, dates, as_of_text)
+        except Exception as error:
+            return ChartRequestView(
+                symbol="MARKET",
+                png_bytes=None,
+                caption="",
+                error=f"Không thể vẽ biểu đồ ngành: {error}",
+            )
+
+        caption = (
+            f"🏭 Top % biến động ngành — {visible_count} phiên gần nhất.\n"
+            "Chỉ số ngành là trung bình equal-weight các đường giá đã chuẩn hóa về 100."
+        )
+        return ChartRequestView(
+            symbol="MARKET",
+            png_bytes=png_bytes,
+            caption=caption,
+            error=None,
+        )
+
+    def _compute_sector_performance(
+        self, as_of: date, *, lookback: int = 20
+    ) -> tuple[list[SectorSeries], list[str], str | None, float | None]:
+        try:
+            rows = self.connection.execute(
+                "SELECT DISTINCT sector_code, sector_name FROM sector_memberships "
+                "WHERE effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)",
+                (as_of.isoformat(), as_of.isoformat()),
+            ).fetchall()
+        except Exception:
+            return [], [], None, None
+
+        if not rows:
+            return [], [], None, None
+
+        sector_series_list: list[SectorSeries] = []
+
+        for row in rows:
+            code = row["sector_code"]
+            name = row["sector_name"] or code
+            members = sector_members(self.connection, code, as_of)
+            if not members:
+                continue
+
+            member_bars: list[tuple[str, Sequence[OHLCVBar]]] = []
+            for m in members:
+                bars = self._load(m)
+                if len(bars) >= lookback:
+                    member_bars.append((m, bars))
+
+            if not member_bars:
+                continue
+
+            cum_series = []
+            for t in range(lookback):
+                idx = -lookback + t
+                norm_vals = [
+                    (bars[idx].close / bars[-lookback].close) * 100.0
+                    for _, bars in member_bars
+                ]
+                avg_norm = sum(norm_vals) / len(norm_vals)
+                cum_series.append(avg_norm - 100.0)
+
+            latest_turnover = sum(
+                (bars[-1].close * bars[-1].volume) / 1e9 for _, bars in member_bars
+            )
+            latest_ret = cum_series[-1]
+            sector_series_list.append(
+                SectorSeries(
+                    sector_code=code,
+                    sector_name=name,
+                    cumulative_returns=tuple(cum_series),
+                    turnover_billion=latest_turnover,
+                    latest_return=latest_ret,
+                )
+            )
+
+        if not sector_series_list:
+            return [], [], None, None
+
+        sector_series_list.sort(key=lambda s: s.latest_return, reverse=True)
+        top_names = [s.sector_name for s in sector_series_list[:3]]
+        weakest_series = sector_series_list[-1]
+        weakest_name = weakest_series.sector_name
+        if len(sector_series_list) > 1:
+            weakest_score = max(5.0, min(95.0, 50.0 + weakest_series.latest_return * 5.0))
+        else:
+            weakest_score = 50.0
+
+        return sector_series_list, top_names, weakest_name, weakest_score
+
     def stock_analysis(self, symbol: str, strategy: str = "CL1") -> StockAnalysisView:
         """Build one complete view; a failing section never removes the others."""
         symbol = symbol.strip().upper()
@@ -256,7 +379,18 @@ class RuntimeBotDataService:
                 )
                 if snapshot.total_value > 0:
                     liquidity = f"{snapshot.total_value / 1e9:,.0f} tỷ ({snapshot.total_volume:,.0f} CP)"
-        market = build_market_view(bars, breadth=breadth, liquidity=liquidity)
+
+        as_of = datetime.fromtimestamp(self.now(), VIETNAM_TIMEZONE).date()
+        _, top_sectors, weakest_sector, weakest_score = self._compute_sector_performance(as_of)
+
+        market = build_market_view(
+            bars,
+            breadth=breadth,
+            liquidity=liquidity,
+            top_sectors=top_sectors,
+            weakest_sector=weakest_sector,
+            weakest_sector_score=weakest_score,
+        )
         if market is None:
             return f"Chưa có dữ liệu lịch sử VNINDEX. Nguồn: {source}"
         quality = self._data_quality(bars[-1].timestamp, source)

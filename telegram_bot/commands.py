@@ -160,8 +160,16 @@ class TelegramCommandService:
         return self._optional("sector_overview", name)
 
     def chart(self, arguments: Sequence[str]) -> ChartRequestView:
-        """Return a rendered candlestick chart; text stays out of this path."""
+        """Return a rendered candlestick or market sector chart; text stays out of this path."""
         symbol = _one_symbol(arguments, "/chart FPT")
+        if symbol == "MARKET":
+            handler = getattr(self.data, "sector_performance_chart", None)
+            if not callable(handler):
+                raise ValueError(UNSUPPORTED)
+            result = handler()
+            if not isinstance(result, ChartRequestView):
+                raise ValueError(UNSUPPORTED)
+            return result
         handler = getattr(self.data, "candlestick_chart", None)
         if not callable(handler):
             raise ValueError(UNSUPPORTED)
@@ -169,6 +177,9 @@ class TelegramCommandService:
         if not isinstance(result, ChartRequestView):
             raise ValueError(UNSUPPORTED)
         return result
+
+    def sector_chart(self) -> ChartRequestView:
+        return self.chart(["MARKET"])
 
     def _optional(self, method: str, argument: str) -> str:
         handler = getattr(self.data, method, None)

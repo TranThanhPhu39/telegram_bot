@@ -3340,3 +3340,26 @@ Target:
 - `/tin`, `/sentiment`, `/soi` should use the same selected set;
 - zero eligible articles = MISSING, never synthetic Neutral;
 - severe-negative ASMF blocker retains its own stricter recency requirement.
+### Market Context & Sector Performance Chart (Bối cảnh thị trường nâng cao)
+
+Matching the team leader's specification and visual dashboard:
+
+1. **Text Market Overview (/market)**:
+   - Header: 🌐 BỐI CẢNH THỊ TRƯỜNG
+   - VN-Index score, percentage change, and trend direction icon (📈 TĂNG / 📉 GIẢM / ➡️ ĐI NGANG).
+   - Quantitative Metrics:
+     - **Số mũ Hurst (H)**: calculated on the last 100 sessions (<= 101 closes) using standard rescaled range analysis (H > 0.55: quán tính xu hướng, H < 0.45: hồi quy trung bình, 0.45 <= H <= 0.55: dao động ngẫu nhiên).
+     - **Phân vị biến động (Volatility Percentile %)**: 20-session rolling realized volatility ranked against past 100 sessions.
+     - **Trạng thái MA50 & MA200**: Evaluates whether index stands above MA50 and MA200 ('Chỉ số chưa đứng vững trên cả MA50 và MA200 -> xu hướng chưa chắc chắn.').
+   - Sector Performance Ranking:
+     - Top 3 strongest sectors and weakest sector with score.
+   - Preserves REGIME:, BREADTH:, LIQUIDITY:, and data quality sections for complete test compatibility.
+   - Interactive navigation prompt: 👉 Chọn một mục bên dưới để xem chi tiết: with inline button 📊 Top % biến động ngành.
+
+2. **Top % Sector Performance Chart (charts/sector_chart.py / /chart MARKET / callback soi:mchart:VNINDEX)**:
+   - Title: TOP % BIẾN ĐỘNG NGÀNH with subtitle NGÀY: DD-MM-YYYY HH:MM.
+   - Y-axis: BIẾN ĐỘNG LŨY KẾ (%), X-axis: 20 phiên gần nhất with DD/MM date ticks.
+   - Dotted zero baseline.
+   - Equal-weight sector index across members: cumulative % return from T0.
+   - Legend formatted with sector name, latest session turnover in billion VND, and cumulative return (+X.XX%).
+   - Rendered using headless Matplotlib (Agg), verified PNG magic bytes.

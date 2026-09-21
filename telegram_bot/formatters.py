@@ -186,19 +186,70 @@ def format_market(
 ) -> str:
     if view is None:
         return "Chưa có dữ liệu lịch sử VNINDEX."
-    blocks = [
-        "🌐 THỊ TRƯỜNG",
-        (
-            f"{view.symbol}\n"
-            f"Điểm số: {number(view.close)} ({percent(view.change_percent)})\n"
-            f"Xu hướng: {view.trend}\n"
-            f"EMA20: {number(view.ema20)} | EMA50: {number(view.ema50)}"
-        ),
-        f"REGIME: {view.regime}\nCơ sở: {view.regime_reason}",
-        f"BREADTH: {view.breadth or 'unavailable'}",
-        f"LIQUIDITY: {view.liquidity or 'unavailable'}",
-        f"DÒNG TIỀN NGOẠI/TỰ DOANH: {view.foreign_flow or 'unavailable'}",
-    ]
+
+    trend_icon = "📈" if "TĂNG" in view.trend else "📉" if "GIẢM" in view.trend else "➡️"
+    index_label = f"VN-Index ({view.symbol})" if view.symbol == "VNINDEX" else view.symbol
+    header_block = (
+        "🌐 BỐI CẢNH THỊ TRƯỜNG\n"
+        f"• {index_label}: {number(view.close)} ({percent(view.change_percent)})\n"
+        f"• Xu hướng: {trend_icon} {view.trend}\n"
+        f"• EMA20: {number(view.ema20)} | EMA50: {number(view.ema50)}"
+    )
+
+    blocks = [header_block]
+
+    quant_lines = []
+    if view.hurst is not None:
+        if view.hurst > 0.55:
+            cmp_str = "> 0.55"
+            interp = f"Hurst = {view.hurst:.2f} > 0.55 -> thị trường có quán tính xu hướng."
+        elif view.hurst < 0.45:
+            cmp_str = "< 0.45"
+            interp = f"Hurst = {view.hurst:.2f} < 0.45 -> thị trường có tính hồi quy trung bình (mean-reverting)."
+        else:
+            cmp_str = "0.45 - 0.55"
+            interp = f"Hurst = {view.hurst:.2f} ≈ 0.50 -> thị trường dao động ngẫu nhiên (random walk)."
+
+        vol_pct_str = (
+            f"{int(round(view.volatility_percentile))}%"
+            if view.volatility_percentile is not None
+            else "N/A"
+        )
+        quant_lines.append(
+            f"• Số mũ Hurst = {view.hurst:.2f} ({cmp_str}) - Phân vị biến động = {vol_pct_str}\n"
+            f"(Dựa trên {view.hurst_lookback} phiên gần nhất)\n"
+            f"• {interp}"
+        )
+    if view.trend_stability_reason:
+        quant_lines.append(f"• {view.trend_stability_reason}")
+
+    if quant_lines:
+        blocks.append("\n".join(quant_lines))
+
+    if view.top_sectors:
+        sector_lines = ["🏭 Ngành mạnh nhất"]
+        medals = ("🥇", "🥈", "🥉")
+        for idx, sec in enumerate(view.top_sectors[:3]):
+            medal = medals[idx] if idx < len(medals) else "•"
+            sector_lines.append(f"{medal} {sec}")
+        if view.weakest_sector:
+            score_str = (
+                f"{int(round(view.weakest_sector_score))}/100"
+                if view.weakest_sector_score is not None
+                else "N/A"
+            )
+            sector_lines.append(f"\nYếu nhất: {view.weakest_sector} — {score_str}")
+        blocks.append("\n".join(sector_lines))
+
+    blocks.extend(
+        [
+            f"REGIME: {view.regime}\nCơ sở: {view.regime_reason}",
+            f"BREADTH: {view.breadth or 'unavailable'}",
+            f"LIQUIDITY: {view.liquidity or 'unavailable'}",
+            f"DÒNG TIỀN NGOẠI/TỰ DOANH: {view.foreign_flow or 'unavailable'}",
+        ]
+    )
+
     if sentiment is not None:
         blocks.append("📰 NEWS SENTIMENT\n" + _sentiment_line(sentiment))
     if view.risk_flags:
@@ -206,6 +257,11 @@ def format_market(
     if view.unavailable:
         blocks.append("Chưa khả dụng:\n" + "\n".join(f"- {item}" for item in view.unavailable))
     blocks.append(data_quality_text)
+
+    blocks.append(
+        "👉 Chọn một mục bên dưới để xem chi tiết:\n\n"
+        "🔎 Chatbot này chỉ dùng với mục đích tham khảo."
+    )
     return "\n\n".join(blocks)
 
 
