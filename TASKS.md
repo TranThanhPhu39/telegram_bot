@@ -14,8 +14,7 @@
 None. Phases 3–7 have active-session acceptance evidence.
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 21 operational follow-up — dynamic all-symbol news linking (COMPLETE)**
-
+**Phase 24 — Automated Fundamentals & Institutional Data (CODE + TESTS COMPLETE — live acceptance pending Phase 26)**
 ### Documentation follow-up — README operational status (COMPLETE)
 
 - [x] Document installation, configuration and bot startup
@@ -562,3 +561,58 @@ pricing for valuation, Phase 24 valuation. Pending Phase 3–7 live validations 
 - [ ] Live acceptance: gửi `/chart` thật qua Telegram với dữ liệu Vietcap thật
   - NOT TESTED. Sandbox không có route tới Vietcap hoặc Telegram.
 - [x] STOP and report
+## Phase 24 — Automated Fundamentals & Institutional Data
+
+### Provider layer
+- [x] `ProviderStatus`/`ProviderResult`/`StatementRow`/`FlowRow` contracts
+- [x] `VNStockProvider` — runtime API discovery, verify với vnstock 3.2.6 thật
+- [x] `YFinanceProvider` — fallback nghiêm ngặt, verify với yfinance 1.0 thật
+- [x] `ProviderChain` — VNStock trước, yfinance chỉ khi MISSING/ERROR
+- [x] Provider layer là nơi DUY NHẤT import vnstock/yfinance
+
+### Storage
+- [x] Migration v7 `automated_fundamentals_coverage` (additive)
+- [x] `automated_financial_statements` — staging, idempotent
+- [x] `symbol_data_coverage` — trạng thái theo (symbol, dataset)
+- [x] `fundamentals/adapters.py` — promote corporate statement khi đủ evidence
+- [x] Bank statement KHÔNG BAO GIỜ tự động promote
+- [x] Institutional flow upsert trực tiếp qua model/store CŨ
+
+### Refresh service
+- [x] `refresh_financials()`/`refresh_institutional_flow()` — kết quả có cấu trúc
+- [x] Freshness policy configurable, `force=True` bypass
+- [x] Một symbol lỗi không chặn refresh symbol khác
+
+### Point-in-time
+- [x] Report công bố sau ngày phân tích vô hình với phân tích đó
+- [x] Thiếu `public_date` → không bao giờ promote
+- [x] `period_end_date()` không bao giờ dùng thay `public_date`
+
+### ASMF integration
+- [x] `asmf_data/scoring.py` không sửa
+- [x] Regression: path cũ vs path mới → cùng điểm 60.0
+
+### Test — chạy thật 2026-09-21
+- [x] `tests/test_fundamental_providers.py` — 47 passed
+- [x] `tests/test_fundamental_refresh.py` — 20 passed
+- [x] `tests/test_point_in_time_safety.py` — 5 passed
+- [x] `tests/test_migrations.py`, `test_portfolio_schema.py`,
+      `test_sector_notification_persistence.py` — 26 passed (6→7)
+- [x] Full regression: **718 passed**, 0 failed, `py -3.12 -m pytest -q`
+- [x] `pip check`: chạy xong; 8 conflict đều pre-existing, không do
+      vnstock/yfinance
+
+### Config
+- [x] `requirements.txt`: `vnstock==3.2.6`, `yfinance==1.0` (version thật đã cài)
+- [ ] `.env.example` — dời sang Phase 25
+
+### Live acceptance
+- [ ] VNStock fetch thật qua mạng cho ≥1 symbol
+  - NOT TESTED — 718 test đều dùng module giả lập; chưa có lần gọi API
+    thật. Cần `scripts/test_phase24_live.py` (Phase 26).
+- [ ] yfinance fallback thật
+  - NOT TESTED — cùng lý do.
+
+### Chưa bắt đầu
+- [ ] Phase 25 — Market Coverage & Refresh Workers
+- [ ] Phase 26 — Live Acceptance, Reliability & Production Hardening

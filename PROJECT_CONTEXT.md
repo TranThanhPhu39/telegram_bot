@@ -2934,3 +2934,204 @@ All symbols in the bot universe are now eligible for sentiment; this does not
 guarantee a sentiment result for every `/sentiment <MÃ>` call. A result still
 requires a CafeF RSS item that mentions the ticker or a catalog-derived company
 name and a completed ingestion run. The command path remains network-free.
+
+### 2026-09-21 — Phase 24: Automated Fundamentals & Institutional Data
+
+#### Vấn đề giải quyết
+
+Trước Phase 24, `financial_reports`/`bank_financial_reports`/`institutional_flows`
+chỉ có dữ liệu qua nhập tay hoặc OCR thử nghiệm (ACB), không có acquisition tự
+động phủ market universe. Phase 24 thêm một pipeline lấy dữ liệu tự động,
+provider-independent, ghi vào đúng bảng canonical cũ — không tạo schema tài
+chính song song, không tạo scoring engine thứ hai, không sửa `strategy/` hay
+`asmf_data/scoring.py`.
+
+#### Kiến trúc
+
+    VNStockProvider ──┐
+                       ├─→ ProviderChain (VNStock trước, yfinance chỉ là fallback)
+    YFinanceProvider ──┘        │
+                                 ▼
+                     ProviderResult (AVAILABLE/PARTIAL/MISSING/STALE/ERROR
+                                      + provenance + attempted[])
+                                 │
+                                 ▼
+              refresh_financials() / refresh_institutional_flow()
+                     (fundamentals/refresh_service.py)
+                    ┌────────────┴────────────┐
+                    ▼                          ▼
+     automated_financial_statements   institutional_flows (canonical CŨ,
+     (staging mới, migration v7,      qua InstitutionalFlow + upsert
+      idempotent theo symbol+         cũ — không cần staging vì mỗi
+      period+source)                  field đã nullable sẵn, và
+                    │                  trading_date không có rủi ro
+                    ▼                  look-ahead)
+       [chỉ khi đủ evidence + có
+        public_date thật]
+       fundamentals/adapters.py
+       promote_corporate_statement()
+                    │
+                    ▼
+       financial_reports (canonical CŨ, model FinancialReport CŨ,
+                           upsert_financial_reports CŨ — không đổi)
+                    │
+                    ▼
+       asmf_data/scoring.py (KHÔNG SỬA — tự động nhận dữ liệu mới
+                              vì đọc thẳng financial_reports/
+                              bank_financial_reports như trước giờ)
+
+Provider layer (`fundamentals/providers/`) là package DUY NHẤT được phép
+import `vnstock`/`yfinance`. `strategy/` và `telegram_bot/` không đụng tới
+2 thư viện này ở bất kỳ đâu.
+
+#### VNStock — discovery thay vì giả định API
+
+Sandbox lúc viết code không có mạng nên không inspect được vnstock thật lúc
+đó; `VNStockProvider` được thiết kế **dò tìm API tại runtime** thay vì
+hard-code một call path: thử `Vnstock().stock(symbol, source).finance.*`
+với `source` lần lượt trong `("VCI", "TCBS", "MAS")`, gọi
+`income_statement/balance_sheet/cash_flow` với `period=`/`lang=` rồi
+fallback không tham số nếu `TypeError`, match tên cột qua bảng alias đã
+normalize (tiếng Anh + tiếng Việt). Nguồn nào trả dữ liệu thật thì thắng và
+được ghi lại thành `provider_source`.
+
+**Đã xác nhận với vnstock thật, cài ở máy người dùng:**
+
+Name: vnstock Version: 3.2.6
+
+
+pytest cảnh báo có bản 4.0.8 mới hơn — **cố tình chưa nâng cấp**, vì §4.1
+cấm code dựa trên API chưa inspect; giữ nguyên bản đã cài và đã chạy test
+qua. Nâng lên 4.0.8 là quyết định riêng, cần inspect API mới trước khi đổi.
+
+#### yfinance — fallback nghiêm ngặt, không đoán exchange
+
+`candidate_tickers()` chỉ derive suffix Yahoo (`.VN`, `.HN`) từ cột
+`exchange` trong bảng `symbols`. Exchange đã biết nhưng không có mapping →
+trả `()` rỗng, không đoán `.VN`. Yahoo không bao giờ cung cấp `public_date`
+tiếng Việt nên mọi statement từ yfinance có `public_date=None` — không được
+promote vào bảng canonical. yfinance không có endpoint institutional flow
+của Việt Nam → luôn trả `MISSING` cho dataset này.
+
+**Đã xác nhận version thật:**
+
+Name: yfinance Version: 1.0
+
+
+#### Quyết định bảo thủ nhất: KHÔNG BAO GIỜ tự động promote statement ngân hàng
+
+`fundamentals/repository.py::_standalone_quarters` de-cumulate báo cáo ngân
+hàng theo quy ước **year-to-date cộng dồn** (Q2 = Q1+Q2 gộp) — đúng quy ước
+Vietstock/OCR đã verify. Chưa xác nhận được vnstock trả bank data theo dạng
+cộng dồn hay standalone (như Yahoo), nên `promote_bank_statement()` **luôn
+trả `None`, vô điều kiện**, kể cả khi statement có đủ cả 4 field bắt buộc.
+Field ngân hàng từ provider vẫn được lưu vào staging
+(`automated_financial_statements`) để hiển thị coverage/provenance, nhưng
+`bank_financial_reports` — và do đó điểm ASMF ngân hàng — tiếp tục chỉ đến
+từ pipeline OCR/Vietstock cũ. Verify bằng test
+`test_bank_score_still_comes_only_from_the_ocr_vietstock_path_never_from_
+automated_staging`.
+
+#### Point-in-time safety
+
+- Corporate statement chỉ được promote vào `financial_reports` khi có cả 5
+  điều kiện: `public_date` thật, `revenue >= 0`, `net_income_parent` hoặc
+  `net_income`, `total_equity > 0`, và cả hai chân nợ ngắn/dài hạn đều có
+  giá trị (thiếu một chân → không promote, không đoán bằng 0).
+- `period_end_date()` tồn tại nhưng không bao giờ dùng thay `public_date` —
+  khoá bằng test riêng.
+- Report công bố sau ngày phân tích thì vô hình với phân tích đó.
+
+#### Idempotency & freshness
+
+`automated_financial_statements` PK `(symbol, period, source)`, upsert
+không tạo trùng. `institutional_flows` tái dùng PK `(symbol, trading_date)`
+cũ. `refresh_financials`/`refresh_institutional_flow` đọc
+`symbol_data_coverage` trước khi gọi provider: nếu còn trong khoảng
+`FUNDAMENTAL_REFRESH_INTERVAL`/`INSTITUTIONAL_REFRESH_INTERVAL` (mặc định 7
+ngày / 1 ngày) thì `SKIPPED_FRESH`, không gọi provider. `force=True` bỏ
+qua freshness check.
+
+#### Schema — migration v7 `automated_fundamentals_coverage`
+
+Additive, không sửa/không drop migration 1–6. `automated_financial_statements`
+(staging, mọi field nullable) và `symbol_data_coverage` (trạng thái theo
+symbol+dataset, `attempts` cộng dồn, `last_success_at` giữ nguyên qua các
+lần lỗi sau đó). Cả hai FK tới `symbols(symbol)`; `refresh_service` tự
+insert symbol mới nếu chưa có — bug thật tự phát hiện và sửa khi test với
+symbol chưa từng thấy, đúng kịch bản §21 (dynamic universe).
+
+#### ASMF regression — bằng chứng §18 quan trọng nhất
+
+Test `test_asmf_score_is_identical_whether_data_arrives_manually_or_via_
+automated_refresh`: 8 quý số liệu giống hệt nhau, path cũ (`upsert_
+financial_reports` thủ công) vs path mới (`refresh_financials()`):
+
+A manual path score: 60.0 B automated path score: 60.0
+
+
+Giống hệt nhau. `asmf_data/scoring.py` không bị sửa một dòng nào.
+
+#### Test — bằng chứng thật, chạy cục bộ 2026-09-21
+
+Máy: Windows, `py -3.12`, `.venv` của repo, vnstock 3.2.6 + yfinance 1.0
+cài thật.
+
+py -3.12 -m pytest -q tests/test_fundamental_providers.py 47 passed, 2 warnings in 25.51s
+
+py -3.12 -m pytest -q tests/test_fundamental_refresh.py 20 passed in 0.97s
+
+py -3.12 -m pytest -q tests/test_point_in_time_safety.py 5 passed in 0.29s
+
+py -3.12 -m pytest -q tests/test_migrations.py tests/test_portfolio_schema.py tests/test_sector_notification_persistence.py 26 passed in 3.44s
+
+py -3.12 -m pytest -q 718 passed, 2 warnings in 22.57s
+
+
+718 = 599 (baseline trước Phase 20) + 13 (sector notification persistence)
++ 25 (candlestick) + 98 (Phase 24: 47+20+5 file mới, cộng phần chênh từ
+việc 3 file test cũ được sửa 6→7 không đổi tổng số test, chỉ đổi giá trị
+assertion) — không có test nào fail, không có test nào bị sửa để né lỗi
+ngoài việc bump version schema 6→7 đã ghi ở entry trước.
+
+2 warning duy nhất: vnstock/vnai có bản mới hơn bản đang pin — không phải
+lỗi, không ảnh hưởng kết quả test.
+
+py -3.12 -m pip check
+
+
+8 conflict — **giống hệt** danh sách đã ghi nhận ở entry Phase 20/candlestick
+trước đó (`googleapis-common-protos`, `google-ai-generativelanguage`,
+`google-api-core`, `grpcio-status`, `proto-plus`, `pyppeteer`, `streamlit`
+với protobuf/urllib3/websockets). **vnstock và yfinance không phát sinh
+conflict mới nào.**
+
+#### Cấu hình
+
+`requirements.txt` đã pin đúng version thật đã cài và test qua:
+
+vnstock==3.2.6 yfinance==1.0
+
+
+`.env.example` chưa có các key `FUNDAMENTAL_PRIMARY_PROVIDER`,
+`FUNDAMENTAL_REFRESH_INTERVAL`, `INSTITUTIONAL_REFRESH_INTERVAL`,
+`VNSTOCK_SOURCE_PREFERENCE`, `YFINANCE_ENABLED` — sẽ thêm ở Phase 25 vì lúc
+đó mới có `runtime/coverage_worker.py` đọc các key này.
+
+#### Live evidence
+
+NOT TESTED. Toàn bộ 718 test pass đều dùng module vnstock/yfinance **giả
+lập** (fake `Vnstock`/`Ticker` object trong test) để đảm bảo tính
+deterministic — đây là thực hành chuẩn cho unit test, không phải hạn chế.
+Nhưng **chưa có lần gọi thật nào** tới API vnstock/Yahoo qua mạng thật để
+xác nhận `VNStockProvider`/`YFinanceProvider` hoạt động đúng với response
+thật (cấu trúc cột, tên field thật của vnstock 3.2.6 có khớp với bảng
+alias đã viết hay không). Cần một live acceptance script
+(`scripts/test_phase24_live.py`, thuộc Phase 26) chạy thật với 1 symbol
+thật để đóng gap này.
+
+#### Ngoài phạm vi / chưa làm
+
+Phase 25 (Market Coverage & Refresh Workers) và Phase 26 (Live Acceptance,
+Reliability & Production Hardening) chưa bắt đầu. EPS/P/E/P/B vẫn chỉ đến
+từ CSV boundary cũ.

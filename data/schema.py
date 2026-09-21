@@ -413,3 +413,81 @@ SECTOR_SYNC_WATCHERS_PENDING_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_sector_sync_watchers_pending
     ON sector_sync_watchers(pending_kind)
 """
+
+AUTOMATED_FINANCIAL_STATEMENTS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS automated_financial_statements (
+    symbol TEXT NOT NULL,
+    period TEXT NOT NULL,
+    source TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    provider_source TEXT,
+    public_date TEXT,
+    consolidated INTEGER NOT NULL DEFAULT 1,
+    revenue REAL,
+    gross_profit REAL,
+    operating_profit REAL,
+    net_income REAL,
+    net_income_parent REAL,
+    total_assets REAL,
+    total_equity REAL,
+    total_liabilities REAL,
+    cash REAL,
+    short_term_debt REAL,
+    long_term_debt REAL,
+    operating_cash_flow REAL,
+    capex REAL,
+    net_interest_income REAL,
+    bank_net_profit REAL,
+    bank_equity REAL,
+    gross_loans REAL,
+    nonperforming_loans REAL,
+    loan_loss_reserve REAL,
+    car_percent REAL,
+    retrieved_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    promoted_to_canonical INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (symbol, period, source),
+    FOREIGN KEY (symbol) REFERENCES symbols(symbol) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CHECK (symbol = upper(trim(symbol))),
+    CHECK (period GLOB '[0-9][0-9][0-9][0-9]Q[1-4]' OR period GLOB '[0-9][0-9][0-9][0-9]'),
+    CHECK (length(trim(source)) > 0),
+    CHECK (length(trim(provider)) > 0),
+    CHECK (public_date IS NULL OR date(public_date) = public_date),
+    CHECK (consolidated IN (0, 1)),
+    CHECK (promoted_to_canonical IN (0, 1)),
+    CHECK (typeof(retrieved_at) = 'integer' AND retrieved_at > 0)
+) WITHOUT ROWID
+"""
+
+AUTOMATED_FINANCIAL_STATEMENTS_SYMBOL_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_automated_financial_statements_symbol
+    ON automated_financial_statements(symbol)
+"""
+
+SYMBOL_DATA_COVERAGE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS symbol_data_coverage (
+    symbol TEXT NOT NULL,
+    dataset TEXT NOT NULL,
+    status TEXT NOT NULL,
+    provider TEXT,
+    provider_source TEXT,
+    error_reason TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at INTEGER,
+    last_success_at INTEGER,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (symbol, dataset),
+    FOREIGN KEY (symbol) REFERENCES symbols(symbol) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CHECK (symbol = upper(trim(symbol))),
+    CHECK (dataset IN ('FINANCIALS', 'INSTITUTIONAL')),
+    CHECK (status IN (
+        'NEVER_ATTEMPTED', 'READY', 'PARTIAL', 'MISSING', 'STALE', 'ERROR', 'IN_PROGRESS'
+    )),
+    CHECK (typeof(attempts) = 'integer' AND attempts >= 0),
+    CHECK (typeof(updated_at) = 'integer' AND updated_at > 0)
+) WITHOUT ROWID
+"""
+
+SYMBOL_DATA_COVERAGE_STATUS_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_symbol_data_coverage_status
+    ON symbol_data_coverage(dataset, status)
+"""
