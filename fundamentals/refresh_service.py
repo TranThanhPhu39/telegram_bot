@@ -14,7 +14,7 @@ loop can isolate one symbol's failure from the rest, per Phase 25 §23.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 import sqlite3
 
@@ -25,9 +25,11 @@ from fundamentals.adapters import (
     promote_corporate_statement,
 )
 from fundamentals.coverage_store import (
+    _COVERAGE_STATUS_FROM_PROVIDER_STATUS,
     CoverageStatus,
     coverage_is_stale,
     load_coverage,
+    record_attempt,
     record_coverage,
     upsert_automated_statement,
 )
@@ -48,21 +50,44 @@ class RefreshResult(str, Enum):
     SKIPPED_FRESH = "SKIPPED_FRESH"
 
 
+def _count_canonical_financial_reports(
+    connection: sqlite3.Connection, symbol: str, as_of: date
+) -> int:
+    as_of_str = as_of.isoformat()
+    c1 = connection.execute(
+        "SELECT COUNT(DISTINCT report_period) FROM financial_reports "
+        "WHERE symbol=? AND consolidated=1 AND public_date<=?",
+        (symbol, as_of_str),
+    ).fetchone()[0]
+    c2 = connection.execute(
+        "SELECT COUNT(DISTINCT report_period) FROM bank_financial_reports "
+        "WHERE symbol=? AND public_date<=?",
+        (symbol, as_of_str),
+    ).fetchone()[0]
+    return max(int(c1), int(c2))
+
+
+def _count_canonical_institutional_flows(
+    connection: sqlite3.Connection, symbol: str, as_of: date
+) -> int:
+    return int(
+        connection.execute(
+            "SELECT COUNT(DISTINCT trading_date) FROM institutional_flows "
+            "WHERE symbol=? AND trading_date<=?",
+            (symbol, as_of.isoformat()),
+        ).fetchone()[0]
+    )
+
+
 def _point_in_time_gap_reason(
-    statements: tuple[StatementRow, ...], promoted_count: int,
+    statements: tuple[StatementRow, ...], promoted_count: int, canonical_count: int = 0,
 ) -> str | None:
     """Explain, for coverage visibility, why usable raw statement rows did not
     all reach the point-in-time canonical ``financial_reports`` table.
 
-    Before this diagnostic existed, ``symbol_data_coverage`` only recorded the
-    raw provider status (e.g. READY) computed from whether values such as
-    revenue/equity were present at all — it never recorded whether any of
-    that data actually became usable point-in-time evidence. A source can
-    genuinely answer with real numbers and still never be promotable (for
-    example VNStock's KBS wide-format statements, which carry no public_date
-    at all), and that gap was invisible in coverage output. Returns None once
-    every period promoted (or there is nothing to promote), so a fully
-    point-in-time-ready result's ``error_reason`` is unaffected.
+    When canonical point-in-time reports already reach >= 8 quarters, ASMF is
+    not blocked, so the diagnostic reflects ASMF readiness instead of falsely
+    stating 'BLOCKED BY DATA SOURCE'.
     """
     if not statements or promoted_count >= len(statements):
         return None
@@ -76,6 +101,11 @@ def _point_in_time_gap_reason(
     detail = "; ".join(
         f"{reason} ({count} period(s))" for reason, count in sorted(gap_counts.items())
     )
+    if canonical_count >= 8:
+        return (
+            f"READY FOR ASMF ({canonical_count} quarters available); "
+            f"{promoted_count}/{len(statements)} raw period(s) promoted - {detail}"
+        )
     return (
         f"BLOCKED BY DATA SOURCE: only {promoted_count}/{len(statements)} period(s) "
         f"reached point-in-time financial_reports - {detail}"
@@ -150,14 +180,24 @@ def refresh_financials(
     if promoted_reports:
         upsert_financial_reports(connection, promoted_reports)
 
-    # Coverage is recorded *after* promotion (not right after fetch, as
-    # before) so a genuinely usable-but-unpromotable result — e.g. real
-    # revenue/equity values with no public_date — carries an honest,
-    # diagnosable error_reason instead of looking identical to a fully
-    # promoted READY/PARTIAL row.
-    gap_reason = _point_in_time_gap_reason(result.statements, len(promoted_reports))
-    coverage_result = result if gap_reason is None else replace(result, error_reason=gap_reason)
-    coverage = record_coverage(connection, symbol, "FINANCIALS", coverage_result, now=stamp)
+    canonical_count = _count_canonical_financial_reports(connection, symbol, stamp.date())
+    gap_reason = _point_in_time_gap_reason(
+        result.statements, len(promoted_reports), canonical_count=canonical_count
+    )
+
+    # Coverage status is synchronized with ASMF readiness:
+    # If the database has >= 8 point-in-time quarters, ASMF Tầng 2 is satisfied (READY).
+    if canonical_count >= 8:
+        coverage_status = "READY"
+    else:
+        coverage_status = _COVERAGE_STATUS_FROM_PROVIDER_STATUS[result.status]
+
+    error_reason = gap_reason or result.error_reason
+    coverage = record_attempt(
+        connection, symbol, "FINANCIALS", coverage_status,
+        provider=result.provider, provider_source=result.provider_source,
+        error_reason=error_reason, now=stamp,
+    )
 
     outcome = (
         RefreshResult.SUCCESS if result.status is ProviderStatus.AVAILABLE
@@ -198,15 +238,16 @@ def refresh_institutional_flow(
             )
 
     result = chain.fetch_institutional_flow(symbol, exchange=exchange, lookback_days=lookback_days)
-    coverage = record_coverage(connection, symbol, "INSTITUTIONAL", result, now=stamp)
 
     if result.status is ProviderStatus.ERROR:
+        coverage = record_coverage(connection, symbol, "INSTITUTIONAL", result, now=stamp)
         return RefreshOutcome(
             symbol=symbol, dataset="INSTITUTIONAL", result=RefreshResult.FAILED,
             provider=result.provider, provider_source=result.provider_source,
             error_reason=result.error_reason, coverage=coverage,
         )
     if not result.status.usable:
+        coverage = record_coverage(connection, symbol, "INSTITUTIONAL", result, now=stamp)
         return RefreshOutcome(
             symbol=symbol, dataset="INSTITUTIONAL", result=RefreshResult.MISSING,
             provider=result.provider, provider_source=result.provider_source,
@@ -217,6 +258,19 @@ def refresh_institutional_flow(
     if flows:
         upsert_institutional_flows(connection, flows)
 
+    canonical_flow_count = _count_canonical_institutional_flows(connection, symbol, stamp.date())
+    # If the database has >= 5 trading sessions, ASMF institutional flow is satisfied (READY).
+    if canonical_flow_count >= 5:
+        coverage_status = "READY"
+    else:
+        coverage_status = _COVERAGE_STATUS_FROM_PROVIDER_STATUS[result.status]
+
+    coverage = record_attempt(
+        connection, symbol, "INSTITUTIONAL", coverage_status,
+        provider=result.provider, provider_source=result.provider_source,
+        error_reason=result.error_reason, now=stamp,
+    )
+
     outcome = (
         RefreshResult.SUCCESS if result.status is ProviderStatus.AVAILABLE
         else RefreshResult.PARTIAL
@@ -226,3 +280,4 @@ def refresh_institutional_flow(
         provider=result.provider, provider_source=result.provider_source,
         rows_stored=len(flows), rows_promoted=len(flows), coverage=coverage,
     )
+

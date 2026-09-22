@@ -488,9 +488,9 @@ class RuntimeBotDataService:
         return format_sentiment(symbol.strip().upper(), self._sentiment_view(symbol))
 
     def latest_news(self, symbol: str) -> str:
+        symbol = symbol.strip().upper()
         if self.news_service is None:
             return NEWS_UNAVAILABLE
-        symbol = symbol.strip().upper()
         try:
             items = self.news_service.latest_news(symbol, 5)
         except Exception:

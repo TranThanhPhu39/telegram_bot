@@ -13,7 +13,7 @@ fail-closed signal and must never see a fabricated zero in its place.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from math import isfinite
 
@@ -132,13 +132,30 @@ def period_end_date(period: str) -> date | None:
     return None
 
 
+DEFAULT_FS_PUBLISH_LAG_DAYS: int = 45
+
+
+def estimate_publication_date(period: str, lag_days: int = DEFAULT_FS_PUBLISH_LAG_DAYS) -> date | None:
+    """Return the estimated publication date: period_end_date + lag_days.
+
+    Never returns the period end date directly, preventing look-ahead bias
+    while adhering to the strategy design when a provider does not publish
+    an actual public announcement date.
+    """
+    end = period_end_date(period)
+    if end is None:
+        return None
+    return end + timedelta(days=lag_days)
+
+
 @dataclass(frozen=True, slots=True)
 class StatementRow:
     """One fiscal period of normalized statement values from one source.
 
-    ``public_date`` is the announcement date. It is None whenever the provider
-    does not publish one; callers must NOT substitute the fiscal period end,
-    because doing so would silently create look-ahead in point-in-time reads.
+    ``public_date`` is the announcement date. When absent from the provider,
+    downstream adapters fall back to ``estimate_publication_date``
+    (period_end_date + 45 days) to preserve point-in-time safety without
+    fabricating an arbitrary date or using period_end directly.
     """
 
     symbol: str
@@ -146,14 +163,17 @@ class StatementRow:
     public_date: date | None
     consolidated: bool = True
     values: dict[str, float | None] = field(default_factory=dict)
+    public_date_source: str | None = None
 
     def __post_init__(self) -> None:
         if not self.symbol or self.symbol != self.symbol.strip().upper():
             raise ValueError("symbol must be normalized uppercase text")
-        if normalize_period(self.period) != self.period:
-            raise ValueError("period must already be normalized")
+        if not isinstance(self.period, str) or not self.period.strip():
+            raise ValueError("period must be non-empty text")
         if self.public_date is not None and not isinstance(self.public_date, date):
             raise TypeError("public_date must be a date when present")
+        if self.public_date_source is not None and not isinstance(self.public_date_source, str):
+            raise TypeError("public_date_source must be a string when present")
         unknown = set(self.values) - set(STATEMENT_FIELDS) - set(BANK_FIELDS)
         if unknown:
             raise ValueError(f"unknown statement fields: {sorted(unknown)}")
@@ -168,6 +188,15 @@ class StatementRow:
     @property
     def has_publication_date(self) -> bool:
         return self.public_date is not None
+
+    @property
+    def effective_public_date(self) -> tuple[date | None, str | None]:
+        if self.public_date is not None:
+            return self.public_date, self.public_date_source or "actual"
+        est = estimate_publication_date(self.period)
+        if est is not None:
+            return est, f"estimated_{DEFAULT_FS_PUBLISH_LAG_DAYS}d"
+        return None, None
 
 
 @dataclass(frozen=True, slots=True)

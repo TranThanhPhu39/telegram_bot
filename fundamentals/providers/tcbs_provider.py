@@ -149,10 +149,11 @@ class TCBSProvider(FundamentalProvider):
             params={"yearly": 0, "isAll": "true"},
             timeout=self._timeout_seconds,
         )
-        if response.status_code in (400, 404):
+        status_code = getattr(response, "status_code", 200)
+        if status_code in (400, 404):
             raise _NoStatementData(
                 f"TCBS has no {report_type} data for {symbol} "
-                f"(HTTP {response.status_code})"
+                f"(HTTP {status_code})"
             )
         response.raise_for_status()
         payload = response.json()

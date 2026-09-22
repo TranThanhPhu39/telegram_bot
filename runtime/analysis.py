@@ -28,6 +28,7 @@ from runtime.views import (
     MetricView,
     PriceView,
     ScanRowView,
+    SentimentArticleView,
     SentimentView,
     StrategyLayerView,
     StrategyView,
@@ -372,6 +373,21 @@ def build_sentiment_view(aggregate) -> SentimentView:
         return SentimentView(available=False, note="Không có tin trong cửa sổ theo dõi.")
     score = aggregate.score
     label = "Positive" if score >= 0.15 else "Negative" if score <= -0.15 else "Neutral"
+    articles: tuple[SentimentArticleView, ...] = ()
+    if hasattr(aggregate, "articles") and aggregate.articles:
+        articles = tuple(
+            SentimentArticleView(
+                title=item.title,
+                published_at=item.published_at,
+                source=item.source,
+                url=item.url,
+                event_type=item.event_type,
+                sentiment_label=(item.sentiment.label.value.upper() if item.sentiment else None),
+                sentiment_score=(item.sentiment.score if item.sentiment else None),
+                model_confidence=(item.sentiment.model_confidence if item.sentiment else None),
+            )
+            for item in aggregate.articles
+        )
     return SentimentView(
         available=True,
         label=label,
@@ -384,6 +400,7 @@ def build_sentiment_view(aggregate) -> SentimentView:
         top_events=tuple(aggregate.top_events),
         latest_at=aggregate.latest_at,
         backends=tuple(aggregate.backends),
+        articles=articles,
     )
 
 
@@ -424,7 +441,7 @@ def build_risk_items(
             watch.append(f"Bổ sung dữ liệu thiếu: {item}")
     if sentiment is not None and sentiment.available and sentiment.label == "Negative":
         risks.append(
-            f"Sentiment tin tức 24h âm ({sentiment.score:+.2f}); đây là context, không phải lệnh bán"
+            f"Sentiment tin tức âm ({sentiment.score:+.2f}); đây là context, không phải lệnh bán"
         )
     return tuple(dict.fromkeys(risks)), tuple(dict.fromkeys(watch))
 

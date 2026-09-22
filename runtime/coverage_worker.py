@@ -52,6 +52,7 @@ import time
 from asmf_data.store import active_sector, sector_members
 from fundamentals.coverage_store import (
     DEFAULT_IN_PROGRESS_LEASE_SECONDS,
+    SUCCESS_STATES,
     CoverageStatus,
     effective_status,
     load_all_coverage,
@@ -75,6 +76,8 @@ from runtime.sector_history_sync import HistoryFetch, SectorSyncResult
 
 logger = logging.getLogger(__name__)
 
+MINIMUM_STRATEGY_HISTORY = 200
+
 #: Mirrors ``RuntimeBotDataService.sector_history_needs_sync``: ASMF needs five
 #: usable peer histories before the sector layer can be scored.
 MINIMUM_USABLE_PEERS = 5
@@ -90,6 +93,7 @@ class HistoryClient:
     """Structural type for the market-history source (a SectorHistorySynchronizer)."""
 
     minimum_bars: int
+    strategy_minimum_bars: int = MINIMUM_STRATEGY_HISTORY
 
     def refresh_symbol_history(self, symbol: str) -> HistoryFetch:  # pragma: no cover
         raise NotImplementedError
@@ -419,12 +423,15 @@ class MarketCoverageEngine:
         fetched = self.history.refresh_symbol_history(symbol)
         if fetched.bars:
             count = len(fetched.bars)
-            minimum = getattr(self.history, "minimum_bars", MINIMUM_SECTOR_HISTORY)
+            minimum = getattr(
+                self.history, "strategy_minimum_bars",
+                getattr(self.history, "minimum_bars", MINIMUM_STRATEGY_HISTORY)
+            )
             if count >= minimum:
                 status, result, reason = "READY", RefreshResult.SUCCESS.value, None
             else:
                 status, result = "PARTIAL", RefreshResult.PARTIAL.value
-                reason = f"short history: {count} of {minimum} daily bars"
+                reason = f"short history: {count} of {minimum} daily bars; need {minimum} for ASMF/CL1"
         elif fetched.errored:
             status, result = "ERROR", RefreshResult.FAILED.value
             reason = "Vietcap history request failed"
@@ -570,12 +577,19 @@ class MarketCoverageEngine:
             return
         self._news_last_failed = False
         window = self.config.news_window_days
+        known_tickers = getattr(result, "known_tickers", frozenset())
         rows = []
         for item in universe:
             articles = int(result.ticker_counts.get(item.symbol, 0))
-            if articles > 0:
+            if articles >= 3:
                 rows.append((item.symbol, "READY", "CafeF", "rss",
                              f"{articles} article(s) in last {window}d"))
+            elif articles > 0:
+                rows.append((item.symbol, "PARTIAL", "CafeF", "rss",
+                             f"{articles} article(s) in last {window}d"))
+            elif item.symbol in known_tickers:
+                rows.append((item.symbol, "STALE", "CafeF", "rss",
+                             f"newest article is older than {window}d"))
             else:
                 # Absence of articles is MISSING, never Neutral sentiment.
                 rows.append((item.symbol, "MISSING", "CafeF", "rss",
@@ -586,7 +600,7 @@ class MarketCoverageEngine:
             logger.exception("coverage could not persist news coverage")
         report.news = (
             f"OK inserted={result.inserted} duplicates={result.duplicates} "
-            f"linked={sum(1 for r in rows if r[1] == 'READY')}"
+            f"linked={sum(1 for r in rows if r[1] in SUCCESS_STATES)}"
         )
 
     def _news_symbols(self) -> set[str]:

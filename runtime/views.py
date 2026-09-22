@@ -163,6 +163,19 @@ class SentimentView:
     latest_at: datetime | None = None
     backends: tuple[str, ...] = ()
     note: str | None = None
+    articles: tuple[SentimentArticleView, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SentimentArticleView:
+    title: str
+    published_at: datetime
+    source: str
+    url: str
+    event_type: str = "OTHER"
+    sentiment_label: str | None = None
+    sentiment_score: float | None = None
+    model_confidence: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

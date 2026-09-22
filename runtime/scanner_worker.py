@@ -29,7 +29,8 @@ from scanner.universe import (
     daily_prescreen,
     realtime_watch_universe,
 )
-from strategy.technical_strategies import evaluate_cl1
+from asmf_data.scoring import fundamental_score, institutional_flow_score
+from strategy.technical_strategies import evaluate_asmf, evaluate_cl1
 
 LOGGER = logging.getLogger(__name__)
 
@@ -236,7 +237,20 @@ def run_scan_cycle(
             strategy_view = None
             f_status = None
             if bars:
-                if strat_upper == "CL1":
+                as_of_sym = datetime.fromtimestamp(bars[-1].timestamp, timezone.utc).date()
+                if strat_upper == "ASMF":
+                    try:
+                        f_score = fundamental_score(connection, sym, as_of_sym)
+                        flow_score = institutional_flow_score(connection, sym, as_of_sym)
+                        asmf_res = evaluate_asmf(
+                            bars, benchmark_bars,
+                            fundamental_score=f_score,
+                            institutional_flow_score=flow_score,
+                        )
+                        strategy_view = build_strategy_view(asmf_res)
+                    except (ValueError, Exception):
+                        strategy_view = None
+                else:  # CL1
                     try:
                         strategy_view = build_strategy_view(evaluate_cl1(bars))
                     except ValueError:

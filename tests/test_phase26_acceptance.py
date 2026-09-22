@@ -25,7 +25,7 @@ def rec(status, rows=0, reason=None, provider="VNStock"):
 
 
 def test_summarize_prints_metadata_not_payload() -> None:
-    result = ScriptedProvider().fetch_financials("FPT", exchange="HOSE")
+    result = ScriptedProvider(statement_count=1).fetch_financials("FPT", exchange="HOSE")
     record = summarize(result)
     assert (record.provider, record.symbol, record.status, record.rows) == ("VNStock", "FPT", "AVAILABLE", 1)
     line = record.line()
@@ -53,20 +53,40 @@ def test_provider_acceptance_is_bounded_and_never_raises() -> None:
     assert "boom" in records[1].reason
 
 
-def test_live_rows_without_public_date_are_staged_but_not_promoted(tmp_path) -> None:
+def test_live_rows_without_promotable_fields_are_staged_but_not_promoted(tmp_path) -> None:
     conn = make_connection(tmp_path)
 
-    class NoDate(ScriptedProvider):
+    class IncompleteRow(ScriptedProvider):
         def fetch_financials(self, symbol, *, exchange=None):
             r = super().fetch_financials(symbol, exchange=exchange)
             from dataclasses import replace
-            return replace(r, statements=(statement(symbol, public_date=None),))
+            return replace(r, statements=(statement(symbol, period="2026Q1", public_date=date(2026, 5, 1), short_term_debt=None, long_term_debt=None),))
 
     records, violations = run_chain_refresh_acceptance(
-        conn, ProviderChain([NoDate()]), [("FPT", "HOSE")], sleep=Sleeper())
+        conn, ProviderChain([IncompleteRow()]), [("FPT", "HOSE")], sleep=Sleeper())
     assert violations == []
     assert conn.execute("SELECT COUNT(*) FROM automated_financial_statements").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM financial_reports").fetchone()[0] == 0   # correctness over coverage
+    assert records[0].rows == 1 and records[0].status == "AVAILABLE"
+    assert provider_verdict(records)[0] == PASS
+
+
+def test_live_rows_without_actual_public_date_are_promoted_with_lag(tmp_path) -> None:
+    conn = make_connection(tmp_path)
+
+    class EstimatedDate(ScriptedProvider):
+        def fetch_financials(self, symbol, *, exchange=None):
+            r = super().fetch_financials(symbol, exchange=exchange)
+            from dataclasses import replace
+            return replace(r, statements=(statement(symbol, period="2026Q1", public_date=None),))
+
+    records, violations = run_chain_refresh_acceptance(
+        conn, ProviderChain([EstimatedDate()]), [("FPT", "HOSE")], sleep=Sleeper())
+    assert violations == []
+    assert conn.execute("SELECT COUNT(*) FROM automated_financial_statements WHERE promoted_to_canonical=1").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM financial_reports").fetchone()[0] == 1
+    row = conn.execute("SELECT public_date FROM financial_reports").fetchone()
+    assert row["public_date"] == "2026-05-15"
     assert records[0].rows == 1 and records[0].status == "AVAILABLE"
     assert provider_verdict(records)[0] == PASS
 

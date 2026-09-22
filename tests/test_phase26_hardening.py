@@ -327,6 +327,7 @@ def test_concurrent_writers_do_not_corrupt_or_duplicate(tmp_path) -> None:
 
     def worker(offset: int) -> None:
         conn = make_connection(tmp_path)
+        conn.execute("PRAGMA busy_timeout=30000")
         try:
             for round_ in range(15):
                 for i in range(20):

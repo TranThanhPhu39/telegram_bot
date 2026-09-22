@@ -363,3 +363,205 @@ def test_short_history_degrades_without_raising() -> None:
     text = runtime.symbol_overview("FPT")
     assert "Chưa đủ dữ liệu" in text
     assert "N/A" in text
+
+
+# ------------------------------------------------------------ Issue 7 tests
+
+def test_soi_renders_compact_sentiment() -> None:
+    runtime = service(news=PositiveNews())
+    add_fundamentals(runtime)
+    text = runtime.symbol_overview("FPT")
+    assert "📰 SENTIMENT\nPositive | score +0.92 | 9 bài\nTin mới nhất:" in text
+    assert "P/N/N:" not in text
+    assert "model confidence 0.95" not in text
+
+
+def test_format_sentiment_includes_articles_with_safe_urls_and_metrics() -> None:
+    from runtime.views import SentimentArticleView, SentimentView
+    from telegram_bot.formatters import format_sentiment
+
+    now = datetime(2026, 9, 21, 10, 50, tzinfo=timezone.utc)
+    articles = (
+        SentimentArticleView(
+            title="[ĐHCĐ] FPT tăng trưởng mạnh",
+            published_at=now,
+            source="CafeF",
+            url="https://cafef.vn/fpt-tang-truong.chn",
+            event_type="EARNINGS",
+            sentiment_label="POSITIVE",
+            sentiment_score=0.85,
+            model_confidence=0.92,
+        ),
+        SentimentArticleView(
+            title="Thị trường rung lắc FPT giảm nhẹ",
+            published_at=now - timedelta(hours=2),
+            source="Vietstock",
+            url="https://cafef.vn/fpt-giam-nhe(1).chn",
+            event_type="MARKET",
+            sentiment_label="NEGATIVE",
+            sentiment_score=-0.43,
+            model_confidence=0.63,
+        ),
+    )
+    view = SentimentView(
+        available=True,
+        label="Positive",
+        score=0.42,
+        model_confidence=0.80,
+        article_count=2,
+        positive_count=1,
+        neutral_count=0,
+        negative_count=1,
+        top_events=("EARNINGS", "MARKET"),
+        latest_at=now,
+        backends=("phobert",),
+        articles=articles,
+    )
+    text = format_sentiment("FPT", view)
+    assert "📰 FPT — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)" in text
+    assert "Nhãn tổng hợp: Positive" in text
+    assert "Chi tiết bài viết:" in text
+    # 1. TÍCH CỰC with escaped brackets in title
+    assert "1. TÍCH CỰC [(ĐHCĐ) FPT tăng trưởng mạnh](https://cafef.vn/fpt-tang-truong.chn)" in text
+    assert "Nguồn: CafeF" in text
+    assert "Score: +0.85 | Confidence: 0.92" in text
+    # 2. TIÊU CỰC with escaped parens in URL
+    assert "2. TIÊU CỰC [Thị trường rung lắc FPT giảm nhẹ](https://cafef.vn/fpt-giam-nhe%281%29.chn)" in text
+    assert "Nguồn: Vietstock" in text
+    assert "Score: -0.43 | Confidence: 0.63" in text
+
+
+def test_sentiment_overview_end_to_end(tmp_path) -> None:
+    from intelligence.news.models import NewsItem, SentimentLabel, SentimentResult
+    from intelligence.news.repository import SQLiteNewsRepository
+    from intelligence.news.service import SentimentQueryService
+
+    repo = SQLiteNewsRepository(str(tmp_path / "news.db"))
+    now = datetime(2026, 9, 21, 10, 50, tzinfo=timezone.utc)
+    item = NewsItem(
+        id="news_1",
+        source="CafeF",
+        url="https://s.cafef.vn/fpt-123.chn",
+        published_at=now,
+        title="FPT ký hợp đồng lớn",
+        tickers=("FPT",),
+        primary_ticker="FPT",
+        sentiment=SentimentResult(
+            label=SentimentLabel.POSITIVE,
+            probability_positive=0.9,
+            probability_neutral=0.1,
+            probability_negative=0.0,
+            model_confidence=0.95,
+            backend="phobert",
+            model_name="phobert-base",
+            model_version="1.0",
+            analyzed_at=now,
+        ),
+    )
+    repo.save(item)
+    news_svc = SentimentQueryService(repo, 24.0)
+
+    runtime = service(news=news_svc)
+    text = runtime.sentiment_overview("FPT")
+    assert "📰 FPT — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)" in text
+    assert "Chi tiết bài viết:" in text
+    assert "1. TÍCH CỰC [FPT ký hợp đồng lớn](https://s.cafef.vn/fpt-123.chn)" in text
+
+
+def test_format_sentiment_caps_at_5_articles_and_handles_none_metrics() -> None:
+    from runtime.views import SentimentArticleView, SentimentView
+    from telegram_bot.formatters import format_sentiment
+
+    now = datetime(2026, 9, 21, 10, 50, tzinfo=timezone.utc)
+    articles = tuple(
+        SentimentArticleView(
+            title=f"[Tin {i}] Tiêu đề bài viết số {i}",
+            published_at=now - timedelta(days=i),
+            source="CafeF",
+            url=f"https://cafef.vn/tin-{i}.chn",
+            sentiment_label="NEUTRAL" if i % 2 == 0 else "POSITIVE",
+            sentiment_score=None if i == 1 else 0.5,
+            model_confidence=None if i == 1 else 0.8,
+        )
+        for i in range(1, 8)  # 7 articles
+    )
+    view = SentimentView(
+        available=True,
+        label="Positive",
+        score=0.5,
+        model_confidence=0.8,
+        article_count=7,
+        positive_count=4,
+        neutral_count=3,
+        negative_count=0,
+        top_events=("OTHER",),
+        latest_at=now,
+        backends=("lexicon",),
+        articles=articles,
+    )
+    text = format_sentiment("TCB", view)
+    assert "1. TÍCH CỰC [(Tin 1) Tiêu đề bài viết số 1](https://cafef.vn/tin-1.chn)" in text
+    assert "5. TÍCH CỰC [(Tin 5) Tiêu đề bài viết số 5](https://cafef.vn/tin-5.chn)" in text
+    assert "6." not in text
+    assert "7." not in text
+    # Article 1 has None score and confidence; verify it doesn't crash or print None
+    assert "Score: None" not in text
+    assert "Confidence: None" not in text
+
+
+def test_callback_sent_renders_article_level_sentiment() -> None:
+    from telegram_bot.app import render_callback
+
+    runtime = service(news=PositiveNews())
+    commands = TelegramCommandService(runtime)
+    text = render_callback(commands, "sent", "FPT")
+    assert "📰 FPT — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)" in text
+    assert "Nhãn tổng hợp: Positive" in text
+    assert "Sentiment là context; tự nó không tạo tín hiệu MUA." in text
+
+
+def test_soi_compact_sentiment_various_states() -> None:
+    from runtime.views import SentimentView
+    from telegram_bot.formatters import _sentiment_block
+
+    now = datetime(2026, 9, 21, 10, 50, tzinfo=timezone.utc)
+    # 1. Available
+    v1 = SentimentView(available=True, label="Negative", score=-0.43, article_count=2, latest_at=now)
+    out1 = _sentiment_block(v1, compact=True)
+    assert out1 == "📰 SENTIMENT\nNegative | score -0.43 | 2 bài\nTin mới nhất: 21/09 17:50"
+    assert "P/N/N" not in out1
+    assert "model confidence" not in out1
+
+    # 2. Unavailable with note
+    v2 = SentimentView(available=False, note="Không có tin trong cửa sổ theo dõi.")
+    out2 = _sentiment_block(v2, compact=True)
+    assert out2 == "📰 SENTIMENT\nKhông có tin trong cửa sổ theo dõi."
+
+    # 3. Unavailable default
+    v3 = SentimentView(available=False)
+    out3 = _sentiment_block(v3, compact=True)
+    assert out3 == "📰 SENTIMENT\nNews sentiment unavailable."
+
+
+def test_build_risk_items_removes_24h_wording() -> None:
+    from runtime.analysis import build_risk_items
+    from runtime.views import SentimentView
+
+    negative_sentiment = SentimentView(
+        available=True,
+        label="Negative",
+        score=-0.45,
+        article_count=3,
+    )
+    risks, watch = build_risk_items(
+        technical=None,
+        market=None,
+        strategy=None,
+        sentiment=negative_sentiment,
+    )
+    assert len(risks) == 1
+    assert "24h" not in risks[0]
+    assert "24 giờ" not in risks[0]
+    assert risks[0] == "Sentiment tin tức âm (-0.45); đây là context, không phải lệnh bán"
+
+

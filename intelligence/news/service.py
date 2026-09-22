@@ -7,12 +7,17 @@ import math
 from intelligence.news.models import NewsItem, SentimentLabel
 from intelligence.news.repository import SQLiteNewsRepository
 
+MAX_NEWS_AGE_DAYS: int = 30
+MAX_ARTICLES: int = 5
+
+
 @dataclass(frozen=True, slots=True)
 class SentimentAggregate:
     ticker: str; hours: int; score: float; article_count: int
     positive_count: int; neutral_count: int; negative_count: int
     model_confidence: float; top_events: tuple[str, ...]
     latest_at: datetime | None; backends: tuple[str, ...]
+    articles: tuple[NewsItem, ...] = ()
 
 class SentimentQueryService:
     def __init__(self, repository: SQLiteNewsRepository, half_life_hours: float = 24):
@@ -21,8 +26,8 @@ class SentimentQueryService:
     def eligible_articles(
         self,
         ticker: str,
-        limit: int = 5,
-        max_age_days: int = 30,
+        limit: int = MAX_ARTICLES,
+        max_age_days: int = MAX_NEWS_AGE_DAYS,
         *,
         now: datetime | None = None,
     ) -> tuple[NewsItem, ...]:
@@ -39,8 +44,8 @@ class SentimentQueryService:
     def latest_news(
         self,
         ticker: str,
-        limit: int = 5,
-        max_age_days: int = 30,
+        limit: int = MAX_ARTICLES,
+        max_age_days: int = MAX_NEWS_AGE_DAYS,
         *,
         now: datetime | None = None,
     ):
@@ -51,8 +56,8 @@ class SentimentQueryService:
         ticker: str,
         hours: int | None = None,
         *,
-        limit: int = 5,
-        max_age_days: int = 30,
+        limit: int = MAX_ARTICLES,
+        max_age_days: int = MAX_NEWS_AGE_DAYS,
         now: datetime | None = None,
     ):
         end = now or datetime.now(timezone.utc)
@@ -90,6 +95,7 @@ class SentimentQueryService:
             tuple(dict.fromkeys(x.event_type for x in items))[:3],
             max(x.published_at for x in items),
             tuple(dict.fromkeys(x.sentiment.backend for x in items)),
+            articles=items,
         )
 
     def severe_negative(

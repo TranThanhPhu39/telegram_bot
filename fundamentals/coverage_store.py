@@ -111,9 +111,11 @@ def upsert_automated_statement(
         "nonperforming_loans", "loan_loss_reserve", "car_percent",
         "retrieved_at", "promoted_to_canonical",
     )
+    from fundamentals.adapters import resolve_public_date
+    effective_date, _ = resolve_public_date(row)
     values = (
         row.symbol, row.period, source, provider, provider_source,
-        None if row.public_date is None else row.public_date.isoformat(),
+        None if effective_date is None else effective_date.isoformat(),
         int(row.consolidated),
         *(columns[name] for name in STATEMENT_FIELDS),
         columns.get("net_interest_income"),
@@ -372,7 +374,15 @@ def load_all_coverage(connection: sqlite3.Connection, dataset: str | None = None
     return tuple(_status_from_row(row) for row in rows)
 
 
-def _status_from_row(row: sqlite3.Row) -> CoverageStatus:
+def _status_from_row(row: sqlite3.Row | tuple) -> CoverageStatus:
+    if isinstance(row, tuple):
+        return CoverageStatus(
+            symbol=row[0], dataset=row[1], status=row[2],
+            provider=row[3], provider_source=row[4],
+            error_reason=row[5], attempts=int(row[6]),
+            last_attempt_at=row[7], last_success_at=row[8],
+            updated_at=int(row[9]),
+        )
     return CoverageStatus(
         symbol=row["symbol"], dataset=row["dataset"], status=row["status"],
         provider=row["provider"], provider_source=row["provider_source"],

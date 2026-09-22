@@ -162,7 +162,7 @@ def test_vnstock_falls_through_source_preference_when_one_source_is_unsupported(
 
 
 def test_vnstock_default_sources_match_supported_v4_finance_backends() -> None:
-    assert DEFAULT_SOURCE_PREFERENCE == ("KBS", "VCI")
+    assert DEFAULT_SOURCE_PREFERENCE == ("KBS", "VCI", "TCBS")
 
 
 def test_vnstock_normalizes_v4_kbs_wide_semantic_statements() -> None:
@@ -374,8 +374,9 @@ def test_yfinance_never_supplies_institutional_flow() -> None:
 
 # ------------------------------------------------------------------- TCBS
 class _FakeTCBSResponse:
-    def __init__(self, payload: object) -> None:
+    def __init__(self, payload: object, status_code: int = 200) -> None:
         self._payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self) -> None:
         return None

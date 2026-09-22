@@ -246,3 +246,127 @@ def test_latest_five_sentiment_and_canonical_selection(tmp_path):
                          published=NOW - timedelta(hours=24), primary="FPT"))
     assert service.severe_negative("FPT", now=NOW) is not None
 
+
+# -------------------------------------------------- Issue 5: Targeted ticker news refresh
+def test_cafef_ticker_news_provider_parses_html():
+    from intelligence.news.pipeline import CafeFTickerNewsProvider
+
+    html_sample = """
+    <html><body>
+    <div id="divEvents">
+        <ul>
+            <li>
+                <span>15/09/2026 08:30</span>
+                <a href="/du-lieu/HC1-2976744/hc1-tra-co-tuc.chn?utm_source=du-lieu">
+                    HC1: 22.09.2026, ngày GDKHQ trả cổ tức bằng tiền mặt
+                </a>
+            </li>
+            <li>
+                <span>10/09/2026</span>
+                <a href="//cafef.vn/hc1-dai-hoi-co-dong.chn">
+                    HC1: Nghị quyết Đại hội đồng cổ đông bất thường
+                </a>
+            </li>
+            <li>
+                <span>01/08/2026</span>
+                <a href="/du-lieu/HC1-old.chn">
+                    HC1: Tin cũ hơn 30 ngày bị loại
+                </a>
+            </li>
+        </ul>
+    </div>
+    </body></html>
+    """
+    provider = CafeFTickerNewsProvider()
+    items = provider.parse_html(html_sample, "HC1", limit=5, max_age_days=30, now=NOW)
+    assert len(items) == 2
+    assert items[0].primary_ticker == "HC1"
+    assert items[0].tickers == ("HC1",)
+    assert items[0].source == "cafef_ticker"
+    assert "HC1: 22.09.2026" in items[0].title
+    assert items[0].url == "https://s.cafef.vn/du-lieu/HC1-2976744/hc1-tra-co-tuc.chn"
+    assert items[1].url == "https://cafef.vn/hc1-dai-hoi-co-dong.chn"
+    assert items[0].published_at.year == 2026
+    assert items[0].published_at.month == 9
+    assert items[0].published_at.day == 15
+
+
+def test_refresh_ticker_news_populates_repository_and_sentiment(tmp_path):
+    from intelligence.news.pipeline import CafeFTickerNewsProvider, refresh_ticker_news
+
+    html_sample = """
+    <div id="divEvents">
+        <p>18/09/2026 09:00 <a href="/du-lieu/HC1-1.chn">HC1: Doanh thu quý 3 tăng trưởng mạnh</a></p>
+        <p>12/09/2026 <a href="/du-lieu/HC1-2.chn">HC1: Ký hợp đồng xây dựng dự án mới</a></p>
+    </div>
+    """
+    class FakeResponse:
+        text = html_sample
+        def raise_for_status(self): pass
+
+    provider = CafeFTickerNewsProvider(request_get=lambda *a, **kw: FakeResponse())
+    repo = SQLiteNewsRepository(tmp_path / "news.db")
+    model = LexiconSentimentModel(now=lambda: NOW)
+
+    count = refresh_ticker_news("HC1", repository=repo, sentiment_model=model, provider=provider, now=NOW)
+    assert count == 2
+
+    # Querying through SentimentQueryService immediately sees HC1 articles
+    service = SentimentQueryService(repo)
+    news = service.latest_news("HC1", now=NOW)
+    assert len(news) == 2
+    assert news[0].primary_ticker == "HC1"
+    assert news[0].sentiment is not None
+
+    agg = service.ticker_sentiment("HC1", now=NOW)
+    assert agg is not None
+    assert agg.article_count == 2
+    assert agg.ticker == "HC1"
+
+
+def test_targeted_news_worker_enqueues_and_processes(tmp_path):
+    import time
+    from runtime.news_refresh import TargetedNewsWorker
+    from intelligence.news.pipeline import CafeFTickerNewsProvider
+
+    html_sample = """
+    <div id="divEvents">
+        <p>19/09/2026 <a href="/du-lieu/VIC-1.chn">VIC: Công bố báo cáo tài chính quý</a></p>
+    </div>
+    """
+    class FakeResponse:
+        text = html_sample
+        def raise_for_status(self): pass
+
+    db_path = tmp_path / "news.db"
+    model = LexiconSentimentModel(now=lambda: NOW)
+    prov = CafeFTickerNewsProvider(request_get=lambda *a, **kw: FakeResponse())
+
+    worker = TargetedNewsWorker(
+        repository_factory=lambda: SQLiteNewsRepository(db_path),
+        sentiment_factory=lambda: model,
+        provider_factory=lambda: prov,
+        request_cooldown_seconds=60.0,
+    )
+    worker.start()
+    try:
+        # First request succeeds
+        assert worker.request("VIC") is True
+        # Immediate duplicate request rejected by cooldown/pending
+        assert worker.request("VIC") is False
+
+        # Wait briefly for worker thread to process queue
+        main_repo = SQLiteNewsRepository(db_path)
+        service = SentimentQueryService(main_repo)
+        for _ in range(40):
+            if len(service.latest_news("VIC", now=NOW)) > 0:
+                break
+            time.sleep(0.05)
+
+        vic_news = service.latest_news("VIC", now=NOW)
+        assert len(vic_news) == 1
+        assert vic_news[0].primary_ticker == "VIC"
+    finally:
+        worker.stop(timeout=5.0)
+
+

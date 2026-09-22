@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
 import html
@@ -274,3 +274,152 @@ class NewsIngestionService:
             if self.repository.save(analyzed): inserted += 1
             else: duplicates += 1
         return inserted, duplicates
+
+
+CAFEF_TICKER_EVENT_URL = "https://s.cafef.vn/tin-doanh-nghiep/{symbol}/Event.chn"
+VIETNAM_TZ = timezone(timedelta(hours=7))
+
+
+class CafeFTickerNewsProvider:
+    """Fetch ticker-specific news/events directly from CafeF corporate event page."""
+
+    def __init__(
+        self,
+        base_url: str = CAFEF_TICKER_EVENT_URL,
+        timeout: float = 15,
+        request_get: Callable | None = None,
+    ):
+        self.base_url = base_url
+        self.timeout = timeout
+        self.request_get = request_get or requests.get
+
+    def fetch(
+        self,
+        symbol: str,
+        limit: int = 5,
+        max_age_days: int = 30,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[NewsItem, ...]:
+        normalized_symbol = _normalize_symbol(symbol)
+        url = self.base_url.format(symbol=normalized_symbol)
+        try:
+            response = self.request_get(
+                url,
+                timeout=self.timeout,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) VNStockBot/1.0"},
+            )
+            response.raise_for_status()
+            content = response.text
+        except Exception:
+            logger.warning("failed to fetch CafeF ticker news for %s", normalized_symbol)
+            return ()
+
+        return self.parse_html(
+            content, normalized_symbol, limit=limit, max_age_days=max_age_days, now=now
+        )
+
+    def parse_html(
+        self,
+        html_content: str,
+        symbol: str,
+        limit: int = 5,
+        max_age_days: int = 30,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[NewsItem, ...]:
+        current_time = now or datetime.now(timezone.utc)
+        min_date = current_time - timedelta(days=max_age_days)
+
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html_content, "html.parser")
+        div_events = soup.find(id="divEvents")
+        if not div_events:
+            return ()
+
+        items: list[NewsItem] = []
+        seen_urls: set[str] = set()
+
+        for node in div_events.find_all(["li", "div", "p", "tr"]):
+            text = node.get_text(" ", strip=True)
+            match_date = re.search(r"(\d{1,2}/\d{1,2}/\d{4}(?:\s+\d{1,2}:\d{1,2})?)", text)
+            anchor = node.find("a", href=True)
+            if not match_date or not anchor:
+                continue
+
+            date_str = match_date.group(1)
+            try:
+                if " " in date_str:
+                    dt = datetime.strptime(date_str, "%d/%m/%Y %H:%M").replace(tzinfo=VIETNAM_TZ)
+                else:
+                    dt = datetime.strptime(date_str, "%d/%m/%Y").replace(tzinfo=VIETNAM_TZ)
+                pub_utc = dt.astimezone(timezone.utc)
+            except Exception:
+                continue
+
+            if pub_utc < min_date or pub_utc > current_time + timedelta(days=1):
+                continue
+
+            raw_href = anchor["href"].strip()
+            if raw_href.startswith("//"):
+                raw_url = "https:" + raw_href
+            elif raw_href.startswith("/"):
+                raw_url = "https://s.cafef.vn" + raw_href
+            else:
+                raw_url = raw_href
+
+            parts = urlsplit(raw_url)
+            clean_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+            if clean_url in seen_urls:
+                continue
+            seen_urls.add(clean_url)
+
+            title = normalize_text(anchor.get_text(strip=True))
+            if not title or len(title) < 5:
+                continue
+
+            identifier = hashlib.sha256(clean_url.encode("utf-8")).hexdigest()
+            event, importance = classify_event(title, "")
+
+            items.append(
+                NewsItem(
+                    id=identifier,
+                    source="cafef_ticker",
+                    url=clean_url,
+                    published_at=pub_utc,
+                    title=title,
+                    summary="",
+                    content="",
+                    tickers=(symbol,),
+                    primary_ticker=symbol,
+                    ticker_relevance={symbol: 1.0},
+                    event_type=event,
+                    event_importance=importance,
+                )
+            )
+
+        items.sort(key=lambda x: x.published_at, reverse=True)
+        return tuple(items[:max(1, limit)])
+
+
+def refresh_ticker_news(
+    symbol: str,
+    *,
+    repository: SQLiteNewsRepository,
+    sentiment_model: SentimentModel,
+    provider: CafeFTickerNewsProvider | None = None,
+    limit: int = 5,
+    max_age_days: int = 30,
+    now: datetime | None = None,
+) -> int:
+    """Fetch, analyze and persist ticker-specific news for a single symbol."""
+    prov = provider or CafeFTickerNewsProvider()
+    items = prov.fetch(symbol, limit=limit, max_age_days=max_age_days, now=now)
+    inserted = 0
+    for raw in items:
+        analyzed = replace(raw, sentiment=sentiment_model.analyze(raw))
+        if repository.save(analyzed):
+            inserted += 1
+    return len(items)
+

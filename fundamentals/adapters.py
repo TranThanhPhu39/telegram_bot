@@ -26,26 +26,52 @@ Two independent decisions are made here, both conservative on purpose:
 
 from __future__ import annotations
 
+from datetime import date
 from asmf_data.models import FinancialReport, InstitutionalFlow
-from fundamentals.providers.base import FlowRow, StatementRow
+from fundamentals.providers.base import (
+    DEFAULT_FS_PUBLISH_LAG_DAYS,
+    FlowRow,
+    StatementRow,
+    estimate_publication_date,
+)
+
+
+def resolve_public_date(
+    row: StatementRow, *, lag_days: int = DEFAULT_FS_PUBLISH_LAG_DAYS
+) -> tuple[date | None, str | None]:
+    """Resolve publication date for point-in-time canonical promotion.
+
+    Rule:
+    1. If provider supplies an actual public_date -> use it, source='actual'.
+    2. If absent but report_period exists -> estimate period_end_date + lag_days (default 45d), source='estimated_45d'.
+    3. If neither is establishable -> (None, None).
+    Never use period_end_date directly, which would introduce look-ahead bias.
+    """
+    if row.public_date is not None:
+        return row.public_date, row.public_date_source or "actual"
+    est = estimate_publication_date(row.period, lag_days=lag_days)
+    if est is not None:
+        return est, f"estimated_{lag_days}d"
+    return None, None
 
 
 #: Minimum evidence a raw provider row must carry before it can leave staging
 #: and enter the point-in-time canonical ``financial_reports`` table. Kept as
 #: one ordered list of checks so :func:`corporate_promotion_gap` (diagnostic)
 #: and :func:`promote_corporate_statement` (enforcement) can never drift apart.
-def corporate_promotion_gap(row: StatementRow) -> str | None:
+def corporate_promotion_gap(
+    row: StatementRow, *, lag_days: int = DEFAULT_FS_PUBLISH_LAG_DAYS
+) -> str | None:
     """Return why ``row`` cannot be promoted yet, or None if it is ready.
 
     This mirrors :func:`promote_corporate_statement`'s own requirements
     exactly. It exists so acquisition/coverage code can explain *why* a raw
     provider row with real values (revenue, equity, ...) still never reached
-    the point-in-time table — e.g. "the provider never established a
-    public_date" — instead of that gap silently looking identical to a fully
-    promoted row everywhere except the one table nobody watches.
+    the point-in-time table.
     """
-    if row.public_date is None:
-        return "no public_date established by provider"
+    pub_date, _ = resolve_public_date(row, lag_days=lag_days)
+    if pub_date is None:
+        return "no public_date or parsable report_period"
     revenue = row.get("revenue")
     if revenue is None or revenue < 0:
         return "no usable revenue value"
@@ -66,7 +92,9 @@ def corporate_promotion_gap(row: StatementRow) -> str | None:
     return None
 
 
-def promote_corporate_statement(row: StatementRow, *, source: str) -> FinancialReport | None:
+def promote_corporate_statement(
+    row: StatementRow, *, source: str, lag_days: int = DEFAULT_FS_PUBLISH_LAG_DAYS
+) -> FinancialReport | None:
     """Build a canonical :class:`FinancialReport`, or None if evidence is short.
 
     Every input the model requires as NOT NULL must be present and valid, and
@@ -75,7 +103,10 @@ def promote_corporate_statement(row: StatementRow, *, source: str) -> FinancialR
     :func:`corporate_promotion_gap` for the same rule with a human-readable
     reason attached.
     """
-    if corporate_promotion_gap(row) is not None:
+    if corporate_promotion_gap(row, lag_days=lag_days) is not None:
+        return None
+    pub_date, date_source = resolve_public_date(row, lag_days=lag_days)
+    if pub_date is None:
         return None
     revenue = row.get("revenue")
     net_profit = row.get("net_income_parent")
@@ -88,9 +119,10 @@ def promote_corporate_statement(row: StatementRow, *, source: str) -> FinancialR
     try:
         return FinancialReport(
             symbol=row.symbol, report_period=row.period,
-            public_date=row.public_date, consolidated=row.consolidated,
+            public_date=pub_date, consolidated=row.consolidated,
             revenue=revenue, net_profit=net_profit, equity=equity,
             total_debt=total_debt, source=source,
+            public_date_source=date_source or "actual",
         )
     except ValueError:
         return None

@@ -36,11 +36,13 @@ class FinancialReport:
     equity: float
     total_debt: float
     source: str
+    public_date_source: str = "actual"
 
     def __post_init__(self) -> None:
         _normalized(self.symbol, "symbol")
         _text(self.report_period, "report_period")
         _text(self.source, "source")
+        _text(self.public_date_source, "public_date_source")
         for name in ("revenue", "net_profit", "equity", "total_debt"):
             if not isfinite(getattr(self, name)):
                 raise ValueError(f"{name} must be finite")

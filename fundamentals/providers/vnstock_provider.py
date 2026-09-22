@@ -35,7 +35,7 @@ LOGGER = logging.getLogger(__name__)
 
 #: Backends vnstock exposes for Vietnamese equities, most complete first. The
 #: adapter only uses the ones the installed release actually accepts.
-DEFAULT_SOURCE_PREFERENCE = ("KBS", "VCI")
+DEFAULT_SOURCE_PREFERENCE = ("KBS", "VCI", "TCBS")
 
 #: Column aliases seen across vnstock releases and Vietnamese/English schemas,
 #: mapped onto the canonical field names. Matching is case-insensitive on a

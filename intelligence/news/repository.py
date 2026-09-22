@@ -68,6 +68,7 @@ class SQLiteNewsRepository:
             ticker_columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(news_tickers)")}
             if "relevance" not in ticker_columns:
                 self.connection.execute("ALTER TABLE news_tickers ADD COLUMN relevance REAL NOT NULL DEFAULT 0.0")
+            self.connection.execute("CREATE INDEX IF NOT EXISTS idx_news_tickers_ticker ON news_tickers(ticker)")
 
     def save(self, item: NewsItem) -> bool:
         sentiment = item.sentiment
@@ -159,3 +160,10 @@ class SQLiteNewsRepository:
             (ticker.strip().upper(), max(1, limit)),
         ).fetchall()
         return tuple(item for row in rows if (item := self.get(row["id"])) is not None)
+
+    def all_tickers_with_articles(self) -> set[str]:
+        """Read-only: all distinct tickers with at least one linked article in SQLite."""
+        rows = self.connection.execute(
+            "SELECT DISTINCT ticker FROM news_tickers"
+        ).fetchall()
+        return {row["ticker"] for row in rows}

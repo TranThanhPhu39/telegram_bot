@@ -41,7 +41,7 @@ class FakeData:
         return f"TIN MỚI NHẤT — {symbol}"
 
     def sentiment_overview(self, symbol: str) -> str:
-        return f"NEWS SENTIMENT 24h: {symbol}"
+        return f"NEWS SENTIMENT: {symbol}"
 
 
 class FakeBot:
@@ -74,7 +74,10 @@ def test_start_help_and_all_data_commands() -> None:
     assert commands.why(["fpt"]) == "RVOL tốt"
     assert commands.performance() == "Win rate: 50%"
     assert commands.news(["fpt"]) == "TIN MỚI NHẤT — FPT"
-    assert commands.sentiment(["fpt"]) == "NEWS SENTIMENT 24h: FPT"
+    assert commands.sentiment(["fpt"]) == "NEWS SENTIMENT: FPT"
+    assert "24 giờ" not in commands.help()
+    assert "24h" not in commands.help()
+    assert "/sentiment FPT - sentiment tin tức gần đây" in commands.help()
 
 
 def test_commands_handle_missing_data_and_usage() -> None:

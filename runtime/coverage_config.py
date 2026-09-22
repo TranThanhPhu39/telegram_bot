@@ -66,7 +66,7 @@ class CoverageConfig:
     news_interval_seconds: float = 1800.0
     news_ingest_limit: int = 30
     #: A symbol counts as having news coverage if linked to an article this recent.
-    news_window_days: int = 7
+    news_window_days: int = 30
     datasets: tuple[str, ...] = DEFAULT_DATASETS
 
     def __post_init__(self) -> None:
@@ -201,6 +201,9 @@ class CoverageConfig:
             news_interval_seconds=number("NEWS_REFRESH_INTERVAL", defaults.news_interval_seconds),
             news_ingest_limit=int(number(
                 "NEWS_INGEST_LIMIT", defaults.news_ingest_limit, integer=True
+            )),
+            news_window_days=int(number(
+                "NEWS_WINDOW_DAYS", defaults.news_window_days, integer=True
             )),
             datasets=datasets,
         )

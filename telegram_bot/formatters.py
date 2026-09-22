@@ -7,6 +7,7 @@ value is printed as an explicit unavailable marker.
 
 from __future__ import annotations
 
+from datetime import timedelta, timezone
 from typing import Sequence
 
 from runtime.views import (
@@ -15,13 +16,26 @@ from runtime.views import (
     NewsItemView,
     ScanRowView,
     SectorView,
+    SentimentArticleView,
     SentimentView,
     StockAnalysisView,
     TechnicalView,
 )
 
+VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
 UNAVAILABLE = "N/A"
 DISCLAIMER = "Tín hiệu định lượng, không phải khuyến nghị đầu tư."
+
+DIVIDER = "────────────────────────"
+HEADER_DIVIDER = "━━━━━━━━━━━━━━━━━━━━━━━━"
+
+
+def escape_markdown_link(title: str, url: str) -> tuple[str, str]:
+    """Escape title and URL so [title](url) is valid markdown and cannot break Telegram."""
+    safe_title = title.replace("[", "(").replace("]", ")").replace("\n", " ").strip()
+    safe_url = url.strip().replace(" ", "%20").replace("(", "%28").replace(")", "%29")
+    return safe_title, safe_url
+
 
 FRESHNESS_LABELS = {
     Freshness.REALTIME: "Realtime",
@@ -52,24 +66,25 @@ def format_stock_overview(view: StockAnalysisView, extra_blocks: Sequence[str] =
     """
     if view.error:
         return view.error
-    blocks: list[str] = [f"📊 {view.symbol} — TỔNG QUAN"]
+    blocks: list[str] = [f"📊 {view.symbol} — TỔNG QUAN\n{HEADER_DIVIDER}"]
 
     if view.price is not None:
         blocks.append(
             "💰 GIÁ\n"
-            f"Đóng cửa: {number(view.price.close)} ({percent(view.price.change_percent)})\n"
-            f"Khối lượng: {integer(view.price.volume)}\n"
-            f"Dữ liệu phiên: {view.price.session_date or UNAVAILABLE}"
+            f"• Đóng cửa: {number(view.price.close)} ({percent(view.price.change_percent)})\n"
+            f"• Khối lượng: {integer(view.price.volume)}\n"
+            f"• Dữ liệu phiên: {view.price.session_date or UNAVAILABLE}"
         )
 
     if view.technical is not None:
         technical = view.technical
+        trend_icon = "📈" if "TĂNG" in technical.trend else "📉" if "GIẢM" in technical.trend else "➡️"
         blocks.append(
             "📈 KỸ THUẬT\n"
-            f"Xu hướng: {technical.trend}\n"
-            f"EMA20: {number(technical.ema20)} | EMA50: {number(technical.ema50)}\n"
-            f"RSI14: {number(technical.rsi14)} | ADX14: {number(technical.adx14)}\n"
-            f"KL/TB20: {_ratio(technical.volume_ratio)} | "
+            f"• Xu hướng: {trend_icon} {technical.trend}\n"
+            f"• EMA20: {number(technical.ema20)} | EMA50: {number(technical.ema50)}\n"
+            f"• RSI14: {number(technical.rsi14)} | ADX14: {number(technical.adx14)}\n"
+            f"• KL/TB20: {_ratio(technical.volume_ratio)} | "
             f"RS vs VNINDEX: {percent(technical.relative_strength)}"
         )
         levels = _levels_block(technical)
@@ -96,8 +111,7 @@ def format_stock_overview(view: StockAnalysisView, extra_blocks: Sequence[str] =
 
     blocks.extend(block for block in extra_blocks if block)
     blocks.append(_data_quality_block(view))
-    blocks.append("Gõ /why " + view.symbol + " để xem giải thích chi tiết.")
-    blocks.append(DISCLAIMER)
+    blocks.append(f"{DIVIDER}\n💡 Gõ /why {view.symbol} để xem giải thích chi tiết.\n⚠️ {DISCLAIMER}")
     return "\n\n".join(blocks)
 
 
@@ -107,10 +121,11 @@ def format_technical(view: StockAnalysisView) -> str:
     if view.technical is None:
         return f"Chưa đủ dữ liệu kỹ thuật cho {view.symbol}."
     technical = view.technical
+    trend_icon = "📈" if "TĂNG" in technical.trend else "📉" if "GIẢM" in technical.trend else "➡️"
     blocks = [
-        f"📈 {view.symbol} — KỸ THUẬT",
+        f"📈 {view.symbol} — KỸ THUẬT\n{HEADER_DIVIDER}",
         (
-            f"Xu hướng: {technical.trend}\n"
+            f"Xu hướng: {trend_icon} {technical.trend}\n"
             f"EMA20: {number(technical.ema20)}\n"
             f"EMA50: {number(technical.ema50)}\n"
             f"MA200: {number(technical.ma200)}\n"
@@ -127,7 +142,7 @@ def format_technical(view: StockAnalysisView) -> str:
     if technical.missing:
         blocks.append("Thiếu dữ liệu:\n" + "\n".join(f"? {item}" for item in technical.missing))
     blocks.append(_data_quality_block(view))
-    blocks.append(DISCLAIMER)
+    blocks.append(f"{DIVIDER}\n⚠️ {DISCLAIMER}")
     return "\n\n".join(blocks)
 
 
@@ -135,7 +150,7 @@ def format_why(view: StockAnalysisView, interpretations: Sequence[str]) -> str:
     """Explainability: state → evidence → interpretation → next triggers."""
     if view.error:
         return view.error
-    blocks: list[str] = [f"❓ {view.symbol} — VÌ SAO Ở TRẠNG THÁI NÀY?"]
+    blocks: list[str] = [f"❓ {view.symbol} — VÌ SAO Ở TRẠNG THÁI NÀY?\n{HEADER_DIVIDER}"]
     if view.strategy is not None:
         strategy = view.strategy
         header = f"Chiến lược {strategy.name}: {strategy.state}"
@@ -175,7 +190,7 @@ def format_why(view: StockAnalysisView, interpretations: Sequence[str]) -> str:
     if limitations:
         blocks.append("Giới hạn dữ liệu:\n" + "\n".join(f"- {item}" for item in dict.fromkeys(limitations)))
     blocks.append(format_data_quality(view.data_quality, include_notes=False))
-    blocks.append("Đây là context lịch sử; không phải khuyến nghị mua/bán.")
+    blocks.append(f"{DIVIDER}\n⚠️ Đây là context lịch sử; không phải khuyến nghị mua/bán.")
     return "\n\n".join(blocks)
 
 
@@ -190,7 +205,8 @@ def format_market(
     trend_icon = "📈" if "TĂNG" in view.trend else "📉" if "GIẢM" in view.trend else "➡️"
     index_label = f"VN-Index ({view.symbol})" if view.symbol == "VNINDEX" else view.symbol
     header_block = (
-        "🌐 BỐI CẢNH THỊ TRƯỜNG\n"
+        f"🌐 BỐI CẢNH THỊ TRƯỜNG\n"
+        f"{HEADER_DIVIDER}\n"
         f"• {index_label}: {number(view.close)} ({percent(view.change_percent)})\n"
         f"• Xu hướng: {trend_icon} {view.trend}\n"
         f"• EMA20: {number(view.ema20)} | EMA50: {number(view.ema50)}"
@@ -259,6 +275,7 @@ def format_market(
     blocks.append(data_quality_text)
 
     blocks.append(
+        f"{DIVIDER}\n"
         "👉 Chọn một mục bên dưới để xem chi tiết:\n\n"
         "🔎 Chatbot này chỉ dùng với mục đích tham khảo."
     )
@@ -271,7 +288,12 @@ def format_fundamental(view: StockAnalysisView) -> str:
     if view.fundamental is None:
         return f"🧾 {view.symbol} — CƠ BẢN\nFundamental data missing."
     return "\n\n".join(
-        [f"🧾 {view.symbol} — CƠ BẢN", _fundamental_block(view.fundamental), _data_quality_block(view)]
+        [
+            f"🧾 {view.symbol} — CƠ BẢN\n{HEADER_DIVIDER}",
+            _fundamental_block(view.fundamental),
+            _data_quality_block(view),
+            f"{DIVIDER}\n⚠️ {DISCLAIMER}",
+        ]
     )
 
 
@@ -280,7 +302,7 @@ def format_sentiment(symbol: str, view: SentimentView | None) -> str:
         note = (view.note if view is not None and view.note else "News sentiment unavailable.")
         return f"📰 {symbol} — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)\n{note}"
     lines = [
-        f"📰 {symbol} — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)",
+        f"📰 {symbol} — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)\n{HEADER_DIVIDER}",
         f"Nhãn tổng hợp: {view.label}",
         f"Score: {view.score:+.2f} (thang -1..+1, có giảm trọng số theo thời gian)",
         f"Model confidence: {number(view.model_confidence)} (độ tin cậy của bộ phân loại, "
@@ -290,41 +312,74 @@ def format_sentiment(symbol: str, view: SentimentView | None) -> str:
         f"Sự kiện chính: {', '.join(view.top_events) or UNAVAILABLE}",
         f"Tin mới nhất: {_time(view.latest_at)}",
         f"Model backend: {', '.join(view.backends) or UNAVAILABLE}",
-        "",
-        "Sentiment là context; tự nó không tạo tín hiệu MUA.",
     ]
+    if view.articles:
+        lines.append("")
+        lines.append(f"{DIVIDER}\nChi tiết bài viết:")
+        label_map = {
+            "POSITIVE": "TÍCH CỰC",
+            "positive": "TÍCH CỰC",
+            "NEGATIVE": "TIÊU CỰC",
+            "negative": "TIÊU CỰC",
+            "NEUTRAL": "TRUNG LẬP",
+            "neutral": "TRUNG LẬP",
+        }
+        for index, article in enumerate(view.articles[:5], start=1):
+            raw_label = article.sentiment_label or "TRUNG LẬP"
+            label_vn = label_map.get(raw_label, raw_label.upper())
+            safe_title, safe_url = escape_markdown_link(article.title, article.url)
+            lines.append(f"{index}. {label_vn} [{safe_title}]({safe_url})")
+            meta_parts = [
+                f"Thời gian: {_time(article.published_at)}",
+                f"Nguồn: {article.source or UNAVAILABLE}",
+            ]
+            lines.append(f"   {' | '.join(meta_parts)}")
+            metric_parts = []
+            if article.sentiment_score is not None:
+                metric_parts.append(f"Score: {article.sentiment_score:+.2f}")
+            if article.model_confidence is not None:
+                metric_parts.append(f"Confidence: {number(article.model_confidence)}")
+            if metric_parts:
+                lines.append(f"   {' | '.join(metric_parts)}")
+    lines.extend([
+        "",
+        DIVIDER,
+        "💡 Sentiment là context; tự nó không tạo tín hiệu MUA.",
+    ])
     return "\n".join(lines)
 
 
 def format_news(symbol: str, items: Sequence[NewsItemView]) -> str:
     if not items:
         return f"Không có tin gần đây cho {symbol}."
-    lines = [f"📰 TIN MỚI NHẤT — {symbol}"]
+    lines = [f"📰 TIN MỚI NHẤT — {symbol}\n{HEADER_DIVIDER}"]
     for item in items:
         lines.append(
-            f"• {item.published_at:%d/%m %H:%M} | {item.event_type} | "
-            f"{item.sentiment_label or 'unavailable'} | {item.source}\n{item.title}"
+            f"• {_time(item.published_at)} | {item.event_type} | "
+            f"{item.sentiment_label or 'unavailable'} | {item.source}\n"
+            f"  📌 {item.title}"
         )
-    return "\n".join(lines)
+    return "\n\n".join(lines)
 
 
 def format_sector(view: SectorView | None) -> str:
     if view is None or view.sector_code is None:
         return "📁 NGÀNH\nKhông có dữ liệu ngành cho mã/ngành này."
     lines = [
-        f"📁 NGÀNH {view.sector_code} — {view.sector_name or UNAVAILABLE}",
-        f"Số mã trong ngành: {view.member_count if view.member_count is not None else UNAVAILABLE}",
-        f"Điểm sức mạnh ngành: {number(view.strength_score, 1)}/100",
-        f"Breadth (trên MA50): {number(view.breadth_percent, 1)}%",
-        f"RS ngành vs VNINDEX: {percent(view.relative_strength)}",
+        f"📁 NGÀNH {view.sector_code} — {view.sector_name or UNAVAILABLE}\n{HEADER_DIVIDER}",
+        f"• Số mã trong ngành: {view.member_count if view.member_count is not None else UNAVAILABLE}",
+        f"• Điểm sức mạnh ngành: {number(view.strength_score, 1)}/100",
+        f"• Breadth (trên MA50): {number(view.breadth_percent, 1)}%",
+        f"• RS ngành vs VNINDEX: {percent(view.relative_strength)}",
     ]
     if view.leaders:
-        lines.append("Dẫn dắt: " + ", ".join(f"{s} {v:+.1f}%" for s, v in view.leaders))
+        lines.append(f"{DIVIDER}\n🥇 Dẫn dắt: " + ", ".join(f"{s} {v:+.1f}%" for s, v in view.leaders))
     if view.laggards:
-        lines.append("Yếu: " + ", ".join(f"{s} {v:+.1f}%" for s, v in view.laggards))
+        lines.append("🥀 Yếu: " + ", ".join(f"{s} {v:+.1f}%" for s, v in view.laggards))
     if view.missing:
-        lines.append("Thiếu dữ liệu: " + "; ".join(view.missing))
-    lines.append(f"Ngày tham chiếu: {view.as_of or UNAVAILABLE} | Nguồn: {view.source or UNAVAILABLE}")
+        lines.append(f"{DIVIDER}\nThiếu dữ liệu: " + "; ".join(view.missing))
+    lines.append(DIVIDER)
+    lines.append(f"📅 Ngày tham chiếu: {view.as_of or UNAVAILABLE} | Nguồn: {view.source or UNAVAILABLE}")
     return "\n".join(lines)
 
 
@@ -340,26 +395,28 @@ def format_scan(
     if not rows:
         return "Chưa có mã đạt bộ lọc."
     header = f"🔎 KẾT QUẢ QUÉT — CHIẾN LƯỢC {strategy}" if strategy != "CL1" else "🔎 KẾT QUẢ QUÉT"
-    lines = [header]
+    lines = [f"{header}\n{HEADER_DIVIDER}"]
     if total_universe is not None or as_of is not None:
         info = []
         if total_universe is not None:
             info.append(f"Toàn thị trường: {len(rows)}/{total_universe} mã đạt lọc")
         if as_of is not None:
             info.append(f"Ngày: {as_of}")
-        lines.append(" | ".join(info))
+        lines.append("📊 " + " | ".join(info))
+        lines.append(DIVIDER)
     if stale:
         lines.append("⚠️ Dữ liệu quét đã cũ (worker chưa cập nhật gần đây) — kết quả có thể không còn mới.")
     for index, row in enumerate(rows, start=1):
         lines.append(
             f"{index}. {row.symbol}\n"
-            f"   Xu hướng: {row.trend}\n"
-            f"   RS: {row.relative_strength}\n"
-            f"   Thanh khoản: {row.liquidity}\n"
-            f"   Cơ bản: {row.fundamental}\n"
-            f"   Chiến lược: {row.strategy_state}"
+            f"   • Xu hướng:   {row.trend}\n"
+            f"   • RS:         {row.relative_strength}\n"
+            f"   • Thanh khoản: {row.liquidity}\n"
+            f"   • Cơ bản:     {row.fundamental}\n"
+            f"   • Chiến lược: {row.strategy_state}"
         )
-    lines.append("Lọc theo thanh khoản + kỹ thuật; không phải danh sách khuyến nghị mua.")
+    lines.append(DIVIDER)
+    lines.append("⚠️ Lọc theo thanh khoản + kỹ thuật; không phải danh sách khuyến nghị mua.")
     return "\n".join(lines)
 
 
@@ -369,30 +426,31 @@ def _levels_block(technical: TechnicalView, *, verbose: bool = False) -> str:
     lines = ["📐 HỖ TRỢ / KHÁNG CỰ"]
     for level in technical.resistances:
         lines.append(
-            f"{level.label}: {number(level.value)}" + (f" — {level.reason}" if verbose else "")
+            f"🔴 {level.label}: {number(level.value)}" + (f" — {level.reason}" if verbose else "")
         )
     for level in technical.supports:
         lines.append(
-            f"{level.label}: {number(level.value)}" + (f" — {level.reason}" if verbose else "")
+            f"🟢 {level.label}: {number(level.value)}" + (f" — {level.reason}" if verbose else "")
         )
     return "\n".join(lines)
 
 
 def _market_summary(market: MarketContextView) -> str:
+    trend_icon = "📈" if "TĂNG" in market.trend else "📉" if "GIẢM" in market.trend else "➡️"
     return (
         "🌐 THỊ TRƯỜNG\n"
-        f"{market.symbol}: {number(market.close)} ({percent(market.change_percent)}) — {market.trend}\n"
-        f"Regime: {market.regime} ({market.regime_reason})\n"
-        f"Breadth: {market.breadth or 'unavailable'}"
+        f"• {market.symbol}: {number(market.close)} ({percent(market.change_percent)}) — {trend_icon} {market.trend}\n"
+        f"• Regime: {market.regime} ({market.regime_reason})\n"
+        f"• Breadth: {market.breadth or 'unavailable'}"
     )
 
 
 def _strategy_block(strategy) -> str:
     lines = [f"🎯 Chiến lược {strategy.name}: {strategy.state}"]
     if strategy.score is not None:
-        lines.append(f"Điểm bằng chứng (Evidence score): {strategy.score:.1f}/100 (tổng hợp điểm, không phải xác suất)")
+        lines.append(f"• Điểm bằng chứng (Evidence score): {strategy.score:.1f}/100 (tổng hợp điểm, không phải xác suất)")
     if strategy.evidence_total:
-        lines.append(f"Độ phủ bằng chứng: {strategy.evidence_covered}/{strategy.evidence_total}")
+        lines.append(f"• Độ phủ bằng chứng: {strategy.evidence_covered}/{strategy.evidence_total}")
     if strategy.layers:
         def _layer_label(item):
             name = "ASMF Market Filter" if strategy.name == "ASMF" and item.name == "Market" else item.name
@@ -401,23 +459,23 @@ def _strategy_block(strategy) -> str:
             core_layers = [i for i in strategy.layers if i.name != "Sentiment"]
             sentiment_layers = [i for i in strategy.layers if i.name == "Sentiment"]
             core_covered = sum(1 for i in core_layers if i.status.value != "MISSING")
-            lines.append(f"Độ phủ tầng cốt lõi: {core_covered}/{len(core_layers)} tầng")
-            lines.append("Tầng: " + " | ".join(_layer_label(i) for i in strategy.layers))
+            lines.append(f"• Độ phủ tầng cốt lõi: {core_covered}/{len(core_layers)} tầng")
+            lines.append("• Tầng: " + " | ".join(_layer_label(i) for i in strategy.layers))
             if sentiment_layers:
                 s = sentiment_layers[0]
-                lines.append(f"Lớp bổ trợ (Sentiment context): {s.status.value}" + (f" ({s.detail})" if s.detail else ""))
+                lines.append(f"• Lớp bổ trợ (Sentiment context): {s.status.value}" + (f" ({s.detail})" if s.detail else ""))
         else:
-            lines.append("Tầng: " + " | ".join(_layer_label(i) for i in strategy.layers))
+            lines.append("• Tầng: " + " | ".join(_layer_label(i) for i in strategy.layers))
     if strategy.positive:
-        lines.append("Đạt: " + "; ".join(strategy.positive))
+        lines.append("• Đạt: " + "; ".join(strategy.positive))
     if strategy.negative:
-        lines.append("Chưa đạt: " + "; ".join(strategy.negative))
+        lines.append("• Chưa đạt: " + "; ".join(strategy.negative))
     if strategy.missing:
-        lines.append("Thiếu dữ liệu: " + "; ".join(strategy.missing))
+        lines.append("• Thiếu dữ liệu: " + "; ".join(strategy.missing))
     if strategy.stop is not None:
-        lines.append(f"Chandelier Exit: {strategy.stop:g}")
+        lines.append(f"• Chandelier Exit: {strategy.stop:g}")
     if strategy.note:
-        lines.append(strategy.note)
+        lines.append(f"• {strategy.note}")
     return "\n".join(lines)
 
 
@@ -427,24 +485,34 @@ def _fundamental_block(fundamental, *, compact: bool = False) -> str:
     if compact:
         shown = shown[:4]
     for metric in shown:
-        lines.append(f"{metric.label}: {metric.value:,.2f}{metric.unit}")
+        lines.append(f"• {metric.label}: {metric.value:,.2f}{metric.unit}")
     if not shown:
         lines.append("Fundamental data missing.")
     if fundamental.missing and not compact:
-        lines.append("Thiếu: " + ", ".join(fundamental.missing))
+        lines.append("• Thiếu: " + ", ".join(fundamental.missing))
     if fundamental.period or fundamental.as_of:
         lines.append(
-            f"Kỳ báo cáo: {fundamental.period or UNAVAILABLE} | "
+            f"• Kỳ báo cáo: {fundamental.period or UNAVAILABLE} | "
             f"As-of: {fundamental.as_of or UNAVAILABLE}"
         )
     if fundamental.source and not compact:
-        lines.append(f"Nguồn: {fundamental.source}")
+        lines.append(f"• Nguồn: {fundamental.source}")
     if fundamental.note and not compact:
-        lines.append(fundamental.note)
+        lines.append(f"• {fundamental.note}")
     return "\n".join(lines)
 
 
 def _sentiment_block(sentiment: SentimentView, *, compact: bool = False) -> str:
+    if not sentiment.available:
+        header = "📰 SENTIMENT" if compact else "📰 SENTIMENT (5 TIN MỚI NHẤT)"
+        return f"{header}\n" + (sentiment.note or "News sentiment unavailable.")
+    if compact:
+        latest = _time(sentiment.latest_at)
+        return (
+            "📰 SENTIMENT\n"
+            f"{sentiment.label} | score {sentiment.score:+.2f} | {sentiment.article_count} bài\n"
+            f"Tin mới nhất: {latest}"
+        )
     return "📰 SENTIMENT (5 TIN MỚI NHẤT)\n" + _sentiment_line(sentiment)
 
 
@@ -469,18 +537,18 @@ def format_data_quality(quality, *, include_notes: bool = True) -> str:
     label = FRESHNESS_LABELS.get(quality.freshness, quality.freshness.value)
     if quality.staleness_days:
         label += f", cách {quality.staleness_days} ngày"
-    lines.append(f"Market data: {label}")
-    lines.append(f"Phiên dữ liệu: {quality.session_date or UNAVAILABLE}")
-    lines.append(f"Nguồn: {quality.market_source}")
+    lines.append(f"• Market data: {label}")
+    lines.append(f"• Phiên dữ liệu: {quality.session_date or UNAVAILABLE}")
+    lines.append(f"• Nguồn: {quality.market_source}")
     if quality.fundamental_source:
         lines.append(
-            f"Nguồn BCTC: {quality.fundamental_source} (as-of {quality.fundamental_as_of or UNAVAILABLE})"
+            f"• Nguồn BCTC: {quality.fundamental_source} (as-of {quality.fundamental_as_of or UNAVAILABLE})"
         )
     if quality.news_source:
-        lines.append(f"Nguồn tin: {quality.news_source} (mới nhất {_time(quality.news_latest_at)})")
+        lines.append(f"• Nguồn tin: {quality.news_source} (mới nhất {_time(quality.news_latest_at)})")
     if include_notes:
         for note in quality.notes:
-            lines.append(f"- {note}")
+            lines.append(f"  - {note}")
     return "\n".join(lines)
 
 
@@ -489,4 +557,11 @@ def _ratio(value: float | None) -> str:
 
 
 def _time(value) -> str:
-    return UNAVAILABLE if value is None else value.strftime("%d/%m %H:%M")
+    if value is None:
+        return UNAVAILABLE
+    if hasattr(value, "tzinfo") and value.tzinfo is not None:
+        try:
+            return value.astimezone(VIETNAM_TIMEZONE).strftime("%d/%m %H:%M")
+        except Exception:
+            pass
+    return value.strftime("%d/%m %H:%M")

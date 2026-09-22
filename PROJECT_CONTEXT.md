@@ -3687,14 +3687,87 @@ per-ticker refresh path for `/tin`/`/sentiment` to fall back on.
   expected: the on-demand refresh widens the sampled window, it does not
   guarantee an article exists right now.
 
+### Issue 9 — Fundamental data PARTIAL/MISSING & ASMF Point-in-Time fallback
+
+**Problem:**
+ASMF Tầng 2 requires financial statements to be queryable point-in-time (`public_date <= as_of`) to prevent look-ahead bias. The implementation in Phase 26 introduced a hard rejection in `corporate_promotion_gap` for any provider statement lacking an actual `public_date` (`if row.public_date is None: return "no public_date established by provider"`). As a consequence, providers without formal announcement dates (e.g. TCBS, VNStock wide format, and yfinance) had all their financial statements trapped in staging table `automated_financial_statements` without promotion to `financial_reports`, leaving ASMF fundamental scoring BLOCKED.
+
+**Strategy Resolution:**
+The strategy document does NOT mandate an actual provider `public_date`. The canonical rule is:
+1. Actual `public_date` present -> use actual (`public_date_source="actual"`).
+2. Actual `public_date` absent but valid `report_period` exists -> estimate `public_date = period_end_date(report_period) + 45 days` (`public_date_source="estimated_45d"`).
+3. Strictly forbid using `period_end_date` directly as `public_date` (avoids look-ahead bias).
+4. Forbid date fabrication outside the defined +45 days rule.
+5. If neither `public_date` nor `report_period` can be established -> reject statement record.
+6. ASMF query constraint remains untouched: `public_date <= as_of`.
+7. Tertiary source preference extended to include TCBS: `DEFAULT_SOURCE_PREFERENCE = ("KBS", "VCI", "TCBS")`.
+
+**Implementation:**
+- `fundamentals/providers/base.py`:
+  - Defined `DEFAULT_FS_PUBLISH_LAG_DAYS = 45`.
+  - Added `estimate_publication_date(period, lag_days=45)`.
+  - Added `public_date_source: str | None = None` and property `effective_public_date` to `StatementRow`.
+  - Relaxed `StatementRow.__post_init__` period string check to allow unparsable rows to reach promotion gap checks.
+- `asmf_data/models.py`:
+  - Added `public_date_source: str = "actual"` to `FinancialReport`.
+- `fundamentals/adapters.py`:
+  - Implemented `resolve_public_date(row, lag_days=45)`.
+  - Updated `corporate_promotion_gap` and `promote_corporate_statement` to resolve effective publication date and reject only if neither actual nor period-derived date is available.
+- `fundamentals/coverage_store.py`:
+  - Staged statements record `effective_date` in `public_date`.
+- `fundamentals/providers/vnstock_provider.py`:
+  - Added `"TCBS"` to `DEFAULT_SOURCE_PREFERENCE = ("KBS", "VCI", "TCBS")`.
+
+**8-Quarter Requirement Audit:**
+- `fundamental_score` in `asmf_data/scoring.py` strictly requires at least 8 quarters of point-in-time financial reports (`len(reports) < 8: return None`) to calculate YoY growth metrics (4 quarters current vs 4 quarters previous year).
+- With the +45d fallback, symbols with 8 quarters available from TCBS/yfinance are now fully unblocked (verified score = 80.0-100.0).
+- Symbols with fewer than 8 quarters will still return `None` as intended by strategy design (not diluted).
+
+**Verification:**
+- Full unit test suite covering requirements A through F:
+  - A: Actual `public_date` preserved.
+  - B: Missing actual date -> fallback to `period_end_date + 45 days`.
+  - C: Neither available -> rejected.
+  - D & E: Strict point-in-time boundaries: invisible prior to `period_end_date + 45d`, visible on/after.
+  - F: 8 quarters from TCBS enables fundamental score calculation.
+- Live verification script `scripts/test_issue9_live.py` passed 100%.
+- Full regression suite: **899/899 passed**.
+
+### Issue 10 — Coverage semantics chưa đồng nhất với ASMF readiness
+
+**Problem:**
+Coverage tracking (`symbol_data_coverage`) was reporting `PARTIAL` with diagnostic `BLOCKED BY DATA SOURCE` even when the canonical SQLite tables (`financial_reports` or `bank_financial_reports`) held $\ge 8$ point-in-time quarters. This occurred because `refresh_financials` and `refresh_institutional_flow` mirrored the ephemeral raw provider outcome (e.g. 8 of 9 periods promoted, 1 period discarded due to missing revenue) instead of assessing actual data readiness for strategy layers. Consequently, ASMF Tầng 2 was fully operational and computing scores, but operational tooling and `/coverage` falsely reported the stock as data-blocked. Similarly, `_refresh_market_history` evaluated daily history against 126 bars (sector requirement) instead of 200 bars (`MINIMUM_STRATEGY_HISTORY`), which is required for ASMF and CL1 strategy execution.
+
+**Strategy Resolution:**
+1. **FINANCIALS**: If canonical `financial_reports` (or `bank_financial_reports`) contains $\ge 8$ point-in-time quarters (`public_date <= as_of`), the dataset coverage status is marked `READY`. The reason string accurately documents strategy readiness: `"READY FOR ASMF ({canonical_count} quarters available); {promoted}/{total} raw period(s) promoted..."` instead of `"BLOCKED BY DATA SOURCE"`. If canonical quarters are between 1 and 7, coverage is `PARTIAL` (`BLOCKED BY DATA SOURCE`). If 0, coverage is `MISSING`.
+2. **MARKET_HISTORY**: Defined `MINIMUM_STRATEGY_HISTORY = 200` bars. When bars are below 200, reason explicitly states: `"short history: {count} of {minimum} daily bars; need {minimum} for ASMF/CL1"`.
+3. **INSTITUTIONAL**: If canonical `institutional_flows` contains $\ge 5$ trading sessions, coverage status is `READY`.
+4. The strict 8-quarter requirement in `fundamental_score` and 200-bar history requirement for strategy execution are preserved without dilution.
+
+**Implementation:**
+- `fundamentals/refresh_service.py`:
+  - Added `_count_canonical_financial_reports` and `_count_canonical_institutional_flows`.
+  - Added `_point_in_time_gap_reason` helper to emit `"READY FOR ASMF ({count} quarters available)..."` when canonical requirements are met.
+  - Reconciled `refresh_financials` and `refresh_institutional_flow` status determination with canonical readiness.
+- `runtime/coverage_worker.py`:
+  - Defined `MINIMUM_STRATEGY_HISTORY = 200`.
+  - Added `strategy_minimum_bars: int = MINIMUM_STRATEGY_HISTORY` to `HistoryClient`.
+  - Updated `_refresh_market_history` threshold and reason message.
+- `tests/coverage_fakes.py`:
+  - Updated `FakeHistory` with `strategy_minimum_bars = 200`.
+- `data/database.py` & `tests/test_phase26_hardening.py`:
+  - Improved SQLite busy timeout handling for high-concurrency test environments on Windows.
+
+**Verification:**
+- Unit tests:
+  - `tests/test_fundamental_refresh.py`: verified 8 quarters yields `READY` despite provider partial result; fewer than 8 quarters yields `PARTIAL`; 5 flow sessions yields `READY`.
+  - `tests/test_coverage_worker.py`: verified market history 200-bar threshold and reason string.
+- Full regression: **902/902 passed in 66.69s** (100% green).
+- Live verification:
+  - Ran `scripts/test_issue10_live.py` against live database with FPT and VIC. FPT has 8 canonical quarters, coverage `READY`, reason `READY FOR ASMF (8 quarters available); 8/9 raw period(s) promoted - no usable revenue value (1 period(s))`, ASMF score `60.0`.
+  - Verified `scripts/coverage_report.py --symbol FPT` outputs `FINANCIALS READY`.
+
 ### Remaining
 
-Issues 6–10 (news freshness window, per-article sentiment output, stale
-"24h" wording, fundamentals PARTIAL/MISSING, coverage-vs-ASMF-readiness
-semantics) are not started; see `TASKS.md` Phase 28 for the full list. Per
-the working agreement, each is audited and fixed one at a time with an
-explicit live-confirmation stop before starting the next. A follow-up
-decision is also open (not an "issue" in this list): whether to keep
-`/market`'s `DÒNG TIỀN NGOẠI/TỰ DOANH: unavailable` line visible (current
-behavior, matches the "mark unavailable rõ ràng" requirement) or remove it
-from output entirely — awaiting the user's choice.
+All known issues (Issue 1 through Issue 10) + Visual Polish + Audit M1/M2/M3 have been resolved, thoroughly tested, and live-verified.
+

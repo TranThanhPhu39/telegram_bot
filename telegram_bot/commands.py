@@ -24,30 +24,37 @@ class BotDataService(Protocol):
 
 
 HELP_TEXT = (
-    "Các lệnh:\n"
-    "/soi FPT [CL1|ASMF] - dashboard tổng quan một mã\n"
-    "/why FPT - giải thích vì sao ở trạng thái đó\n"
-    "/technical FPT - chi tiết kỹ thuật + hỗ trợ/kháng cự\n"
-    "/fundamental FPT - chỉ số cơ bản theo ngày công bố\n"
-    "/sentiment FPT - sentiment tin tức 24 giờ\n"
-    "/tin FPT - các tin mới nhất\n"
-    "/sector ACB - bối cảnh ngành\n"
-    "/chart FPT - biểu đồ nến kèm EMA20/EMA50\n"
-    "/market - trạng thái thị trường\n"
-    "/scan - danh sách quét kèm lý do\n"
-    "/chienluoc - mô tả CL1 và ASMF\n"
-    "/performance - kết quả backtest\n"
+    "🤖 HỆ THỐNG TRỢ LÝ ĐỊNH LƯỢNG CHỨNG KHOÁN\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "🔍 TRA CỨU & PHÂN TÍCH CỔ PHIẾU:\n"
+    "• /soi FPT [CL1|ASMF] - dashboard tổng quan một mã\n"
+    "• /why FPT - giải thích vì sao ở trạng thái đó\n"
+    "• /technical FPT - chi tiết kỹ thuật + hỗ trợ/kháng cự\n"
+    "• /fundamental FPT - chỉ số cơ bản theo ngày công bố\n"
+    "• /sentiment FPT - sentiment tin tức gần đây (tối đa 30 ngày)\n"
+    "• /tin FPT - các tin mới nhất\n"
+    "• /sector ACB - bối cảnh ngành\n"
+    "• /chart FPT - biểu đồ nến kèm EMA20/EMA50\n"
     "\n"
-    "Danh mục & rủi ro:\n"
-    "/watchlist - danh sách theo dõi | /addwatch FPT | /removewatch FPT\n"
-    "/portfolio - danh mục, P&L chưa thực hiện, tỷ trọng, phơi nhiễm\n"
-    "/addholding FPT 1000 150000 - thêm/cập nhật vị thế (số lượng, giá vốn)\n"
-    "/removeholding FPT - xóa vị thế\n"
-    "/risk - rủi ro danh mục (tập trung, biến động lịch sử)\n"
-    "/size FPT 150000 142000 500000000 [rủi ro %] - tính khối lượng theo ngân sách rủi ro\n"
-    "/stress portfolio -5 | /stress FPT -10 - kịch bản giảm giá tất định\n"
-    "/setrisk 1 | /risksettings - rủi ro mặc định mỗi lệnh"
+    "🌐 THỊ TRƯỜNG & CHIẾN LƯỢC:\n"
+    "• /market - trạng thái thị trường\n"
+    "• /scan - danh sách quét kèm lý do\n"
+    "• /chienluoc - mô tả CL1 và ASMF\n"
+    "• /performance - kết quả backtest\n"
+    "\n"
+    "💼 QUẢN LÝ DANH MỤC & RỦI RO:\n"
+    "• /watchlist - danh sách theo dõi | /addwatch FPT | /removewatch FPT\n"
+    "• /portfolio - danh mục, P&L chưa thực hiện, tỷ trọng, phơi nhiễm\n"
+    "• /addholding FPT 1000 150000 - thêm/cập nhật vị thế (số lượng, giá vốn)\n"
+    "• /removeholding FPT - xóa vị thế\n"
+    "• /risk - rủi ro danh mục (tập trung, biến động lịch sử)\n"
+    "• /size FPT 150000 142000 500000000 [rủi ro %] - tính khối lượng theo ngân sách rủi ro\n"
+    "• /stress portfolio -5 | /stress FPT -10 - kịch bản giảm giá tất định\n"
+    "• /setrisk 1 | /risksettings - rủi ro mặc định mỗi lệnh\n"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    "💡 Gõ /soi <MÃ> hoặc bấm vào các nút điều hướng để xem chi tiết."
 )
+
 
 UNSUPPORTED = "Tính năng này chưa được bật trong runtime hiện tại."
 
@@ -98,7 +105,7 @@ class TelegramCommandService:
         self, name: str, user_id: int | None, arguments: Sequence[str]
     ) -> str:
         """Portfolio/watchlist/risk commands, keyed by Telegram numeric user id."""
-        return self.portfolio.execute(name, user_id, arguments)    
+        return self.portfolio.execute(name, user_id, arguments)
 
     def start(self) -> str:
         return "Bot tín hiệu chứng khoán Việt Nam đã sẵn sàng.\n" + HELP_TEXT

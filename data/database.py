@@ -29,8 +29,9 @@ def sqlite_path_from_url(database_url: str) -> str:
 
 def connect_database(database_url: str) -> sqlite3.Connection:
     """Open a configured SQLite connection without creating application tables."""
-    connection = sqlite3.connect(sqlite_path_from_url(database_url))
+    connection = sqlite3.connect(sqlite_path_from_url(database_url), timeout=30.0)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     connection.execute("PRAGMA busy_timeout = 5000")
     return connection
+

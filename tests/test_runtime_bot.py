@@ -447,3 +447,27 @@ def test_soi_stock_analysis_hides_implausible_liquidity_like_market() -> None:
     soi_view = runtime.stock_analysis("FPT")
     assert soi_view.market is not None
     assert soi_view.market.liquidity is None
+
+
+def test_latest_news_and_sentiment_trigger_news_refresh_requester() -> None:
+    requested: list[str] = []
+
+    class EmptyNews:
+        def latest_news(self, *args, **kwargs): return ()
+        def ticker_sentiment(self, *args, **kwargs): return None
+        def severe_negative(self, *args, **kwargs): return None
+
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("HC1", "HOSE", "STOCK"),),
+        news_service=EmptyNews(),
+        now=lambda: 1_800_000_000,
+        news_refresh_requester=requested.append,
+    )
+
+    runtime.latest_news("HC1")
+    assert requested == ["HC1"]
+
+    runtime._sentiment_view("HC1")
+    assert requested == ["HC1", "HC1"]
+

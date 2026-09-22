@@ -307,13 +307,14 @@ def test_worker_survives_a_crashing_cycle(tmp_path) -> None:
 
 # ------------------------------------------------------- market history
 def test_market_history_statuses_and_missing_client(tmp_path) -> None:
-    hist = FakeHistory({"AAA": 200, "BBB": 30}, errored={"DDD"})
+    hist = FakeHistory({"AAA": 200, "BBB": 30, "EEE": 150}, errored={"DDD"})
     cfg = fast_config(datasets=("MARKET_HISTORY",), max_retries=0)
-    engine, conn, *_ = build(tmp_path, symbols=["AAA", "BBB", "CCC", "DDD"], config=cfg, history=hist)
+    engine, conn, *_ = build(tmp_path, symbols=["AAA", "BBB", "CCC", "DDD", "EEE"], config=cfg, history=hist)
     engine.run_cycle()
-    got = {s: load_coverage(conn, s, "MARKET_HISTORY") for s in ("AAA", "BBB", "CCC", "DDD")}
-    assert [got[s].status for s in got] == ["READY", "PARTIAL", "MISSING", "ERROR"]
-    assert "short history" in got["BBB"].error_reason
+    got = {s: load_coverage(conn, s, "MARKET_HISTORY") for s in ("AAA", "BBB", "CCC", "DDD", "EEE")}
+    assert [got[s].status for s in got] == ["READY", "PARTIAL", "MISSING", "ERROR", "PARTIAL"]
+    assert "short history: 30 of 200 daily bars; need 200 for ASMF/CL1" == got["BBB"].error_reason
+    assert "short history: 150 of 200 daily bars; need 200 for ASMF/CL1" == got["EEE"].error_reason
 
     lone = MarketCoverageEngine(conn, chain_of(ScriptedProvider()), cfg, clock=Clock(), sleep=Sleeper())
     r = lone.run_cycle(force=True)
@@ -418,3 +419,38 @@ def test_news_runner_absent_and_close(tmp_path) -> None:
     engine.news_runner = news
     engine.close()
     assert news.closed
+
+
+def test_news_canonical_eligibility_statuses_ready_partial_stale_missing(tmp_path) -> None:
+    # Canonical news eligibility:
+    # READY: >= 3 eligible articles (<= 30d)
+    # PARTIAL: 1-2 eligible articles (<= 30d)
+    # STALE: 0 eligible articles in 30d, but known to have articles in DB
+    # MISSING: 0 eligible articles, never has had articles
+    news = FakeNews(
+        counts={"AAA": 3, "BBB": 2},
+        known_tickers={"AAA", "BBB", "CCC"},
+    )
+    cfg = fast_config(datasets=("NEWS",), news_interval_seconds=1800.0)
+    assert cfg.news_window_days == 30
+    symbols = ["AAA", "BBB", "CCC", "DDD"]
+    engine, conn, _, _, _ = build(tmp_path, symbols=symbols, config=cfg, news_runner=news)
+    r = engine.run_cycle()
+    assert r.news.startswith("OK")
+
+    aaa = load_coverage(conn, "AAA", "NEWS")
+    assert aaa.status == "READY"
+    assert "3 article(s) in last 30d" in aaa.error_reason
+
+    bbb = load_coverage(conn, "BBB", "NEWS")
+    assert bbb.status == "PARTIAL"
+    assert "2 article(s) in last 30d" in bbb.error_reason
+
+    ccc = load_coverage(conn, "CCC", "NEWS")
+    assert ccc.status == "STALE"
+    assert "newest article is older than 30d" in ccc.error_reason
+
+    ddd = load_coverage(conn, "DDD", "NEWS")
+    assert ddd.status == "MISSING"
+    assert "no relevant news in last 30d" in ddd.error_reason
+

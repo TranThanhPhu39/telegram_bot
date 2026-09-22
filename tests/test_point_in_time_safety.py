@@ -16,7 +16,7 @@ from asmf_data.scoring import fundamental_score
 from asmf_data.store import latest_financial_reports, upsert_financial_reports
 from data.database import connect_database
 from data.migrations import bootstrap_schema
-from fundamentals.adapters import promote_corporate_statement
+from fundamentals.adapters import corporate_promotion_gap, promote_corporate_statement
 from fundamentals.coverage_store import load_automated_statements
 from fundamentals.providers.base import ProviderResult, ProviderStatus, StatementRow
 from fundamentals.providers.provider_chain import ProviderChain
@@ -57,25 +57,61 @@ def test_a_report_published_after_the_analysis_date_is_invisible_to_that_analysi
     assert len(visible_after_publication) == 1
 
 
-def test_missing_publication_date_never_promotes_to_the_point_in_time_table(connection) -> None:
-    """A provider that establishes every number but not *when* it was
-    published must not silently create point-in-time availability."""
+def test_missing_publication_date_and_period_never_promotes_to_the_point_in_time_table(connection) -> None:
+    """A row with neither an actual publication date nor a parsable report
+    period must not silently create point-in-time availability."""
+    unusable = StatementRow(
+        "FPT", "INVALID", None, values={
+            "revenue": 1000.0, "net_income": 100.0, "total_equity": 2000.0,
+            "short_term_debt": 5.0, "long_term_debt": 5.0,
+        },
+    )
+    assert promote_corporate_statement(unusable, source="VNStock/VCI") is None
+    assert corporate_promotion_gap(unusable) == "no public_date or parsable report_period"
+
+    # Incomplete financial fields with valid period can stage in SQLite but never promote
+    unpromotable = StatementRow(
+        "FPT", "2026Q2", None, values={
+            "revenue": 1000.0, "net_income": 100.0, "total_equity": 2000.0,
+            # missing short_term_debt and long_term_debt
+        },
+    )
+    assert promote_corporate_statement(unpromotable, source="VNStock/VCI") is None
+    chain = ProviderChain([_FixedResultProvider(statements=(unpromotable,))])
+    outcome = refresh_financials(connection, chain, "FPT")
+
+    assert outcome.rows_promoted == 0
+    assert latest_financial_reports(connection, "FPT", date(2099, 1, 1)) == ()
+    staged = load_automated_statements(connection, "FPT")
+    assert staged[0]["promoted_to_canonical"] == 0
+
+
+def test_missing_actual_date_with_valid_period_promotes_with_45d_lag(connection) -> None:
+    """A provider that establishes numbers and report_period but not actual public_date
+    promotes with period_end + 45 days, maintaining anti-look-ahead safety."""
     undated = StatementRow(
         "FPT", "2026Q2", None, values={
             "revenue": 1000.0, "net_income": 100.0, "total_equity": 2000.0,
             "short_term_debt": 5.0, "long_term_debt": 5.0,
         },
     )
-    assert promote_corporate_statement(undated, source="VNStock/VCI") is None
+    report = promote_corporate_statement(undated, source="VNStock/TCBS")
+    assert report is not None
+    assert report.public_date == date(2026, 8, 14)
+    assert report.public_date_source == "estimated_45d"
 
     chain = ProviderChain([_FixedResultProvider(statements=(undated,))])
     outcome = refresh_financials(connection, chain, "FPT")
 
-    assert outcome.rows_promoted == 0
-    assert latest_financial_reports(connection, "FPT", date(2099, 1, 1)) == ()
+    assert outcome.rows_promoted == 1
+    # Anti-look-ahead: before 45d lag date, report is invisible
+    assert latest_financial_reports(connection, "FPT", date(2026, 6, 30)) == ()
+    assert latest_financial_reports(connection, "FPT", date(2026, 8, 13)) == ()
+    # At and after 45d lag date, report is visible
+    assert len(latest_financial_reports(connection, "FPT", date(2026, 8, 14))) == 1
     staged = load_automated_statements(connection, "FPT")
-    assert staged[0]["public_date"] is None
-    assert staged[0]["promoted_to_canonical"] == 0
+    assert staged[0]["public_date"] == "2026-08-14"
+    assert staged[0]["promoted_to_canonical"] == 1
 
 
 def test_yfinance_rows_never_carry_a_publication_date_by_construction() -> None:
@@ -99,18 +135,23 @@ def test_yfinance_rows_never_carry_a_publication_date_by_construction() -> None:
 
 
 def test_period_end_date_helper_is_never_used_as_a_publication_date_substitute() -> None:
-    """period_end_date exists for display/context only. Confirm the adapter's
-    promotion path does not fall back to it when public_date is None."""
+    """period_end_date must never be used directly as public_date (which creates look-ahead).
+    The strategy rule applies report_period + 45 days fallback instead."""
     from fundamentals.providers.base import period_end_date
 
     row = StatementRow("FPT", "2026Q2", None, values={
         "revenue": 1.0, "net_income": 1.0, "total_equity": 1.0,
         "short_term_debt": 0.0, "long_term_debt": 0.0,
     })
-    # Sanity: the helper itself does compute a plausible date...
+    # Sanity: the helper computes period end...
     assert period_end_date(row.period) == date(2026, 6, 30)
-    # ...but promotion still refuses, because it only reads row.public_date.
-    assert promote_corporate_statement(row, source="VNStock") is None
+    # Promotion must NOT use period_end_date directly (anti-look-ahead)
+    report = promote_corporate_statement(row, source="VNStock")
+    assert report is not None
+    assert report.public_date != date(2026, 6, 30)
+    # Must use report_period + 45 days
+    assert report.public_date == date(2026, 8, 14)
+    assert report.public_date_source == "estimated_45d"
 
 
 def test_asmf_fundamental_score_stays_none_until_eight_public_quarters_exist(

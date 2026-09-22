@@ -56,6 +56,7 @@ if __name__ == "__main__":
     service.set_sector_history_requester(sector_worker.request)
     sector_notifications = build_sector_notification_broker()
     sector_worker.add_listener(sector_notifications.publish)
+
     # Phase 25: market-wide coverage refresh. Starting it only spawns a daemon
     # thread (its first cycle runs after COVERAGE_STARTUP_DELAY), so bot startup
     # never waits on a full-market refresh. It reuses the sector worker for

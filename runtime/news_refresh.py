@@ -24,10 +24,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import logging
 import os
+from queue import Queue
 import sqlite3
 import threading
 import time
-from queue import Queue
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,7 @@ class NewsRunResult:
     duplicates: int
     #: Distinct articles per ticker inside the coverage window (read from SQLite).
     ticker_counts: Mapping[str, int]
+    known_tickers: frozenset[str] = frozenset()
 
 
 class NewsRefreshRunner:
@@ -49,7 +50,7 @@ class NewsRefreshRunner:
         provider_factory: Callable[[], object],
         catalog_factory: Callable[[], object],
         sentiment_factory: Callable[[], object],
-        window_days: int = 7,
+        window_days: int = 30,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
         if window_days < 1:
@@ -87,11 +88,15 @@ class NewsRefreshRunner:
         counts = self._repository.ticker_article_counts(
             self._now() - timedelta(days=self._window_days)
         )
+        known = getattr(self._repository, "all_tickers_with_articles", None)
+        known_tickers = (
+            frozenset(known()) if callable(known) else frozenset(counts.keys())
+        )
         logger.info(
             "news ingestion finished inserted=%d duplicates=%d linked_tickers=%d",
             inserted, duplicates, len(counts),
         )
-        return NewsRunResult(inserted, duplicates, counts)
+        return NewsRunResult(inserted, duplicates, counts, known_tickers=known_tickers)
 
     def close(self) -> None:
         repository = self._repository
@@ -105,7 +110,7 @@ class NewsRefreshRunner:
 
 
 def build_news_runner_from_env(
-    connection_factory: Callable[[], sqlite3.Connection], *, window_days: int = 7,
+    connection_factory: Callable[[], sqlite3.Connection], *, window_days: int = 30,
 ) -> NewsRefreshRunner:
     """Build the production runner with the same env contract as run_news_once."""
     from dotenv import load_dotenv
@@ -380,3 +385,169 @@ def build_targeted_news_refresh_worker_from_env(
         fetch_limit=int(os.getenv("NEWS_TARGETED_FETCH_LIMIT", "60")),
         cooldown_seconds=float(os.getenv("NEWS_TARGETED_COOLDOWN_SECONDS", "300")),
     )
+
+
+class TargetedNewsWorker:
+    """Bounded, non-blocking daemon worker for targeted ticker news refresh."""
+
+    _STOP = object()
+
+    def __init__(
+        self,
+        *,
+        repository_factory: Callable[[], object],
+        sentiment_factory: Callable[[], object],
+        provider_factory: Callable[[], object] | None = None,
+        connection_factory: Callable[[], sqlite3.Connection] | None = None,
+        request_cooldown_seconds: float = 300.0,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.repository_factory = repository_factory
+        self.sentiment_factory = sentiment_factory
+        self.provider_factory = provider_factory
+        self.connection_factory = connection_factory
+        self.request_cooldown_seconds = request_cooldown_seconds
+        self.monotonic = monotonic
+
+        self._queue: Queue[str | object] = Queue(maxsize=100)
+        self._lock = threading.Lock()
+        self._pending: set[str] = set()
+        self._last_attempt: dict[str, float] = {}
+        self._thread: threading.Thread | None = None
+        self._stopped = False
+
+    def start(self) -> threading.Thread:
+        with self._lock:
+            if self._stopped:
+                raise RuntimeError("targeted news worker has been stopped")
+            if self._thread is not None:
+                return self._thread
+            self._thread = threading.Thread(
+                target=self._run, name="targeted-news-worker", daemon=True
+            )
+            self._thread.start()
+            return self._thread
+
+    def request(self, symbol: str) -> bool:
+        normalized = symbol.strip().upper()
+        if not normalized or not normalized.isalnum():
+            return False
+        with self._lock:
+            if self._stopped:
+                return False
+            if normalized in self._pending:
+                return False
+            last_attempt = self._last_attempt.get(normalized)
+            if (
+                last_attempt is not None
+                and self.monotonic() - last_attempt < self.request_cooldown_seconds
+            ):
+                return False
+            try:
+                self._pending.add(normalized)
+                self._queue.put_nowait(normalized)
+                return True
+            except Exception:
+                self._pending.discard(normalized)
+                return False
+
+    def stop(self, timeout: float | None = None) -> None:
+        with self._lock:
+            if self._stopped:
+                return
+            self._stopped = True
+            thread = self._thread
+            self._queue.put(self._STOP)
+        if thread is not None:
+            thread.join(timeout)
+
+    def _run(self) -> None:
+        from intelligence.news.pipeline import CafeFTickerNewsProvider, refresh_ticker_news
+
+        repository = self.repository_factory()
+        sentiment_model = self.sentiment_factory()
+        provider = (
+            self.provider_factory()
+            if self.provider_factory is not None
+            else CafeFTickerNewsProvider()
+        )
+        while True:
+            item = self._queue.get()
+            if item is self._STOP:
+                self._queue.task_done()
+                return
+            symbol = str(item)
+            try:
+                count = refresh_ticker_news(
+                    symbol,
+                    repository=repository,
+                    sentiment_model=sentiment_model,
+                    provider=provider,
+                    limit=5,
+                    max_age_days=30,
+                )
+                if self.connection_factory is not None:
+                    try:
+                        conn = self.connection_factory()
+                        try:
+                            from fundamentals.coverage_store import record_attempt
+
+                            if count >= 3:
+                                status = "READY"
+                                reason = f"{count} article(s) in last 30d"
+                            elif count > 0:
+                                status = "PARTIAL"
+                                reason = f"{count} article(s) in last 30d"
+                            else:
+                                has_any = bool(repository.latest_for_ticker(symbol, 1))
+                                if has_any:
+                                    status = "STALE"
+                                    reason = "newest article is older than 30d"
+                                else:
+                                    status = "MISSING"
+                                    reason = "no relevant news in last 30d"
+                            record_attempt(
+                                conn,
+                                symbol,
+                                "NEWS",
+                                status,
+                                provider="CafeF",
+                                provider_source="ticker_page",
+                                error_reason=reason,
+                            )
+                        finally:
+                            conn.close()
+                    except Exception:
+                        logger.warning("failed to record news coverage for %s", symbol)
+            except Exception:
+                logger.exception("targeted news refresh failed for %s", symbol)
+            finally:
+                with self._lock:
+                    self._pending.discard(symbol)
+                    self._last_attempt[symbol] = self.monotonic()
+                self._queue.task_done()
+
+
+def start_targeted_news_worker_from_env(
+    connection_factory: Callable[[], sqlite3.Connection] | None = None,
+) -> TargetedNewsWorker:
+    """Build and start the targeted ticker news refresh worker from env config."""
+    from dotenv import load_dotenv
+
+    from intelligence.news.pipeline import CafeFTickerNewsProvider
+    from intelligence.news.repository import SQLiteNewsRepository
+    from intelligence.news.sentiment import build_sentiment_model
+
+    load_dotenv()
+    timeout = float(os.getenv("NEWS_HTTP_TIMEOUT", "15"))
+    worker = TargetedNewsWorker(
+        repository_factory=lambda: SQLiteNewsRepository(
+            os.getenv("NEWS_DATABASE_PATH", "news_sentiment.db")
+        ),
+        sentiment_factory=build_sentiment_model,
+        provider_factory=lambda: CafeFTickerNewsProvider(timeout=timeout),
+        connection_factory=connection_factory,
+        request_cooldown_seconds=float(os.getenv("NEWS_ON_DEMAND_COOLDOWN_SECONDS", "300")),
+    )
+    worker.start()
+    return worker

@@ -75,10 +75,14 @@ class ScriptedProvider(FundamentalProvider):
 
     name = "VNStock"
 
-    def __init__(self, script=None, default: str = "ok") -> None:
+    def __init__(
+        self, script=None, default: str = "ok", statement_count: int = 1, flow_count: int = 1
+    ) -> None:
         self.script = {key: list(value) if isinstance(value, list) else [value]
                        for key, value in (script or {}).items()}
         self.default = default
+        self.statement_count = statement_count
+        self.flow_count = flow_count
         self.calls: list[tuple[str, str, str | None]] = []
 
     def available(self) -> bool:
@@ -102,9 +106,21 @@ class ScriptedProvider(FundamentalProvider):
         if action == "missing":
             return ProviderResult.missing(symbol, "FINANCIALS", self.name, reason="no data")
         status = ProviderStatus.PARTIAL if action == "partial" else ProviderStatus.AVAILABLE
+        if action == "partial":
+            statements = (statement(symbol, period="2026Q2"),)
+        else:
+            periods = ["2024Q3", "2024Q4", "2025Q1", "2025Q2", "2025Q3", "2025Q4", "2026Q1", "2026Q2"]
+            p_dates = [
+                date(2024, 11, 15), date(2025, 2, 15), date(2025, 5, 15), date(2025, 8, 15),
+                date(2025, 11, 15), date(2026, 2, 15), date(2026, 5, 15), date(2026, 8, 15),
+            ]
+            statements = tuple(
+                statement(symbol, period=periods[i % len(periods)], public_date=p_dates[i % len(p_dates)])
+                for i in range(self.statement_count)
+            )
         return ProviderResult(
             symbol=symbol, dataset="FINANCIALS", provider=self.name, status=status,
-            provider_source="VCI", statements=(statement(symbol),),
+            provider_source="VCI", statements=statements,
         )
 
     def fetch_institutional_flow(self, symbol, *, exchange=None, lookback_days=30):
@@ -117,11 +133,18 @@ class ScriptedProvider(FundamentalProvider):
         if action == "missing":
             return ProviderResult.missing(symbol, "INSTITUTIONAL", self.name, reason="no data")
         status = ProviderStatus.PARTIAL if action == "partial" else ProviderStatus.AVAILABLE
+        if action == "partial":
+            flows = (FlowRow(symbol, date(2026, 9, 18), foreign_buy_value=10.0, foreign_sell_value=4.0),)
+        else:
+            flows = tuple(
+                FlowRow(symbol, date(2026, 9, 18) - timedelta(days=i), foreign_buy_value=10.0,
+                        foreign_sell_value=4.0)
+                for i in range(self.flow_count)
+            )
         return ProviderResult(
             symbol=symbol, dataset="INSTITUTIONAL", provider=self.name, status=status,
             provider_source="VCI",
-            flows=(FlowRow(symbol, date(2026, 9, 18), foreign_buy_value=10.0,
-                           foreign_sell_value=4.0),),
+            flows=flows,
         )
 
     def count(self, dataset: str) -> int:
@@ -138,7 +161,8 @@ def chain_of(provider: FundamentalProvider) -> ProviderChain:
 class FakeHistory:
     """Stands in for SectorHistorySynchronizer.refresh_symbol_history."""
 
-    minimum_bars = 126
+    minimum_bars = 200
+    strategy_minimum_bars = 200
 
     def __init__(self, bars_by_symbol=None, errored=()) -> None:
         self.bars_by_symbol = bars_by_symbol or {}
@@ -160,11 +184,14 @@ class FakeHistory:
 
 
 class FakeNews:
-    def __init__(self, counts=None, error: Exception | None = None) -> None:
+    def __init__(
+        self, counts=None, error: Exception | None = None, known_tickers=None,
+    ) -> None:
         from runtime.news_refresh import NewsRunResult
 
         self._result_type = NewsRunResult
         self.counts = counts or {}
+        self.known_tickers = frozenset(known_tickers) if known_tickers is not None else frozenset()
         self.error = error
         self.calls: list[int] = []
         self.closed = False
@@ -173,7 +200,7 @@ class FakeNews:
         self.calls.append(limit)
         if self.error is not None:
             raise self.error
-        return self._result_type(3, 1, dict(self.counts))
+        return self._result_type(3, 1, dict(self.counts), known_tickers=self.known_tickers)
 
     def close(self):
         self.closed = True

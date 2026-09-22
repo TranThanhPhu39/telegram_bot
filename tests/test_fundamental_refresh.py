@@ -169,29 +169,44 @@ def test_partial_result_is_staged_but_not_promoted_to_canonical(connection) -> N
     assert latest_financial_reports(connection, "FPT", date(2026, 12, 31)) == ()
 
 
-# -------------------------------------------- Issue 9: point-in-time gap
-def test_usable_result_missing_public_date_for_every_period_is_visible_in_coverage_reason(
+def test_usable_result_with_promotion_gap_is_visible_in_coverage_reason(
     connection,
 ) -> None:
-    """Reproduces the real VNStock/KBS symptom: the provider answers AVAILABLE
-    with real revenue/equity values but never establishes a public_date, so
-    nothing reaches point-in-time financial_reports. Before this fix that
-    looked identical, in symbol_data_coverage, to a fully-promoted READY row —
-    now the gap is explicit and diagnosable without fabricating a public_date."""
+    """When a provider answers with values but statements cannot be promoted
+    due to missing required fields, that gap is explicit in coverage reason."""
+    row_a = statement("FPT", "2026Q2", date(2026, 8, 15), revenue=1000.0, net_income=100.0,
+                      total_equity=2000.0)  # missing debt legs
+    row_b = statement("FPT", "2026Q1", date(2026, 5, 1), revenue=1000.0, net_income=100.0,
+                      total_equity=2000.0)  # missing debt legs
+    chain = ProviderChain([StubProvider(statements=(row_a, row_b), status=ProviderStatus.AVAILABLE)])
+
+    outcome = refresh_financials(connection, chain, "FPT")
+
+    assert outcome.result is RefreshResult.SUCCESS  # the raw fetch genuinely succeeded
+    assert outcome.rows_stored == 2 and outcome.rows_promoted == 0
+    assert latest_financial_reports(connection, "FPT", date(2026, 12, 31)) == ()
+    assert outcome.coverage.status == "READY"  # coverage vocabulary is unchanged
+    assert outcome.coverage.error_reason is not None
+    assert "BLOCKED BY DATA SOURCE" in outcome.coverage.error_reason
+    assert "missing short_term_debt or long_term_debt" in outcome.coverage.error_reason
+    assert outcome.error_reason == outcome.coverage.error_reason
+
+
+def test_estimated_public_date_promotes_statement_with_45d_lag(connection) -> None:
+    """Strategy rule: provider without actual public_date but with valid report_period
+    promotes with estimated public_date = period_end_date + 45 days."""
     row = statement("FPT", "2026Q2", None, revenue=1000.0, net_income=100.0,
                      total_equity=2000.0, short_term_debt=5.0, long_term_debt=5.0)
     chain = ProviderChain([StubProvider(statements=(row,), status=ProviderStatus.AVAILABLE)])
 
     outcome = refresh_financials(connection, chain, "FPT")
 
-    assert outcome.result is RefreshResult.SUCCESS  # the raw fetch genuinely succeeded
-    assert outcome.rows_stored == 1 and outcome.rows_promoted == 0
-    assert latest_financial_reports(connection, "FPT", date(2026, 12, 31)) == ()
-    assert outcome.coverage.status == "READY"  # coverage vocabulary is unchanged
-    assert outcome.coverage.error_reason is not None
-    assert "BLOCKED BY DATA SOURCE" in outcome.coverage.error_reason
-    assert "public_date" in outcome.coverage.error_reason
-    assert outcome.error_reason == outcome.coverage.error_reason
+    assert outcome.rows_stored == 1 and outcome.rows_promoted == 1
+    assert outcome.error_reason is None
+    reports = latest_financial_reports(connection, "FPT", date(2026, 12, 31))
+    assert len(reports) == 1
+    assert reports[0]["report_period"] == "2026Q2"
+    assert reports[0]["public_date"] == "2026-08-14"  # 2026-06-30 + 45 days
 
 
 def test_fully_promoted_result_keeps_coverage_reason_clean(connection) -> None:
@@ -209,14 +224,15 @@ def test_fully_promoted_result_keeps_coverage_reason_clean(connection) -> None:
 def test_partially_promoted_result_reports_the_exact_promoted_ratio(connection) -> None:
     good = statement("FPT", "2026Q2", date(2026, 8, 15), revenue=1.0, net_income=1.0,
                       total_equity=1.0, short_term_debt=0.0, long_term_debt=0.0)
-    bad = statement("FPT", "2026Q1", None, revenue=1.0, net_income=1.0,
-                     total_equity=1.0, short_term_debt=0.0, long_term_debt=0.0)
+    bad = statement("FPT", "2026Q1", date(2026, 5, 1), revenue=1.0, net_income=1.0,
+                     total_equity=1.0)  # missing debt legs -> not promotable
     chain = ProviderChain([StubProvider(statements=(good, bad), status=ProviderStatus.AVAILABLE)])
 
     outcome = refresh_financials(connection, chain, "FPT")
 
     assert outcome.rows_promoted == 1 and outcome.rows_stored == 2
     assert "1/2" in outcome.coverage.error_reason
+    assert "missing short_term_debt or long_term_debt" in outcome.coverage.error_reason
 
 
 def test_missing_result_is_recorded_for_a_brand_new_symbol_without_crashing(connection) -> None:
@@ -290,17 +306,93 @@ def test_institutional_flow_missing_leg_is_distinguished_from_available_leg(conn
     assert both_missing.result is RefreshResult.MISSING
 
 
-# --------------------------------------------------------------- adapters
-def test_promote_corporate_statement_requires_public_date() -> None:
-    row = statement("FPT", "2026Q2", None, revenue=1.0, net_income=1.0,
-                     total_equity=1.0, short_term_debt=0.0, long_term_debt=0.0)
+def test_promote_corporate_statement_rejects_when_no_public_date_and_no_period() -> None:
+    row = StatementRow("FPT", "INVALID", None, values={
+        "revenue": 1.0, "net_income": 1.0, "total_equity": 1.0,
+        "short_term_debt": 0.0, "long_term_debt": 0.0,
+    })
+    assert promote_corporate_statement(row, source="VNStock") is None
+    assert corporate_promotion_gap(row) == "no public_date or parsable report_period"
+
+
+# -------------------------------------------- Issue 9: Required tests A-F
+def test_issue9_a_actual_public_date() -> None:
+    """A. Có actual public_date -> dùng actual."""
+    row = statement("FPT", "2026Q2", date(2026, 8, 20), revenue=100.0, net_income=10.0,
+                     total_equity=200.0, short_term_debt=10.0, long_term_debt=10.0)
+    report = promote_corporate_statement(row, source="VNStock/VCI")
+    assert report is not None
+    assert report.public_date == date(2026, 8, 20)
+    assert report.public_date_source == "actual"
+
+
+def test_issue9_b_estimated_public_date_from_report_period() -> None:
+    """B. Không có actual, có report_period -> +45 ngày."""
+    row = statement("FPT", "2026Q2", None, revenue=100.0, net_income=10.0,
+                     total_equity=200.0, short_term_debt=10.0, long_term_debt=10.0)
+    report = promote_corporate_statement(row, source="VNStock/TCBS")
+    assert report is not None
+    assert report.public_date == date(2026, 8, 14)
+    assert report.public_date_source == "estimated_45d"
+    # Anti-look-ahead check: must not use period_end directly
+    assert report.public_date != date(2026, 6, 30)
+
+
+def test_issue9_c_reject_when_neither_available() -> None:
+    """C. Không có cả hai -> reject."""
+    row = StatementRow("FPT", "INVALID", None, values={
+        "revenue": 100.0, "net_income": 10.0, "total_equity": 200.0,
+        "short_term_debt": 10.0, "long_term_debt": 10.0,
+    })
+    assert corporate_promotion_gap(row) == "no public_date or parsable report_period"
     assert promote_corporate_statement(row, source="VNStock") is None
 
 
-def test_corporate_promotion_gap_names_the_missing_public_date() -> None:
-    row = statement("FPT", "2026Q2", None, revenue=1.0, net_income=1.0,
-                     total_equity=1.0, short_term_debt=0.0, long_term_debt=0.0)
-    assert corporate_promotion_gap(row) == "no public_date established by provider"
+def test_issue9_d_e_point_in_time_boundary(connection) -> None:
+    """D. as_of trước estimated public_date -> chưa được dùng.
+       E. as_of sau estimated public_date -> được dùng."""
+    row = statement("FPT", "2026Q2", None, revenue=100.0, net_income=10.0,
+                     total_equity=200.0, short_term_debt=10.0, long_term_debt=10.0)
+    report = promote_corporate_statement(row, source="VNStock/TCBS")
+    assert report is not None
+    upsert_financial_reports(connection, [report])
+
+    # D: Trước ngày công bố ước tính 2026-08-14 (ví dụ 2026-08-13) -> chưa dùng
+    before = latest_financial_reports(connection, "FPT", as_of=date(2026, 8, 13))
+    assert len(before) == 0
+
+    # E: Tại và sau ngày công bố ước tính 2026-08-14 (ví dụ 2026-08-14) -> được dùng
+    at_date = latest_financial_reports(connection, "FPT", as_of=date(2026, 8, 14))
+    assert len(at_date) == 1
+    assert at_date[0]["report_period"] == "2026Q2"
+    assert at_date[0]["public_date"] == "2026-08-14"
+
+    after = latest_financial_reports(connection, "FPT", as_of=date(2026, 8, 20))
+    assert len(after) == 1
+
+
+def test_issue9_f_eight_quarters_estimated_public_date_enables_score(connection) -> None:
+    """F. TCBS/yfinance có đủ 8 quý -> fundamental_score không còn None chỉ vì thiếu public_date."""
+    periods = [
+        ("2026Q2", 150.0, 30.0), ("2026Q1", 140.0, 28.0),
+        ("2025Q4", 130.0, 26.0), ("2025Q3", 120.0, 24.0),
+        ("2025Q2", 100.0, 20.0), ("2025Q1", 95.0, 19.0),
+        ("2024Q4", 90.0, 18.0), ("2024Q3", 85.0, 17.0),
+    ]
+    reports = []
+    for period, rev, profit in periods:
+        row = statement("FPT", period, None, revenue=rev, net_income=profit,
+                         total_equity=100.0, short_term_debt=10.0, long_term_debt=10.0)
+        report = promote_corporate_statement(row, source="VNStock/TCBS")
+        assert report is not None
+        assert report.public_date_source == "estimated_45d"
+        reports.append(report)
+    upsert_financial_reports(connection, reports)
+
+    from asmf_data.scoring import fundamental_score
+    score = fundamental_score(connection, "FPT", as_of=date(2026, 8, 20))
+    assert score is not None
+    assert score == 100.0
 
 
 def test_corporate_promotion_gap_names_missing_debt_legs() -> None:
@@ -434,3 +526,67 @@ def test_load_all_coverage_filters_by_dataset(connection) -> None:
 
     assert len(financials_only) == 1 and financials_only[0].symbol == "FPT"
     assert institutional_only == ()
+
+
+# ------------------------------------------------------------- Issue 10 ASMF readiness
+def test_issue10_eight_quarters_yields_ready_even_if_provider_result_partial(connection) -> None:
+    """When a symbol has >= 8 canonical quarters promoted, coverage must be READY
+    even if provider had a 9th unpromoted statement and status is PARTIAL."""
+    def eight_valid_plus_one_bad() -> list[StatementRow]:
+        rows = []
+        for i in range(8):
+            quarter = 4 - (i % 4)
+            year = 2025 if i < 4 else 2024
+            rows.append(statement(
+                "FPT", f"{year}Q{quarter}", date(year, 3 * quarter if quarter < 4 else 12, 15),
+                revenue=1000.0 + i * 50, net_income=100.0 + i * 10,
+                total_equity=2000.0, short_term_debt=500.0, long_term_debt=500.0,
+            ))
+        # 9th statement missing revenue
+        rows.append(statement(
+            "FPT", "2023Q4", date(2024, 2, 15),
+            revenue=None, net_income=50.0, total_equity=1000.0,
+        ))
+        return rows
+
+    chain = ProviderChain([StubProvider(statements=tuple(eight_valid_plus_one_bad()), status=ProviderStatus.PARTIAL)])
+    outcome = refresh_financials(connection, chain, "FPT", force=True)
+
+    assert outcome.rows_stored == 9
+    assert outcome.rows_promoted == 8
+    assert outcome.coverage.status == "READY"
+    assert "READY FOR ASMF (8 quarters available)" in outcome.coverage.error_reason
+    assert "BLOCKED BY DATA SOURCE" not in outcome.coverage.error_reason
+    assert fundamental_score(connection, "FPT", date(2026, 9, 22)) is not None
+
+
+def test_issue10_fewer_than_eight_quarters_yields_partial_when_provider_partial(connection) -> None:
+    """When a symbol has < 8 canonical quarters promoted and provider status is PARTIAL,
+    coverage must report PARTIAL with BLOCKED BY DATA SOURCE."""
+    good = statement("FPT", "2026Q2", date(2026, 8, 15), revenue=1000.0, net_income=100.0,
+                     total_equity=2000.0, short_term_debt=100.0, long_term_debt=100.0)
+    bad = statement("FPT", "2026Q1", date(2026, 5, 1), revenue=None, net_income=100.0)
+    chain = ProviderChain([StubProvider(statements=(good, bad), status=ProviderStatus.PARTIAL)])
+    outcome = refresh_financials(connection, chain, "FPT", force=True)
+
+    assert outcome.rows_promoted == 1
+    assert outcome.coverage.status == "PARTIAL"
+    assert "BLOCKED BY DATA SOURCE" in outcome.coverage.error_reason
+    assert fundamental_score(connection, "FPT", date(2026, 9, 22)) is None
+
+
+def test_issue10_five_flow_sessions_yields_ready_for_institutional(connection) -> None:
+    """When >= 5 flow sessions are persisted, institutional flow coverage is READY
+    even if provider returned PARTIAL status."""
+    from asmf_data.scoring import institutional_flow_score
+    flows = tuple(
+        FlowRow("FPT", date(2026, 9, 10 + i), foreign_buy_value=10.0 + i, foreign_sell_value=5.0)
+        for i in range(5)
+    )
+    chain = ProviderChain([StubProvider(flows=flows, status=ProviderStatus.PARTIAL)])
+    outcome = refresh_institutional_flow(connection, chain, "FPT", force=True)
+
+    assert outcome.rows_promoted == 5
+    assert outcome.coverage.status == "READY"
+    assert institutional_flow_score(connection, "FPT", date(2026, 9, 22)) is not None
+
