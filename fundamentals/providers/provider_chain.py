@@ -94,11 +94,21 @@ class ProviderChain:
                 error_reason=first_error.error_reason,
                 attempted=tuple(attempted),
             )
+        # Issue 4: attributing this to `self._providers[-1].name` (e.g.
+        # "yfinance") falsely implied that provider was relied upon/valid for
+        # this dataset -- live evidence showed
+        # "provider=yfinance reason=no provider in the chain had data" for
+        # institutional flow, which reads as "we used yfinance and it had
+        # nothing" when in fact *no* provider in the chain (including the
+        # authoritative VNStock/Vietcap one) had usable data, and yfinance
+        # itself never claims to carry Vietnamese institutional flow at all
+        # (see YFinanceProvider.fetch_institutional_flow). "none" makes that
+        # honest, and the reason lists every provider actually attempted.
         return ProviderResult(
             symbol=symbol, dataset=dataset,
-            provider=self._providers[-1].name, status=ProviderStatus.MISSING,
+            provider="none", status=ProviderStatus.MISSING,
             retrieved_at=datetime.now(timezone.utc),
-            error_reason="no provider in the chain had data",
+            error_reason="no provider had data (attempted: " + ", ".join(attempted) + ")",
             attempted=tuple(attempted),
         )
 

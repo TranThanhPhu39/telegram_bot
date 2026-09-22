@@ -268,3 +268,49 @@ def test_soi_stock_analysis_has_no_breadth_when_index_state_absent() -> None:
     assert soi_view.market is not None
     assert soi_view.market.breadth is None
     assert "chỉ dựa trên xu hướng EMA" in soi_view.market.regime_reason
+
+
+# --- Issue 3: implausible realtime total_value reported as unavailable ----
+
+
+def test_market_overview_hides_implausible_total_value_instead_of_zero_ty() -> None:
+    # Live evidence: total_volume looked plausible (hundreds of millions of
+    # matched shares) but total_value was near zero, i.e. an implied average
+    # price far below any real VN stock price. That must render as
+    # "unavailable", never as a misleading "0 tỷ".
+    state = LatestIndexState()
+    state.update(vnindex_snapshot(total_volume=301_778_416.0, total_value=42.0))
+    runtime = service(FakeClient(payload()), index_state=state)
+    result = runtime.market_overview()
+    assert "LIQUIDITY: unavailable" in result
+    assert "0 tỷ" not in result
+    # Breadth is independent of the total_value field and must still render.
+    assert "BREADTH: unavailable" not in result
+
+
+def test_market_overview_hides_liquidity_when_total_volume_is_zero() -> None:
+    state = LatestIndexState()
+    state.update(vnindex_snapshot(total_volume=0.0, total_value=12_500_000_000_000.0))
+    runtime = service(FakeClient(payload()), index_state=state)
+    result = runtime.market_overview()
+    assert "LIQUIDITY: unavailable" in result
+
+
+def test_market_overview_shows_liquidity_for_plausible_total_value() -> None:
+    # Regression guard: the Issue 3 plausibility check must not reject a
+    # genuine snapshot (this is the same fixture Issue 2's test already uses).
+    state = LatestIndexState()
+    state.update(vnindex_snapshot())
+    runtime = service(FakeClient(payload()), index_state=state)
+    result = runtime.market_overview()
+    assert "12,500 tỷ" in result
+    assert "LIQUIDITY: unavailable" not in result
+
+
+def test_soi_stock_analysis_hides_implausible_liquidity_like_market() -> None:
+    state = LatestIndexState()
+    state.update(vnindex_snapshot(total_volume=301_778_416.0, total_value=42.0))
+    runtime = service(FakeClient(payload()), index_state=state)
+    soi_view = runtime.stock_analysis("FPT")
+    assert soi_view.market is not None
+    assert soi_view.market.liquidity is None

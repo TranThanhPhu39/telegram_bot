@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
+import logging
 import os
 import sqlite3
 import time
@@ -76,6 +77,8 @@ from telegram_bot.formatters import (
 )
 
 
+LOGGER = logging.getLogger(__name__)
+
 VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
 NEWS_UNAVAILABLE = "News sentiment unavailable."
 #: A persisted /scan snapshot older than this is flagged stale rather than
@@ -83,6 +86,34 @@ NEWS_UNAVAILABLE = "News sentiment unavailable."
 #: every ScannerWorkerConfig.scan_interval_seconds, default 300s).
 SCAN_SNAPSHOT_STALE_AFTER_SECONDS = 1800
 MINIMUM_SECTOR_HISTORY = 126
+#: Sanity bounds (VND) for the implied average matched price
+#: (``total_value / total_volume``) of a realtime VNINDEX snapshot. Real VN
+#: equity prices never trade outside this range, so an implied average price
+#: outside it means the realtime feed's ``total_value`` field is not a valid
+#: market-wide matched value (Issue 3: live output showed "LIQUIDITY: 0 tỷ"
+#: next to a plausible volume, i.e. total_value >> 0 total_volume but with an
+#: implied price far below any real VN stock price). We surface "unavailable"
+#: in that case instead of a misleading near-zero figure.
+MIN_PLAUSIBLE_AVERAGE_PRICE_VND = 100.0
+MAX_PLAUSIBLE_AVERAGE_PRICE_VND = 1_000_000.0
+
+
+def _is_plausible_market_liquidity(total_value: float, total_volume: float) -> bool:
+    """Whether ``total_value``/``total_volume`` look like a real matched value.
+
+    Guards against surfacing a corrupted or mismapped ``total_value`` field
+    (see Issue 3) as if it were genuine market-wide liquidity: a valid VNINDEX
+    session always has an implied average matched price
+    (``total_value / total_volume``) within real VN equity price bounds.
+    """
+    if total_value <= 0 or total_volume <= 0:
+        return False
+    average_price = total_value / total_volume
+    return (
+        MIN_PLAUSIBLE_AVERAGE_PRICE_VND
+        <= average_price
+        <= MAX_PLAUSIBLE_AVERAGE_PRICE_VND
+    )
 
 
 class HistoricalClient(Protocol):
@@ -389,8 +420,19 @@ class RuntimeBotDataService:
             f"{int(snapshot.unchanged)} tham chiếu"
         )
         liquidity = None
-        if snapshot.total_value > 0:
+        if _is_plausible_market_liquidity(snapshot.total_value, snapshot.total_volume):
             liquidity = f"{snapshot.total_value / 1e9:,.0f} tỷ ({snapshot.total_volume:,.0f} CP)"
+        elif snapshot.total_value > 0 or snapshot.total_volume > 0:
+            # total_value is present but not a believable market-wide matched
+            # value (see MIN/MAX_PLAUSIBLE_AVERAGE_PRICE_VND) -- log once per
+            # snapshot at WARNING so a live run surfaces the raw numbers for
+            # diagnosis, instead of silently showing "0 tỷ" as if it were real.
+            LOGGER.warning(
+                "Vietcap VNINDEX snapshot total_value looks implausible "
+                "(total_value=%.2f total_volume=%.2f); reporting liquidity as "
+                "unavailable instead of a misleading figure",
+                snapshot.total_value, snapshot.total_volume,
+            )
         return breadth, liquidity
 
     def market_overview(self) -> str:

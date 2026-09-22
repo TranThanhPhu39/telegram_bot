@@ -149,13 +149,15 @@ def test_normalize_index_maps_to_index_snapshot() -> None:
 
     snapshot = normalize_index(message)
 
+    # Issue 3: the wire totalValue (triệu đồng) is scaled to VND on
+    # normalization; totalShares is passed through unscaled.
     assert snapshot == IndexSnapshot(
         symbol="VNINDEX",
         value=1_280.5,
         change=5.25,
         change_percent=0.41,
         total_volume=500_000_000.0,
-        total_value=12_500_000_000_000.0,
+        total_value=12_500_000_000_000.0 * 1_000_000.0,
         advances=250.0,
         declines=120.0,
         unchanged=60.0,
@@ -163,6 +165,21 @@ def test_normalize_index_maps_to_index_snapshot() -> None:
         floor_count=3.0,
         exchange_time="11:05:22",
     )
+
+
+def test_normalize_index_scales_total_value_from_trieu_dong_to_vnd() -> None:
+    # Issue 3 live evidence (2026-09-22 debug capture): totalValue=9,926,135.61
+    # alongside totalShares=409,881,936 is only a plausible average matched
+    # price (~24,220 VND/share) once totalValue is read as triệu đồng.
+    message = valid_message()
+    message.totalShares = 409_881_936.0
+    message.totalValue = 9_926_135.61
+
+    snapshot = normalize_index(message)
+
+    assert snapshot.total_value == pytest.approx(9_926_135.61 * 1_000_000.0)
+    implied_average_price = snapshot.total_value / snapshot.total_volume
+    assert 100.0 <= implied_average_price <= 1_000_000.0
 
 
 def test_normalize_index_normalizes_mixed_case_index_identifier() -> None:

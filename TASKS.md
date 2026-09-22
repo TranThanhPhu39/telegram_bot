@@ -836,11 +836,89 @@ iteration, each stopped for explicit live confirmation before the next.
       `total_value` field. Noted for Issue 3 audit, not fixed here.
 
 ### Issue 3 — Liquidity toàn thị trường unavailable
-- [ ] NOT STARTED — waiting for explicit confirmation to proceed after Issue 2.
-      Carries over the `LIQUIDITY: 0 tỷ` observation above as a starting lead.
+- [x] Root cause: NOT a missing data source. The Vietcap realtime index
+      stream's `totalValue` field is denominated in **triệu đồng** (millions
+      of VND), not raw VND as `normalize_index()` assumed. Live evidence:
+      `totalValue=9,926,135.61` alongside `totalShares=409,881,936` implies
+      ~0.02 VND/share if read as raw VND (impossible), but ~24,220 VND/share
+      once scaled by 1e6 — a plausible VN equity price, and ~9,926 tỷ VND
+      total turnover consistent with a real mid-afternoon HOSE session. This
+      also explains the Issue 2 follow-up note of `LIQUIDITY: 0 tỷ` — PASS
+      2026-09-22
+- [x] Added `VIETCAP_INDEX_TOTAL_VALUE_UNIT_SCALE = 1_000_000.0` in
+      `data/vietcap/normalizer.py`; `normalize_index()` now scales
+      `totalValue` to VND on ingestion. `totalShares` is unaffected (no unit
+      mismatch observed there). No other consumer of `total_value` needed
+      changing (`runtime/bot_service.py`'s plausibility check and `/1e9` "tỷ"
+      formatting already assumed VND input and were already correct) — PASS
+      2026-09-22
+- [x] Did not touch `MIN/MAX_PLAUSIBLE_AVERAGE_PRICE_VND` bounds, the
+      plausibility function, or `/chart` — out of scope for this issue
+- [x] Tests: updated `tests/test_index_stream.py::test_normalize_index_maps_to_index_snapshot`
+      for the new scaled expectation; added
+      `test_normalize_index_scales_total_value_from_trieu_dong_to_vnd`
+      regression test reproducing the exact live totalValue/totalShares pair
+      and asserting the implied average price falls back within plausible
+      bounds — full suite still green (870/870, includes the +1 new test) —
+      PASS 2026-09-22 (user-confirmed)
+- [x] Live: `/market` shows `LIQUIDITY: 11,103 tỷ (458,208,014 CP)` instead of
+      `unavailable`/`0 tỷ`, implied average price ≈24,230 VND/share (plausible),
+      no more "total_value looks implausible" WARNING in normal conditions —
+      PASS 2026-09-22 (user-confirmed)
 
 ### Issue 4 — Foreign / proprietary flow unavailable
-- [ ] NOT STARTED
+- [x] Root cause is actually two independent things, audited separately:
+      1. **`/market`'s market-wide `DÒNG TIỀN NGOẠI/TỰ DOANH`** — never wired
+         (no code ever passed `foreign_flow=` into `build_market_view()`) for
+         the honest reason that **no market-wide data source exists**
+         anywhere in the repo (Vietcap `IndexMessage` has no such field, no
+         aggregate table/query exists). **BLOCKED BY DATA SOURCE** — correctly
+         stays "unavailable", not fixable by code alone — PASS 2026-09-22
+      2. **Per-symbol `INSTITUTIONAL` coverage** (e.g. ACB showing
+         `provider=yfinance reason=no provider in the chain had data`) — a
+         real, fixable bug: `ProviderChain._run()`'s all-MISSING fallback
+         attributed the result to `self._providers[-1].name` (yfinance),
+         falsely implying yfinance was relied upon for VN institutional data,
+         when in fact it always honestly declines
+         (`YFinanceProvider.fetch_institutional_flow()` never fabricates VN
+         flow) and the authoritative source (`VNStockProvider`, already
+         trying `trading.foreign_trade`/`trading.prop_trade`/
+         `quote.foreign_trade` across VCI/TCBS — correct layer, no new
+         implementation needed) was the one that actually had nothing — PASS
+         2026-09-22
+- [x] Confirmed `FlowRow`/`InstitutionalFlow` already track foreign and
+      proprietary legs as fully independent nullable fields; "ownership"
+      data has no representation anywhere in the repo — no conflation risk,
+      no change needed — PASS 2026-09-22
+- [x] Fixed `fundamentals/providers/provider_chain.py`: all-MISSING chain
+      result now reports `provider="none"` with
+      `error_reason="no provider had data (attempted: ...)"` listing every
+      provider actually tried, instead of blaming the last provider in the
+      chain — PASS 2026-09-22
+- [x] Tests: `tests/test_fundamental_providers.py` — extended
+      `test_chain_missing_when_every_provider_is_missing`; added
+      `test_chain_missing_institutional_flow_does_not_blame_yfinance` — full
+      suite **872/872 passed** — PASS 2026-09-22 (user-confirmed)
+- [x] Live: `py -3.12 -m scripts.sync_institutional_flow --symbol ACB --force`
+      → `provider=none status=MISSING reason=no provider had data (attempted:
+      VNStock:MISSING, yfinance:MISSING)`; `py -3.12 -m scripts.coverage_report
+      --symbol ACB` confirms the same persisted, corrected labeling — PASS
+      2026-09-22 (user-confirmed)
+- [x] Live evidence also shows VNStock 3.2.6 genuinely has no institutional
+      flow data for ACB right now (not a code bug) — the per-symbol chain is
+      honest but functionally still MISSING for at least this symbol
+- Follow-up (not implemented, awaiting decision, tracked separately from this
+  issue's PASS): researched DNSE OpenAPI (`dnse-sdk-openapi`,
+  `openapi.dnse.com.vn`) as a possible additional foreign-flow source — its
+  WebSocket Market Data API documents a `foreign_investor` topic (realtime,
+  per-instrument foreign investor trading data), but no equivalent
+  proprietary/tự doanh topic was found in the same official SDK docs.
+  Integrating a new provider (API key/secret registration, adapter, auth) is
+  out of scope for this issue and would need its own issue/phase if pursued.
+  DNSE's older "LightSpeed API" docs (hdsd.dnse.com.vn) list a different,
+  narrower topic set with no foreign-investor topic visible — the two DNSE
+  doc surfaces were not fully reconciled; confirm directly with DNSE
+  docs/support before integrating.
 
 ### Issue 5 — News ingestion không phủ đủ theo ticker
 - [ ] NOT STARTED

@@ -56,7 +56,7 @@ the Phase 25 worker-in-real-bot check remain NOT TESTED.
 All 8 post-Phase-26 operational/UX issues were code-complete, tested, and integrated as of
 2026-09-21. Live testing on 2026-09-22 found items 2 and 4 below were not actually wired
 into the production process despite being marked Resolved; see the corrections inline and
-`## 2026-09-22 — Live Acceptance Fix Round (Phase 28), Issues 1–2` at the end of this file:
+`## 2026-09-22 — Live Acceptance Fix Round (Phase 28), Issues 1–4` at the end of this file:
 
 1. **Latest-five ticker sentiment (Resolved):**
    - Migrated from strict 24h query window to canonical `eligible_articles(ticker, limit=5, max_age_days=30)`.
@@ -76,7 +76,19 @@ into the production process despite being marked Resolved; see the corrections i
    - `market_overview()` was written to read `index_state`, displaying advances/declines/ceiling/floor and liquidity, with a historical trend-only fallback when unavailable — but `build_runtime_service_from_env()` never constructed or passed an `index_state`, and no worker ever populated one, so `/market` always showed `BREADTH: unavailable` in the real bot. `stock_analysis()` (`/soi`) never read breadth at all, wired or not.
    - Fixed 2026-09-22: added `runtime/index_stream_worker.py` (bounded daemon-thread worker over the existing, previously standalone-only, Vietcap realtime index socket pipeline), wired `index_state` into `build_runtime_service_from_env()`, and shared the breadth/liquidity lookup between `market_overview()` and `stock_analysis()` via `RuntimeBotDataService._index_breadth_liquidity()`.
    - Live-confirmed 2026-09-22: `/market` and `/soi` both show live breadth (e.g. `143 tăng (3 trần) / 148 giảm (7 sàn) / 64 tham chiếu`) and `Regime: BULL (xu hướng EMA + breadth ...)`.
-   - Known follow-up, not yet fixed: live output showed `LIQUIDITY: 0 tỷ` despite a plausible non-zero traded volume — suspected unit/field issue in the realtime index `total_value` field, left for the Issue 3 (liquidity) audit.
+   - Known follow-up: live output showed `LIQUIDITY: 0 tỷ` despite a plausible non-zero traded volume — suspected unit/field issue in the realtime index `total_value` field. Root-caused and fixed 2026-09-22 as Phase 28 Issue 3, see below.
+
+4b. **Market-wide liquidity unavailable (Fixed & live-validated 2026-09-22, see Phase 28 Issue 3):**
+   - Root cause was a unit mismatch, not a missing data source: the Vietcap realtime index stream's `totalValue` field is in triệu đồng (millions of VND), not raw VND as `normalize_index()` assumed, so the existing plausibility guard (correctly) rejected the tiny implied average price and reported `unavailable`.
+   - Fixed by scaling `totalValue` to VND at the normalization boundary (`data/vietcap/normalizer.py`); no change needed to `runtime/bot_service.py`'s plausibility check or "tỷ" formatting, which already assumed VND input.
+   - Live-confirmed 2026-09-22: `/market` shows `LIQUIDITY: 11,103 tỷ (458,208,014 CP)` with a plausible implied average price (~24,230 VND/share).
+
+4c. **Foreign/proprietary flow unavailable (Root cause fixed & live-validated 2026-09-22, see Phase 28 Issue 4):**
+   - Two independent things, audited separately: the market-wide `/market` field has no data source anywhere in the repo (stays honestly "unavailable" — BLOCKED BY DATA SOURCE, not a bug); the per-symbol `INSTITUTIONAL` coverage chain had a real mislabeling bug where an all-MISSING result was attributed to `yfinance` (the last provider tried) instead of honestly reflecting that no provider, including the authoritative VNStock/Vietcap one, had data.
+   - Fixed by changing `ProviderChain._run()`'s all-MISSING fallback to report `provider="none"` with an honest `error_reason` listing every provider attempted.
+   - Live-confirmed 2026-09-22: `ACB` coverage now shows `provider=none reason=no provider had data (attempted: VNStock:MISSING, yfinance:MISSING)` instead of `provider=yfinance`.
+   - Confirmed `foreign_buy/sell_value` and `proprietary_buy/sell_value` are already tracked as fully independent nullable fields in `FlowRow`/`InstitutionalFlow`; "ownership" data has no representation anywhere in the repo, so there is no conflation risk to fix.
+   - Researched (not implemented): DNSE OpenAPI's official SDK documents a `foreign_investor` WebSocket topic (realtime, per-instrument foreign trading data) as a possible future foreign-flow source, but no proprietary/tự doanh equivalent was found in the same docs. Integrating it would be a new provider (API key/secret, adapter, auth) — out of scope here, needs its own issue if pursued.
 
 5. **Compact `/soi` dashboard (Resolved):**
    - Overview condensed into concise high-value summary; detailed technical levels, fundamentals, and strategy conditions are accessible via inline buttons and direct commands.
@@ -3373,7 +3385,7 @@ Matching the team leader's specification and visual dashboard:
 
 ---
 
-## 2026-09-22 — Live Acceptance Fix Round (Phase 28), Issues 1–2
+## 2026-09-22 — Live Acceptance Fix Round (Phase 28), Issues 1–4
 
 ### Context
 
@@ -3465,11 +3477,136 @@ mismatch in the realtime index event's `total_value` field. Not investigated
 or changed as part of Issue 2; flagged for the Issue 3 (market-wide liquidity)
 audit.
 
+### Issue 3 — Market-wide liquidity unavailable
+
+**Root cause:** not a missing data source (the plausibility guard added
+alongside Issue 2 was working correctly and flagging a real problem). The
+Vietcap realtime index stream's `totalValue` field is denominated in
+**triệu đồng** (millions of VND), not raw VND as `normalize_index()` assumed.
+Live evidence (debug capture, same session as Issue 2): a snapshot reported
+`totalValue=9,926,135.61` alongside `totalShares=409,881,936`. Read as raw
+VND this implies an average matched price of ~0.02 VND/share (impossible for
+any VN equity), which is exactly why
+`runtime.bot_service._is_plausible_market_liquidity()` rejected it and
+rendered `LIQUIDITY: unavailable` (and, right after Issue 2 landed,
+`LIQUIDITY: 0 tỷ` for a near-zero `total_value`). Scaled by 1e6 the same
+numbers imply ~24,220 VND/share (a plausible VN equity price) and ~9,926 tỷ
+VND total market turnover — consistent with a real mid-afternoon HOSE
+session before ATC. `totalShares` has no equivalent mismatch (409M matched
+shares is plausible on its own), so only `totalValue` needed scaling.
+
+**Implementation:**
+
+- Added `VIETCAP_INDEX_TOTAL_VALUE_UNIT_SCALE = 1_000_000.0` in
+  `data/vietcap/normalizer.py`; `normalize_index()` now multiplies the wire
+  `totalValue` by this constant when building `IndexSnapshot.total_value`,
+  so every downstream consumer sees VND consistently.
+- No change to `runtime/bot_service.py`: its plausibility bounds
+  (`MIN/MAX_PLAUSIBLE_AVERAGE_PRICE_VND`) and the `/1e9` "tỷ" formatting
+  already assumed VND input and were already correct once the input is
+  actually VND. Confirmed by grep that `runtime/bot_service.py` is the only
+  non-test consumer of `IndexSnapshot.total_value`, so there was no
+  double-scaling risk elsewhere.
+- Did not touch `/chart`, the plausibility bounds themselves, or ASMF/CL1
+  scoring — out of scope for this issue.
+
+**Verification:**
+
+- Updated `tests/test_index_stream.py::test_normalize_index_maps_to_index_snapshot`
+  for the new scaled expectation.
+- Added `test_normalize_index_scales_total_value_from_trieu_dong_to_vnd`:
+  reproduces the exact live `totalValue`/`totalShares` pair from the debug
+  capture and asserts the resulting implied average price falls back within
+  `_is_plausible_market_liquidity()`'s bounds.
+- Full regression: **870/870 passed** (`python -m pytest -q`, user-run) —
+  no regressions in Issue 1 (`/scan`), Issue 2 (breadth), `/chart`, or market
+  regime tests.
+- Live (2026-09-22): `/market` showed
+  `LIQUIDITY: 11,103 tỷ (458,208,014 CP)` — implied average price ≈24,230
+  VND/share (plausible), no more `unavailable`/`0 tỷ`, and the "Chưa khả
+  dụng" list no longer includes liquidity. No more "total_value looks
+  implausible" WARNING under normal market conditions.
+
+### Issue 4 — Foreign/proprietary flow unavailable
+
+**Root cause (two independent things, not one):**
+
+1. `/market`'s market-wide `DÒNG TIỀN NGOẠI/TỰ DOANH` was always
+   "unavailable" because nothing ever passed `foreign_flow=` into
+   `build_market_view()` — but unlike Issues 2/3, this is not dead wiring:
+   there is genuinely **no market-wide data source anywhere in the repo**.
+   Vietcap's `IndexMessage` wire schema has no foreign/proprietary field
+   (only `MatchPriceMessage`, at per-symbol level, has
+   `foreignBuyValue`/`foreignSellValue`), and no aggregate table or query
+   exists. This is **BLOCKED BY DATA SOURCE**, not a bug — "unavailable"
+   stays, correctly.
+2. Per-symbol `INSTITUTIONAL` coverage (e.g. ACB) showed
+   `provider=yfinance reason=no provider in the chain had data`, which
+   falsely implied yfinance was relied upon for Vietnamese institutional
+   flow. Audited: `YFinanceProvider.fetch_institutional_flow()` already
+   honestly declines with `"Yahoo does not publish Vietnamese institutional
+   flow"` and never fabricates data; `VNStockProvider.fetch_institutional_flow()`
+   is already the correct layer (tries `trading.foreign_trade`,
+   `trading.prop_trade`, `quote.foreign_trade` across VCI/TCBS sources) and
+   needed no new implementation. The actual bug was in
+   `ProviderChain._run()`: when every provider in the chain returned
+   MISSING, it attributed the result to `self._providers[-1].name`
+   (yfinance) instead of honestly reflecting that no provider — including
+   the authoritative one — had data.
+
+**Implementation:**
+
+- Fixed `fundamentals/providers/provider_chain.py`: the all-MISSING fallback
+  now returns `provider="none"` with
+  `error_reason="no provider had data (attempted: ...)"`, listing every
+  provider actually tried. Shared by `FINANCIALS` and `INSTITUTIONAL`
+  (same underlying `_run()`), but only this specific mislabeling branch
+  changed — no other behavior touched.
+- Confirmed (no change needed): `FlowRow`/`InstitutionalFlow` already track
+  `foreign_buy_value`/`foreign_sell_value` and
+  `proprietary_buy_value`/`proprietary_sell_value` as fully independent
+  nullable fields (`has_foreign`/`has_proprietary` properties keep "no
+  proprietary desk data" from collapsing into "proprietary flow was zero").
+  "Ownership" data has no representation anywhere in the repo, so there was
+  no three-way conflation to fix.
+
+**Verification:**
+
+- Extended `tests/test_fundamental_providers.py::test_chain_missing_when_every_provider_is_missing`
+  and added `test_chain_missing_institutional_flow_does_not_blame_yfinance`,
+  reproducing the exact ACB scenario.
+- Full regression: **872/872 passed** (`python -m pytest tests/ -q`,
+  user-run).
+- Live (2026-09-22): `py -3.12 -m scripts.sync_institutional_flow --symbol
+  ACB --force` → `provider=none status=MISSING reason=no provider had data
+  (attempted: VNStock:MISSING, yfinance:MISSING)`;
+  `py -3.12 -m scripts.coverage_report --symbol ACB` confirms the same
+  corrected labeling persisted. This live run also confirms VNStock 3.2.6
+  genuinely has no institutional-flow data for ACB right now — the chain is
+  now honest about it, but the symbol is still functionally MISSING (a data
+  availability fact, not a code defect).
+
+**Researched, not implemented:** DNSE OpenAPI (`dnse-sdk-openapi`,
+`openapi.dnse.com.vn`) documents a `foreign_investor` WebSocket topic
+(realtime, per-instrument foreign investor trading data) as a possible
+future additional source for the foreign leg. No equivalent
+proprietary/tự doanh topic was found in the same official SDK docs.
+Integrating a new provider (API key/secret registration, adapter, request
+signing) is a materially larger scope than this issue and was not started;
+would need its own issue/phase if pursued. DNSE's older "LightSpeed API"
+docs (hdsd.dnse.com.vn) list a narrower topic set with no foreign-investor
+topic visible in what was checked — the two DNSE doc surfaces were not
+fully reconciled; confirm directly with DNSE before integrating.
+
 ### Remaining
 
-Issues 3–10 (liquidity, foreign/proprietary flow, news ingestion coverage,
-news freshness window, per-article sentiment output, stale "24h" wording,
-fundamentals PARTIAL/MISSING, coverage-vs-ASMF-readiness semantics) are not
-started; see `TASKS.md` Phase 28 for the full list. Per the working agreement,
-each is audited and fixed one at a time with an explicit live-confirmation
-stop before starting the next.
+Issues 5–10 (news ingestion coverage, news freshness window, per-article
+sentiment output, stale "24h" wording, fundamentals PARTIAL/MISSING,
+coverage-vs-ASMF-readiness semantics) are not started; see `TASKS.md`
+Phase 28 for the full list. Per the working agreement, each is audited and
+fixed one at a time with an explicit live-confirmation stop before starting
+the next. A follow-up decision is also open (not an "issue" in this list):
+whether to keep `/market`'s `DÒNG TIỀN NGOẠI/TỰ DOANH: unavailable` line
+visible (current behavior, matches the "mark unavailable rõ ràng"
+requirement) or remove it from output entirely — awaiting the user's
+choice.

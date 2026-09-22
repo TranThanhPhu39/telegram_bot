@@ -430,6 +430,30 @@ def test_chain_missing_when_every_provider_is_missing() -> None:
     ]).fetch_financials("FPT")
     assert result.status is ProviderStatus.MISSING
     assert result.attempted == ("VNStock:MISSING", "yfinance:MISSING")
+    # Issue 4: must not attribute an all-MISSING chain to the last provider
+    # tried (e.g. "yfinance") as if it were the authoritative/relied-upon
+    # source -- that misleads readers into thinking yfinance was a valid
+    # source for this dataset. "none" plus an honest attempted-list reason
+    # makes clear no provider in the chain had data.
+    assert result.provider == "none"
+    assert "VNStock" in result.error_reason
+    assert "yfinance" in result.error_reason
+
+
+def test_chain_missing_institutional_flow_does_not_blame_yfinance() -> None:
+    # Issue 4 live evidence: ACB coverage showed
+    # "provider=yfinance reason=no provider in the chain had data" for
+    # INSTITUTIONAL, implying yfinance was the relied-upon source, when in
+    # fact yfinance never claims to carry Vietnamese foreign/proprietary
+    # flow and VNStock (the authoritative source) was the one that actually
+    # had nothing for this symbol.
+    result = ProviderChain([
+        _StubProvider("VNStock", ProviderStatus.MISSING),
+        _StubProvider("yfinance", ProviderStatus.MISSING),
+    ]).fetch_institutional_flow("ACB")
+    assert result.status is ProviderStatus.MISSING
+    assert result.provider == "none"
+    assert result.provider != "yfinance"
 
 
 def test_chain_survives_an_adapter_that_raises() -> None:

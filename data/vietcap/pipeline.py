@@ -106,6 +106,18 @@ class IndexStatePipeline:
             )
             return None
 
+        # Diagnostic only (DEBUG): the raw total_value/total_volume magnitude
+        # from the Vietcap feed, kept so a live run with LOG_LEVEL=DEBUG can
+        # confirm whether total_value carries a real market-wide matched value
+        # (Issue 3 audit trail; see runtime.bot_service._is_plausible_market_liquidity).
+        logger.debug(
+            "Vietcap index snapshot symbol=%s value=%.2f total_volume=%.2f "
+            "total_value=%.2f advances=%.0f declines=%.0f unchanged=%.0f",
+            snapshot.symbol, snapshot.value, snapshot.total_volume,
+            snapshot.total_value, snapshot.advances, snapshot.declines,
+            snapshot.unchanged,
+        )
+
         self._state.update(snapshot)
         return snapshot
 

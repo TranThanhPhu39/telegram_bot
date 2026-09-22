@@ -46,11 +46,26 @@ def normalize_match_price(message: price_pb2.MatchPriceMessage) -> TradeTick:
     )
 
 
+#: Issue 3 (live capture 2026-09-22): the Vietcap realtime index stream's
+#: ``totalValue`` field is denominated in *triệu đồng* (millions of VND),
+#: not raw VND as previously assumed. Live evidence: a mid-session snapshot
+#: reported totalValue=9,926,135.61 alongside totalShares=409,881,936 -- if
+#: taken as raw VND that implies an average matched price of ~0.02 VND/share
+#: (impossible), but scaled by 1e6 it implies ~24,220 VND/share (a plausible
+#: VN equity price) and a market-wide turnover of ~9,926 tỷ VND, consistent
+#: with a real mid-afternoon HOSE session total. totalShares has no such
+#: mismatch (409M matched shares is plausible on its own), so only
+#: totalValue is scaled here.
+VIETCAP_INDEX_TOTAL_VALUE_UNIT_SCALE = 1_000_000.0
+
+
 def normalize_index(message: price_pb2.IndexMessage) -> IndexSnapshot:
     """Validate and normalize a Vietcap index message.
 
     ``estimatedChange`` and ``estimatedFsp`` are not mapped because the schema
-    does not document their meaning. Provider numeric units are preserved.
+    does not document their meaning. Provider numeric units are preserved,
+    except ``totalValue`` which is scaled from triệu đồng to VND -- see
+    ``VIETCAP_INDEX_TOTAL_VALUE_UNIT_SCALE``.
     """
     errors = validate_index(message)
     if errors:
@@ -62,7 +77,7 @@ def normalize_index(message: price_pb2.IndexMessage) -> IndexSnapshot:
         change=float(message.change),
         change_percent=float(message.changePercent),
         total_volume=float(message.totalShares),
-        total_value=float(message.totalValue),
+        total_value=float(message.totalValue) * VIETCAP_INDEX_TOTAL_VALUE_UNIT_SCALE,
         advances=float(message.totalStockIncrease),
         declines=float(message.totalStockDecline),
         unchanged=float(message.totalStockNoChange),
