@@ -317,7 +317,8 @@ class RuntimeBotDataService:
         benchmark, benchmark_source = self._history("VNINDEX")
         price = build_price_view(bars)
         technical = build_technical_view(bars, benchmark)
-        market = build_market_view(benchmark)
+        breadth, liquidity = self._index_breadth_liquidity()
+        market = build_market_view(benchmark, breadth=breadth, liquidity=liquidity)
         sentiment = self._sentiment_view(symbol)
         facts = self._fundamental_facts(symbol, bars[-1].timestamp)
         strategy_view = self._strategy_view(strategy, bars, benchmark, sentiment)
@@ -369,20 +370,32 @@ class RuntimeBotDataService:
             return view.error
         return format_why(view, interpret_indicators(view.technical))
 
+    def _index_breadth_liquidity(self) -> tuple[str | None, str | None]:
+        """Build the shared Vietnamese breadth/liquidity strings from the
+        realtime ``LatestIndexState``, when one is wired in.
+
+        Used by both ``/market`` (``market_overview``) and ``/soi``
+        (``stock_analysis``) so the two commands always report the same
+        market-breadth state instead of ``/soi`` silently omitting it.
+        """
+        if self.index_state is None or not hasattr(self.index_state, "get"):
+            return None, None
+        snapshot = self.index_state.get("VNINDEX")
+        if snapshot is None:
+            return None, None
+        breadth = (
+            f"{int(snapshot.advances)} tăng ({int(snapshot.ceiling_count)} trần) / "
+            f"{int(snapshot.declines)} giảm ({int(snapshot.floor_count)} sàn) / "
+            f"{int(snapshot.unchanged)} tham chiếu"
+        )
+        liquidity = None
+        if snapshot.total_value > 0:
+            liquidity = f"{snapshot.total_value / 1e9:,.0f} tỷ ({snapshot.total_volume:,.0f} CP)"
+        return breadth, liquidity
+
     def market_overview(self) -> str:
         bars, source = self._history("VNINDEX")
-        breadth = None
-        liquidity = None
-        if self.index_state is not None and hasattr(self.index_state, "get"):
-            snapshot = self.index_state.get("VNINDEX")
-            if snapshot is not None:
-                breadth = (
-                    f"{int(snapshot.advances)} tăng ({int(snapshot.ceiling_count)} trần) / "
-                    f"{int(snapshot.declines)} giảm ({int(snapshot.floor_count)} sàn) / "
-                    f"{int(snapshot.unchanged)} tham chiếu"
-                )
-                if snapshot.total_value > 0:
-                    liquidity = f"{snapshot.total_value / 1e9:,.0f} tỷ ({snapshot.total_volume:,.0f} CP)"
+        breadth, liquidity = self._index_breadth_liquidity()
 
         as_of = datetime.fromtimestamp(self.now(), VIETNAM_TIMEZONE).date()
         _, top_sectors, weakest_sector, weakest_score = self._compute_sector_performance(as_of)
@@ -887,9 +900,12 @@ def build_runtime_service_from_env() -> RuntimeBotDataService:
         )
     except (OSError, ValueError, sqlite3.Error):
         news_service = None
+    from data.market_state import LatestIndexState
+
     return RuntimeBotDataService(
         client, connection, instruments, news_service=news_service,
         fundamentals_csv_path=os.getenv("FUNDAMENTALS_CSV_PATH", "").strip() or None,
+        index_state=LatestIndexState(),
     )
 
 

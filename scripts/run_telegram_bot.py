@@ -11,6 +11,7 @@ from telegram_bot.sector_notification_store import SQLiteNotificationStore
 from telegram_bot.sector_notifications import SectorSyncNotificationBroker
 from runtime.bot_service import build_runtime_service_from_env
 from runtime.coverage_factory import start_coverage_worker_from_env
+from runtime.index_stream_worker import start_index_stream_worker_from_env
 from runtime.redaction import configure_logging
 from runtime.scanner_worker import start_scanner_worker_from_env
 from runtime.sector_history_sync import start_sector_history_background_sync
@@ -64,6 +65,15 @@ if __name__ == "__main__":
     # back to the small legacy BOT_WATCH_SYMBOLS watch list (e.g. FPT/ACB)
     # instead of the full HOSE/HNX/UPCoM universe.
     scanner_worker = start_scanner_worker_from_env()
+    # Issue 2 fix: without this, ``service.index_state`` was always empty in
+    # production (nothing ever populated it), so /market and /soi always
+    # reported "BREADTH: unavailable" and a regime reason that could never
+    # move past "chỉ dựa trên xu hướng EMA". This reuses the same
+    # VietcapRealtimeClient/IndexStatePipeline previously only exercised by
+    # scripts/test_realtime_index.py, on a bounded daemon thread.
+    index_stream_worker = None
+    if service.index_state is not None:
+        index_stream_worker = start_index_stream_worker_from_env(service.index_state)
     try:
         run_polling(TelegramCommandService(service), sector_notifications)
     finally:
@@ -71,4 +81,6 @@ if __name__ == "__main__":
             scanner_worker.stop(timeout=10.0)
         if coverage_worker is not None:
             coverage_worker.stop(timeout=10.0)
+        if index_stream_worker is not None:
+            index_stream_worker.stop(timeout=10.0)
         sector_worker.stop(timeout=10.0)

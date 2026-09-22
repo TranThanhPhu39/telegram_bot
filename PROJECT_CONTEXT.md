@@ -51,26 +51,32 @@ provider follow-up is complete: VNStock 4.0.8/KBS, yfinance fallback, and live
 promotion safety all passed on 2026-09-21. Phase 22 active-session acceptance and
 the Phase 25 worker-in-real-bot check remain NOT TESTED.
 
-## Current Operational Status (Updated 2026-09-21)
+## Current Operational Status (Updated 2026-09-22)
 
-All 8 post-Phase-26 operational/UX issues have been fully resolved, tested, and integrated:
+All 8 post-Phase-26 operational/UX issues were code-complete, tested, and integrated as of
+2026-09-21. Live testing on 2026-09-22 found items 2 and 4 below were not actually wired
+into the production process despite being marked Resolved; see the corrections inline and
+`## 2026-09-22 — Live Acceptance Fix Round (Phase 28), Issues 1–2` at the end of this file:
 
 1. **Latest-five ticker sentiment (Resolved):**
    - Migrated from strict 24h query window to canonical `eligible_articles(ticker, limit=5, max_age_days=30)`.
    - Unified selection path across `/tin`, `/sentiment`, and `/soi`. Zero eligible articles correctly reports `MISSING` (never fake Neutral).
    - Preserved 48-hour severe-negative ASMF blocker recency independently.
 
-2. **Full-market scanner & universe (Resolved):**
+2. **Full-market scanner & universe (Code Resolved 2026-09-21; ⚠️ live testing on 2026-09-22 found `/scan` still returned only `2/2` mã in the real bot process — fixed separately as Phase 28 Issue 1, see below):**
    - Removed reliance of `/scan` on `BOT_WATCH_SYMBOLS`. Universe is dynamically loaded from active HOSE/HNX/UPCoM common stocks in SQLite via `load_market_universe()`.
+   - Live-confirmed working 2026-09-22 after the Phase 28 Issue 1 fix: `universe=1524`, `/scan` no longer shows `2/2`.
 
 3. **Background scanner worker & SQLite snapshot persistence (Resolved):**
    - Created `runtime/scanner_worker.py` with `MarketScannerWorker` daemon thread and `run_scan_cycle()`.
    - Created Migration 9 (`scan_snapshots` table and index) to persist full-market scans.
    - `/scan` reads latest snapshot from SQLite cache in <10ms with strategy support (CL1 and ASMF) and fallback.
 
-4. **Realtime breadth in Telegram market context (Resolved):**
-   - Injected `index_state` into `RuntimeBotDataService.market_overview()`, displaying advances/declines/ceiling/floor and liquidity.
-   - Preserved historical trend-only fallback when index_state is unavailable.
+4. **Realtime breadth in Telegram market context (Code Resolved 2026-09-21; ⚠️ was dead code in production — fixed & live-validated 2026-09-22, see Phase 28 Issue 2):**
+   - `market_overview()` was written to read `index_state`, displaying advances/declines/ceiling/floor and liquidity, with a historical trend-only fallback when unavailable — but `build_runtime_service_from_env()` never constructed or passed an `index_state`, and no worker ever populated one, so `/market` always showed `BREADTH: unavailable` in the real bot. `stock_analysis()` (`/soi`) never read breadth at all, wired or not.
+   - Fixed 2026-09-22: added `runtime/index_stream_worker.py` (bounded daemon-thread worker over the existing, previously standalone-only, Vietcap realtime index socket pipeline), wired `index_state` into `build_runtime_service_from_env()`, and shared the breadth/liquidity lookup between `market_overview()` and `stock_analysis()` via `RuntimeBotDataService._index_breadth_liquidity()`.
+   - Live-confirmed 2026-09-22: `/market` and `/soi` both show live breadth (e.g. `143 tăng (3 trần) / 148 giảm (7 sàn) / 64 tham chiếu`) and `Regime: BULL (xu hướng EMA + breadth ...)`.
+   - Known follow-up, not yet fixed: live output showed `LIQUIDITY: 0 tỷ` despite a plausible non-zero traded volume — suspected unit/field issue in the realtime index `total_value` field, left for the Issue 3 (liquidity) audit.
 
 5. **Compact `/soi` dashboard (Resolved):**
    - Overview condensed into concise high-value summary; detailed technical levels, fundamentals, and strategy conditions are accessible via inline buttons and direct commands.
@@ -3363,3 +3369,107 @@ Matching the team leader's specification and visual dashboard:
    - Equal-weight sector index across members: cumulative % return from T0.
    - Legend formatted with sector name, latest session turnover in billion VND, and cumulative return (+X.XX%).
    - Rendered using headless Matplotlib (Agg), verified PNG magic bytes.
+
+
+---
+
+## 2026-09-22 — Live Acceptance Fix Round (Phase 28), Issues 1–2
+
+### Context
+
+Live testing of the real bot process (`py -3.12 -m scripts.run_telegram_bot`)
+found that several items previously logged as "Resolved" in the 2026-09-21
+Current Operational Status section were code-complete but had never actually
+been exercised end-to-end in production, and in fact did not work live. This
+round fixes issues one at a time, stopping for explicit live confirmation
+after each before starting the next (see `TASKS.md` Phase 28 for the full
+issue list and status).
+
+### Issue 1 — `/scan` returned 2/2 instead of the full market
+
+- Confirmed live: `/scan` returned only FPT/ACB (`2/2`) while the coverage
+  worker log showed `universe=1524`.
+- Fixed and live-confirmed 2026-09-22: `/scan` now reflects the full
+  HOSE/HNX/UPCoM universe (`universe=1524`), no longer limited to
+  `BOT_WATCH_SYMBOLS`.
+
+### Issue 2 — Realtime breadth missing from `/market` and `/soi`
+
+**Root cause (three independent gaps, all in production wiring, not in the
+already-correct breadth-computation logic):**
+
+1. `runtime.bot_service.build_runtime_service_from_env()` — the factory used
+   by `scripts/run_telegram_bot.py` — never passed `index_state=` into
+   `RuntimeBotDataService`, so `self.index_state` was always `None` regardless
+   of anything else.
+2. The Vietcap realtime index socket pipeline (`VietcapRealtimeClient` +
+   `IndexStatePipeline` + `LatestIndexState`, from `data/vietcap/`) worked
+   correctly but had only ever been exercised standalone by
+   `scripts/test_realtime_index.py`; no background worker started it inside
+   `scripts/run_telegram_bot.py`, unlike the scanner/coverage workers.
+3. `RuntimeBotDataService.stock_analysis()` (backing `/soi`) called
+   `build_market_view(benchmark)` without ever passing `breadth`/`liquidity`,
+   even where `market_overview()` (`/market`) already had that logic — so
+   `/soi` structurally could not share `/market`'s breadth state.
+
+**Implementation:**
+
+- Added `runtime/index_stream_worker.py`: `IndexStreamWorker`, a bounded
+  daemon-thread worker following the same start/stop pattern as
+  `MarketScannerWorker`/`MarketCoverageWorker`. Connects via
+  `VietcapRealtimeClient`, subscribes VNINDEX, feeds a shared
+  `LatestIndexState` through `IndexStatePipeline`. Retries the initial connect
+  with exponential backoff (capped) on failure without busy-looping or
+  blocking Telegram polling; `VietcapRealtimeClient`'s own bounded Socket.IO
+  reconnection policy handles drops within an established session.
+  `INDEX_STREAM_WORKER_ENABLED` env flag to disable (offline/dev).
+- `build_runtime_service_from_env()` now constructs a `LatestIndexState()` and
+  passes it as `index_state=`.
+- `scripts/run_telegram_bot.py` starts/stops `index_stream_worker` alongside
+  the scanner/coverage/sector workers.
+- Extracted `RuntimeBotDataService._index_breadth_liquidity()` and reused it in
+  both `market_overview()` and `stock_analysis()`, so `/market` and `/soi` now
+  read the same live breadth/liquidity state.
+- When the feed is down or hasn't produced a VNINDEX snapshot yet, both
+  commands fall back to the existing "unavailable"/EMA-only presentation — no
+  EOD data is ever mislabeled as realtime.
+
+**Verification:**
+
+- New `tests/test_index_stream_worker.py` (6 tests): first-connect population,
+  retry after failed initial connect, no busy-loop on repeated failures,
+  `stop()` before `start()` is a no-op, `INDEX_STREAM_WORKER_ENABLED=false`
+  disables the worker, rejects a non-`LatestIndexState` state.
+- Extended `tests/test_runtime_bot.py` (+4 tests): `/market` reports
+  unavailable breadth without `index_state`; `/market` renders breadth and
+  liquidity strings correctly from a fake snapshot; `/soi`'s
+  `StockAnalysisView.market.breadth` matches what `/market` renders from the
+  same state; `/soi` has no breadth when `index_state` is absent.
+- Full regression: **866 passed** (`python -m pytest tests/ -q`), no
+  regressions in Issue 1 (`/scan`), `/chart`, market regime, or Telegram
+  command tests.
+- Live (2026-09-22, trading session): bot log showed
+  `Realtime index stream worker started` →
+  `Vietcap realtime index stream connected symbols=('VNINDEX',)`. `/market`
+  showed `BREADTH: 143 tăng (3 trần) / 148 giảm (7 sàn) / 64 tham chiếu` and
+  `Regime: BULL (xu hướng EMA + breadth ...)`. `/soi HPG`, read seconds later,
+  showed the same live breadth shape (`141 tăng (3 trần) / 149 giảm (7 sàn) /
+  65 tham chiếu` — the small drift between the two reads is expected: both are
+  genuinely realtime against the same shared, continuously-updating
+  `index_state`, not a frozen duplicate).
+
+**Known follow-up (out of scope for Issue 2, left for Issue 3):** live output
+showed `LIQUIDITY: 0 tỷ (301,778,416 CP)` — the traded volume looks
+plausible but the traded value renders as zero. Suspected unit or field
+mismatch in the realtime index event's `total_value` field. Not investigated
+or changed as part of Issue 2; flagged for the Issue 3 (market-wide liquidity)
+audit.
+
+### Remaining
+
+Issues 3–10 (liquidity, foreign/proprietary flow, news ingestion coverage,
+news freshness window, per-article sentiment output, stale "24h" wording,
+fundamentals PARTIAL/MISSING, coverage-vs-ASMF-readiness semantics) are not
+started; see `TASKS.md` Phase 28 for the full list. Per the working agreement,
+each is audited and fixed one at a time with an explicit live-confirmation
+stop before starting the next.

@@ -5,6 +5,8 @@ from datetime import date, datetime, timezone
 from asmf_data.models import SectorMembership
 from asmf_data.store import upsert_sector_memberships
 from data.database import connect_database
+from data.market_state import LatestIndexState
+from data.models import IndexSnapshot
 from data.vietcap.historical import normalize_gap_chart
 from data.vietcap.rest import VietcapTimeFrame
 from runtime.bot_service import RuntimeBotDataService
@@ -41,12 +43,24 @@ def payload(count=260):
     }
 
 
-def service(client):
+def service(client, *, index_state=None):
     return RuntimeBotDataService(
         client, connect_database("sqlite:///:memory:"),
         (ScannerInstrument("FPT", "HOSE", "STOCK"),),
         now=lambda: 1_800_000_000,
+        index_state=index_state,
     )
+
+
+def vnindex_snapshot(**overrides):
+    fields = dict(
+        symbol="VNINDEX", value=1_280.5, change=5.25, change_percent=0.41,
+        total_volume=500_000_000.0, total_value=12_500_000_000_000.0,
+        advances=250.0, declines=120.0, unchanged=60.0,
+        ceiling_count=8.0, floor_count=3.0, exchange_time="11:05:22",
+    )
+    fields.update(overrides)
+    return IndexSnapshot(**fields)
 
 
 def test_symbol_market_why_scan_and_performance_use_real_modules() -> None:
@@ -213,3 +227,44 @@ def test_asmf_buy_is_blocked_only_when_severe_news_exists(monkeypatch) -> None:
     monkeypatch.setattr("runtime.bot_service.institutional_flow_score", lambda *a: 80.0)
     monkeypatch.setattr("runtime.bot_service.sector_strength_score", lambda *a: 80.0)
     assert "CHƯA ĐỦ ĐIỀU KIỆN" in runtime.symbol_overview("FPT", "ASMF")
+
+
+# --- Issue 2: realtime breadth shared by /market and /soi -----------------
+
+
+def test_market_overview_reports_unavailable_breadth_without_index_state() -> None:
+    runtime = service(FakeClient(payload()))
+    result = runtime.market_overview()
+    assert "BREADTH: unavailable" in result
+    assert "chỉ dựa trên xu hướng EMA; chưa có breadth" in result
+
+
+def test_market_overview_uses_index_state_breadth_when_available() -> None:
+    state = LatestIndexState()
+    state.update(vnindex_snapshot())
+    runtime = service(FakeClient(payload()), index_state=state)
+    result = runtime.market_overview()
+    assert "250 tăng (8 trần) / 120 giảm (3 sàn) / 60 tham chiếu" in result
+    assert "12,500 tỷ" in result
+    assert "BREADTH: unavailable" not in result
+    assert "xu hướng EMA + breadth" in result
+
+
+def test_soi_stock_analysis_uses_the_same_breadth_state_as_market(monkeypatch) -> None:
+    state = LatestIndexState()
+    state.update(vnindex_snapshot())
+    runtime = service(FakeClient(payload()), index_state=state)
+    market_breadth = runtime.market_overview()
+    soi_view = runtime.stock_analysis("FPT")
+    assert soi_view.market is not None
+    assert soi_view.market.breadth == "250 tăng (8 trần) / 120 giảm (3 sàn) / 60 tham chiếu"
+    assert soi_view.market.breadth in market_breadth
+    assert "xu hướng EMA + breadth" in soi_view.market.regime_reason
+
+
+def test_soi_stock_analysis_has_no_breadth_when_index_state_absent() -> None:
+    runtime = service(FakeClient(payload()))
+    soi_view = runtime.stock_analysis("FPT")
+    assert soi_view.market is not None
+    assert soi_view.market.breadth is None
+    assert "chỉ dựa trên xu hướng EMA" in soi_view.market.regime_reason

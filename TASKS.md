@@ -724,11 +724,23 @@ Authorised to run back-to-back with Phase 26 in a single iteration (no STOP gate
 - [x] `/scan` reads latest snapshot (<10ms) — PASS 2026-09-21
 - [x] Add strategy-aware CL1/ASMF views without inventing new strategy rules — PASS 2026-09-21
 - [x] Add liquidity configuration and tests (`tests/test_scanner_worker.py`) — PASS 2026-09-21
+  - ⚠️ CORRECTION (2026-09-22): code above was complete but never live-validated in the
+    real bot process; `MarketScannerWorker` was not started from
+    `scripts/run_telegram_bot.py` and `/scan` silently fell back to
+    `BOT_WATCH_SYMBOLS` (FPT/ACB only) in production. Fixed and live-validated as
+    **Live Acceptance Fix Round — Issue 1** below (2026-09-22).
 
 ### Issue 3 — Realtime breadth in Telegram market context
 - [x] Connect realtime VNINDEX breadth to `/market` via `index_state` injection — PASS 2026-09-21
 - [x] Preserve historical trend-only fallback when realtime breadth is unavailable — PASS 2026-09-21
 - [x] Distinguish General Market Context from ASMF Market Filter — PASS 2026-09-21
+  - ⚠️ CORRECTION (2026-09-22): the `market_overview()` code path above was correct,
+    but `index_state` was never actually constructed/passed by
+    `build_runtime_service_from_env()`, and no worker ever populated it — so in
+    production `/market` always showed `BREADTH: unavailable`, and `/soi` never
+    received breadth/liquidity at all (`stock_analysis()` didn't wire it in either).
+    Fixed and live-validated as **Live Acceptance Fix Round — Issue 2** below
+    (2026-09-22).
 
 ### Issue 4 — `/soi` compact dashboard
 - [x] Reduce overview to concise high-value information — PASS 2026-09-21
@@ -773,3 +785,77 @@ untime/bot_service.py with sector_performance_chart() and integrate sector ranki
 - [x] Format /market in 	elegram_bot/formatters.py matching national standard visual layout and disclaimer
 - [x] Support /chart MARKET and inline callback soi:mchart:VNINDEX in 	elegram_bot/app.py
 - [x] Add unit & integration tests (	ests/test_sector_chart.py, 	ests/test_market_context_advanced.py) — 852/852 tests PASS
+
+## Phase 28 — Live Acceptance Fix Round (2026-09-22)
+Fixing remaining live-acceptance gaps found after real bot startup, ONE issue per
+iteration, each stopped for explicit live confirmation before the next.
+
+### Issue 1 — `/scan` chỉ scan 2 mã thay vì toàn thị trường (universe=1524)
+- [x] Root cause: `MarketScannerWorker` was never started from
+      `scripts/run_telegram_bot.py`, so `/scan` had no snapshot and fell back to
+      the legacy `BOT_WATCH_SYMBOLS` watch list — PASS 2026-09-22
+- [x] `/scan` reads latest persisted full-market snapshot, no longer limited by
+      `BOT_WATCH_SYMBOLS` — PASS 2026-09-22
+- [x] Live: `universe=1524`, `/scan` no longer shows `2/2` — PASS 2026-09-22 (user-confirmed)
+
+### Issue 2 — Realtime breadth chưa vào `/market` (và `/soi`)
+- [x] Root cause #1: `build_runtime_service_from_env()` never passed
+      `index_state=` into `RuntimeBotDataService`, so it was always `None` in
+      production regardless of the (working, standalone-tested) Vietcap realtime
+      index pipeline — PASS 2026-09-22
+- [x] Root cause #2: no worker ever started the realtime index socket in the bot
+      process (unlike `scanner_worker`/`coverage_worker`) — PASS 2026-09-22
+- [x] Root cause #3: `stock_analysis()` (used by `/soi`) built its market view
+      without ever passing breadth/liquidity, even when `index_state` was wired —
+      so `/soi` could never share `/market`'s breadth — PASS 2026-09-22
+- [x] Added `runtime/index_stream_worker.py`: bounded daemon-thread worker
+      (`IndexStreamWorker`, `start_index_stream_worker_from_env`), retry/backoff
+      on connect failure, never busy-loops, doesn't block Telegram polling;
+      `INDEX_STREAM_WORKER_ENABLED` env flag — PASS 2026-09-22
+- [x] Shared `RuntimeBotDataService._index_breadth_liquidity()` used by both
+      `market_overview()` (`/market`) and `stock_analysis()` (`/soi`) — PASS 2026-09-22
+- [x] Tests: `tests/test_index_stream_worker.py` (new, 6 tests), extended
+      `tests/test_runtime_bot.py` (+4 tests: breadth unavailable without
+      `index_state`, breadth/liquidity populated from a snapshot, `/market` and
+      `/soi` share the same breadth string, `/soi` has no breadth when
+      `index_state` is absent) — 19/19 passed 2026-09-22
+- [x] Full regression: **866 passed** (`python -m pytest tests/ -q`) — no
+      regression in `/scan` (Issue 1), `/chart`, market_regime, telegram_bot
+- [x] Live: bot startup log shows `Realtime index stream worker started` →
+      `Vietcap realtime index stream connected symbols=('VNINDEX',)` — PASS 2026-09-22
+- [x] Live: `/market` shows `BREADTH: 143 tăng (3 trần) / 148 giảm (7 sàn) / 64
+      tham chiếu` and `Regime: BULL (xu hướng EMA + breadth ...)` instead of
+      `unavailable` — PASS 2026-09-22 (user-confirmed)
+- [x] Live: `/soi HPG` shows the same live breadth shape in `🌐 THỊ TRƯỜNG` as
+      `/market` (values differ slightly because both reads are genuinely realtime,
+      taken seconds apart against the same live `index_state`, not a frozen
+      duplicate) — PASS 2026-09-22 (user-confirmed)
+- [x] Known side effect (not in scope, left for Issue 3): live output showed
+      `LIQUIDITY: 0 tỷ (301,778,416 CP)` — volume looks right but the matched
+      value renders as 0; suspected unit/field mismatch in the realtime index
+      `total_value` field. Noted for Issue 3 audit, not fixed here.
+
+### Issue 3 — Liquidity toàn thị trường unavailable
+- [ ] NOT STARTED — waiting for explicit confirmation to proceed after Issue 2.
+      Carries over the `LIQUIDITY: 0 tỷ` observation above as a starting lead.
+
+### Issue 4 — Foreign / proprietary flow unavailable
+- [ ] NOT STARTED
+
+### Issue 5 — News ingestion không phủ đủ theo ticker
+- [ ] NOT STARTED
+
+### Issue 6 — News freshness đang dùng 7 ngày thay vì 30 ngày
+- [ ] NOT STARTED
+
+### Issue 7 — Sentiment cần article-level output + URL
+- [ ] NOT STARTED
+
+### Issue 8 — Xóa wording 24h còn sót lại
+- [ ] NOT STARTED
+
+### Issue 9 — Fundamental data PARTIAL/MISSING
+- [ ] NOT STARTED
+
+### Issue 10 — Coverage semantics chưa đồng nhất với ASMF readiness
+- [ ] NOT STARTED
