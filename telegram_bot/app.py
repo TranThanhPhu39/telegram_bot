@@ -40,7 +40,7 @@ CHART_SEND_ERROR_TEXT = "Không thể gửi biểu đồ lúc này, vui lòng th
 TELEGRAM_MESSAGE_LIMIT = 3900
 
 CALLBACK_PREFIX = "soi"
-CALLBACK_ACTIONS = ("tech", "fund", "asmf", "why", "news", "sent", "market", "chart")
+CALLBACK_ACTIONS = ("tech", "fund", "asmf", "why", "news", "sent", "market", "chart", "mchart")
 
 
 def load_telegram_token() -> str:
@@ -72,6 +72,20 @@ def build_symbol_keyboard(symbol: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("🌐 Market", callback_data=f"{CALLBACK_PREFIX}:market:{symbol}"),
                 InlineKeyboardButton("📉 Biểu đồ nến", callback_data=f"{CALLBACK_PREFIX}:chart:{symbol}"),
             ],
+        ]
+    )
+
+
+def build_market_keyboard() -> InlineKeyboardMarkup:
+    """Offer market context drill-down including sector performance chart."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "📊 Top % biến động ngành",
+                    callback_data=f"{CALLBACK_PREFIX}:mchart:VNINDEX",
+                )
+            ]
         ]
     )
 
@@ -248,10 +262,10 @@ def build_application(
         await reply(update, text, markup)
 
     async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await reply(update, commands.scan())
+        await reply(update, commands.scan(context.args))
 
     async def market(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await reply(update, commands.market())
+        await reply(update, commands.market(), build_market_keyboard())
 
     async def why(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _reply_with_usage(update, lambda: commands.why(context.args))
@@ -329,6 +343,9 @@ def build_application(
         if action == "chart":
             await reply_chart(update, [symbol])
             return
+        if action == "mchart":
+            await reply_chart(update, ["MARKET"])
+            return
         watch = _watch_sector(update, symbol) if action == "asmf" else None
         text = render_callback(
             commands, action, symbol,
@@ -336,8 +353,20 @@ def build_application(
         )
         _remove_unneeded_watch(watch)
         if query.message is not None:
-            for part in split_message(text):
-                await query.message.reply_text(part)
+            parts = split_message(text)
+            markup = build_symbol_keyboard(symbol)
+            if hasattr(query, "edit_message_text") and callable(query.edit_message_text):
+                try:
+                    await query.edit_message_text(parts[0], reply_markup=markup)
+                    for part in parts[1:]:
+                        await query.message.reply_text(part, reply_markup=markup)
+                    return
+                except Exception:
+                    pass
+            for index, part in enumerate(parts):
+                await query.message.reply_text(
+                    part, reply_markup=markup if index == len(parts) - 1 else None
+                )
 
     application.add_handlers(
         [

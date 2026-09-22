@@ -539,3 +539,29 @@ SYMBOL_DATA_COVERAGE_V8_DROP_SQL = "DROP TABLE symbol_data_coverage"
 SYMBOL_DATA_COVERAGE_V8_RENAME_SQL = (
     "ALTER TABLE symbol_data_coverage_v8 RENAME TO symbol_data_coverage"
 )
+
+SCAN_SNAPSHOTS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS scan_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy TEXT NOT NULL,
+    as_of_date TEXT NOT NULL,
+    scanned_at INTEGER NOT NULL,
+    total_universe INTEGER NOT NULL,
+    screened_count INTEGER NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '[]',
+    CHECK (length(strategy) BETWEEN 1 AND 32),
+    CHECK (strategy = upper(trim(strategy))),
+    CHECK (strategy NOT GLOB '*[^A-Z0-9_]*'),
+    CHECK (length(as_of_date) BETWEEN 8 AND 16),
+    CHECK (typeof(scanned_at) = 'integer' AND scanned_at > 0),
+    CHECK (total_universe >= 0),
+    CHECK (screened_count >= 0),
+    CHECK (json_valid(payload_json))
+)
+"""
+
+SCAN_SNAPSHOTS_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_scan_snapshots_strategy_scanned_at
+ON scan_snapshots(strategy, scanned_at DESC)
+"""
+

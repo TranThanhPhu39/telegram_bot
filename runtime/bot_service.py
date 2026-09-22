@@ -42,6 +42,7 @@ from runtime.analysis import (
 from portfolio.config import PortfolioConfig
 from runtime.portfolio_runtime import PortfolioRuntime
 from charts.candlestick import ChartRenderError, render_candlestick
+from charts.sector_chart import SectorSeries, render_sector_performance_chart
 from runtime.views import (
     ChartRequestView,
     DataQualityView,
@@ -85,8 +86,8 @@ class HistoricalClient(Protocol):
 
 
 class NewsService(Protocol):
-    def latest_news(self, ticker: str, limit: int = 5): ...
-    def ticker_sentiment(self, ticker: str, hours: int = 24): ...
+    def latest_news(self, ticker: str, limit: int = 5, **kwargs): ...
+    def ticker_sentiment(self, ticker: str, **kwargs): ...
     def severe_negative(self, ticker: str, **kwargs): ...
 
 
@@ -104,6 +105,7 @@ class RuntimeBotDataService:
         now: Callable[[], float] = time.time,
         fundamentals_csv_path: str | None = None,
         sector_history_requester: Callable[[str], bool] | None = None,
+        index_state: object | None = None,
     ) -> None:
         self.client = client
         self.connection = connection
@@ -113,6 +115,7 @@ class RuntimeBotDataService:
         self.now = now
         self.fundamentals_csv_path = fundamentals_csv_path
         self.sector_history_requester = sector_history_requester
+        self.index_state = index_state
         bootstrap_schema(connection)
         self.portfolio = PortfolioRuntime(
            connection, self._history, lambda: self.now(), PortfolioConfig.from_env() 
@@ -173,6 +176,128 @@ class RuntimeBotDataService:
         return ChartRequestView(
             symbol=symbol, png_bytes=chart.png_bytes, caption=caption, error=None,
         )
+
+    def sector_performance_chart(
+        self, *, visible_count: int = 20
+    ) -> ChartRequestView:
+        """Render the Top % Sector Performance Chart into ChartRequestView."""
+        as_of_dt = datetime.fromtimestamp(self.now(), VIETNAM_TIMEZONE)
+        as_of = as_of_dt.date()
+        series_list, _, _, _ = self._compute_sector_performance(as_of, lookback=visible_count)
+        if len(series_list) < 2:
+            return ChartRequestView(
+                symbol="MARKET",
+                png_bytes=None,
+                caption="",
+                error="Chưa đủ dữ liệu ngành để vẽ biểu đồ so sánh biến động.",
+            )
+
+        vnindex_bars, _ = self._history("VNINDEX")
+        if len(vnindex_bars) >= visible_count:
+            dates = [
+                datetime.fromtimestamp(b.timestamp, VIETNAM_TIMEZONE).strftime("%d/%m")
+                for b in vnindex_bars[-visible_count:]
+            ]
+        else:
+            base_date = as_of_dt - timedelta(days=int(visible_count * 1.5))
+            dates = [
+                (base_date + timedelta(days=i)).strftime("%d/%m")
+                for i in range(visible_count)
+            ]
+
+        top_5_series = series_list[:5]
+        as_of_text = as_of_dt.strftime("%d-%m-%Y %H:%M")
+        try:
+            png_bytes = render_sector_performance_chart(top_5_series, dates, as_of_text)
+        except Exception as error:
+            return ChartRequestView(
+                symbol="MARKET",
+                png_bytes=None,
+                caption="",
+                error=f"Không thể vẽ biểu đồ ngành: {error}",
+            )
+
+        caption = (
+            f"🏭 Top % biến động ngành — {visible_count} phiên gần nhất.\n"
+            "Chỉ số ngành là trung bình equal-weight các đường giá đã chuẩn hóa về 100."
+        )
+        return ChartRequestView(
+            symbol="MARKET",
+            png_bytes=png_bytes,
+            caption=caption,
+            error=None,
+        )
+
+    def _compute_sector_performance(
+        self, as_of: date, *, lookback: int = 20
+    ) -> tuple[list[SectorSeries], list[str], str | None, float | None]:
+        try:
+            rows = self.connection.execute(
+                "SELECT DISTINCT sector_code, sector_name FROM sector_memberships "
+                "WHERE effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)",
+                (as_of.isoformat(), as_of.isoformat()),
+            ).fetchall()
+        except Exception:
+            return [], [], None, None
+
+        if not rows:
+            return [], [], None, None
+
+        sector_series_list: list[SectorSeries] = []
+
+        for row in rows:
+            code = row["sector_code"]
+            name = row["sector_name"] or code
+            members = sector_members(self.connection, code, as_of)
+            if not members:
+                continue
+
+            member_bars: list[tuple[str, Sequence[OHLCVBar]]] = []
+            for m in members:
+                bars = self._load(m)
+                if len(bars) >= lookback:
+                    member_bars.append((m, bars))
+
+            if not member_bars:
+                continue
+
+            cum_series = []
+            for t in range(lookback):
+                idx = -lookback + t
+                norm_vals = [
+                    (bars[idx].close / bars[-lookback].close) * 100.0
+                    for _, bars in member_bars
+                ]
+                avg_norm = sum(norm_vals) / len(norm_vals)
+                cum_series.append(avg_norm - 100.0)
+
+            latest_turnover = sum(
+                (bars[-1].close * bars[-1].volume) / 1e9 for _, bars in member_bars
+            )
+            latest_ret = cum_series[-1]
+            sector_series_list.append(
+                SectorSeries(
+                    sector_code=code,
+                    sector_name=name,
+                    cumulative_returns=tuple(cum_series),
+                    turnover_billion=latest_turnover,
+                    latest_return=latest_ret,
+                )
+            )
+
+        if not sector_series_list:
+            return [], [], None, None
+
+        sector_series_list.sort(key=lambda s: s.latest_return, reverse=True)
+        top_names = [s.sector_name for s in sector_series_list[:3]]
+        weakest_series = sector_series_list[-1]
+        weakest_name = weakest_series.sector_name
+        if len(sector_series_list) > 1:
+            weakest_score = max(5.0, min(95.0, 50.0 + weakest_series.latest_return * 5.0))
+        else:
+            weakest_score = 50.0
+
+        return sector_series_list, top_names, weakest_name, weakest_score
 
     def stock_analysis(self, symbol: str, strategy: str = "CL1") -> StockAnalysisView:
         """Build one complete view; a failing section never removes the others."""
@@ -242,7 +367,30 @@ class RuntimeBotDataService:
 
     def market_overview(self) -> str:
         bars, source = self._history("VNINDEX")
-        market = build_market_view(bars)
+        breadth = None
+        liquidity = None
+        if self.index_state is not None and hasattr(self.index_state, "get"):
+            snapshot = self.index_state.get("VNINDEX")
+            if snapshot is not None:
+                breadth = (
+                    f"{int(snapshot.advances)} tăng ({int(snapshot.ceiling_count)} trần) / "
+                    f"{int(snapshot.declines)} giảm ({int(snapshot.floor_count)} sàn) / "
+                    f"{int(snapshot.unchanged)} tham chiếu"
+                )
+                if snapshot.total_value > 0:
+                    liquidity = f"{snapshot.total_value / 1e9:,.0f} tỷ ({snapshot.total_volume:,.0f} CP)"
+
+        as_of = datetime.fromtimestamp(self.now(), VIETNAM_TIMEZONE).date()
+        _, top_sectors, weakest_sector, weakest_score = self._compute_sector_performance(as_of)
+
+        market = build_market_view(
+            bars,
+            breadth=breadth,
+            liquidity=liquidity,
+            top_sectors=top_sectors,
+            weakest_sector=weakest_sector,
+            weakest_sector_score=weakest_score,
+        )
         if market is None:
             return f"Chưa có dữ liệu lịch sử VNINDEX. Nguồn: {source}"
         quality = self._data_quality(bars[-1].timestamp, source)
@@ -271,15 +419,34 @@ class RuntimeBotDataService:
 
     def scan_results(self) -> tuple[str, ...]:
         """Preserved contract: ordered ticker tuple for backward compatibility."""
-        histories = {item.symbol: self._history(item.symbol)[0] for item in self.instruments}
-        config = ScannerConfig(20, 0.0, 0.0, min(20, len(self.instruments)) or 1)
+        instruments = self.instruments
+        if not instruments:
+            from runtime.market_universe import load_market_universe
+            market_syms = load_market_universe(self.connection)
+            instruments = tuple(
+                ScannerInstrument(s.symbol, s.exchange or "HOSE", "STOCK")
+                for s in market_syms
+            )
+        histories = {item.symbol: self._history(item.symbol)[0] for item in instruments}
+        config = ScannerConfig(20, 0.0, 0.0, min(20, len(instruments)) or 1)
         screened = daily_prescreen(
-            self.instruments, histories, config, as_of_timestamp=int(self.now()) + 1
+            instruments, histories, config, as_of_timestamp=int(self.now()) + 1
         )
         return realtime_watch_universe(screened, config)
 
-    def scan_overview(self) -> str:
-        """Explain why each screened symbol is on the watch list."""
+    def scan_overview(self, strategy: str = "CL1") -> str:
+        """Explain why each screened symbol is on the watch list, reading latest snapshot from SQLite when available."""
+        strategy_upper = strategy.strip().upper() if strategy else "CL1"
+        from runtime.scanner_worker import load_latest_scan_snapshot, save_scan_snapshot
+        snapshot = load_latest_scan_snapshot(self.connection, strategy=strategy_upper)
+        if snapshot is not None and snapshot.rows:
+            return format_scan(
+                snapshot.rows,
+                as_of=snapshot.as_of_date,
+                scanned_at=snapshot.scanned_at,
+                total_universe=snapshot.total_universe,
+                strategy=strategy_upper,
+            )
         symbols = self.scan_results()
         if not symbols:
             return "Chưa có mã đạt bộ lọc."
@@ -291,13 +458,35 @@ class RuntimeBotDataService:
             strategy_view = None
             status = None
             if bars:
-                try:
-                    strategy_view = build_strategy_view(evaluate_cl1(bars))
-                except ValueError:
-                    strategy_view = None
+                if strategy_upper == "ASMF":
+                    try:
+                        asmf_res, _ = self._evaluate_asmf(bars, benchmark)
+                        strategy_view = build_strategy_view(asmf_res)
+                    except Exception:
+                        strategy_view = None
+                else:
+                    try:
+                        strategy_view = build_strategy_view(evaluate_cl1(bars))
+                    except ValueError:
+                        strategy_view = None
                 status = self._fundamental_status(symbol, bars[-1].timestamp)
             rows.append(build_scan_row(symbol, technical, strategy_view, True, status))
-        return format_scan(tuple(rows))
+        try:
+            from datetime import datetime, timezone
+            cur_ts = int(self.now())
+            as_of_d = datetime.fromtimestamp(cur_ts, timezone.utc).strftime("%Y-%m-%d")
+            save_scan_snapshot(
+                self.connection,
+                strategy=strategy_upper,
+                as_of_date=as_of_d,
+                scanned_at=cur_ts,
+                total_universe=len(symbols),
+                screened_count=len(rows),
+                rows=rows,
+            )
+        except Exception:
+            pass
+        return format_scan(tuple(rows), strategy=strategy_upper)
 
     def sector_overview(self, name: str) -> str:
         return format_sector(self.sector_view(name))
@@ -477,7 +666,7 @@ class RuntimeBotDataService:
         if self.news_service is None:
             return SentimentView(available=False, note=NEWS_UNAVAILABLE)
         try:
-            aggregate = self.news_service.ticker_sentiment(symbol.strip().upper(), 24)
+            aggregate = self.news_service.ticker_sentiment(symbol.strip().upper())
         except Exception:
             return SentimentView(available=False, note=NEWS_UNAVAILABLE)
         return build_sentiment_view(aggregate)

@@ -97,6 +97,15 @@ class MarketContextView:
     foreign_flow: str | None = None
     risk_flags: tuple[str, ...] = ()
     unavailable: tuple[str, ...] = ()
+    hurst: float | None = None
+    volatility_percentile: float | None = None
+    hurst_lookback: int = 100
+    ma50_status: str | None = None
+    ma200_status: str | None = None
+    trend_stability_reason: str | None = None
+    top_sectors: tuple[str, ...] = ()
+    weakest_sector: str | None = None
+    weakest_sector_score: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

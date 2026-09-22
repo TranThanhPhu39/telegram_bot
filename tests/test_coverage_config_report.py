@@ -145,7 +145,7 @@ def test_refresh_service_is_the_only_caller_of_the_chain() -> None:
     # runtime/acceptance.py is the explicit live-acceptance harness and may probe providers directly.
     hits = []
     for path in (ROOT / "runtime").glob("*.py"):
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         if path.name != "acceptance.py" and (
             ".fetch_financials(" in text or ".fetch_institutional_flow(" in text
         ):

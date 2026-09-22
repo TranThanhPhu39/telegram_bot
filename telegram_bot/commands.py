@@ -114,10 +114,16 @@ class TelegramCommandService:
             result = self.data.symbol_overview(symbol, strategy)
         return result if result is not None else f"Chưa có dữ liệu cho {symbol}."
 
-    def scan(self) -> str:
+    def scan(self, arguments: Sequence[str] | None = None) -> str:
+        strategy = "CL1"
+        if arguments and len(arguments) > 0 and arguments[0].strip().upper() in {"CL1", "ASMF"}:
+            strategy = arguments[0].strip().upper()
         detailed = getattr(self.data, "scan_overview", None)
         if callable(detailed):
-            return detailed()
+            try:
+                return detailed(strategy=strategy)
+            except TypeError:
+                return detailed()
         symbols = tuple(self.data.scan_results())
         return "Chưa có mã đạt bộ lọc." if not symbols else "Watchlist: " + ", ".join(symbols)
 
@@ -154,8 +160,16 @@ class TelegramCommandService:
         return self._optional("sector_overview", name)
 
     def chart(self, arguments: Sequence[str]) -> ChartRequestView:
-        """Return a rendered candlestick chart; text stays out of this path."""
+        """Return a rendered candlestick or market sector chart; text stays out of this path."""
         symbol = _one_symbol(arguments, "/chart FPT")
+        if symbol == "MARKET":
+            handler = getattr(self.data, "sector_performance_chart", None)
+            if not callable(handler):
+                raise ValueError(UNSUPPORTED)
+            result = handler()
+            if not isinstance(result, ChartRequestView):
+                raise ValueError(UNSUPPORTED)
+            return result
         handler = getattr(self.data, "candlestick_chart", None)
         if not callable(handler):
             raise ValueError(UNSUPPORTED)
@@ -163,6 +177,9 @@ class TelegramCommandService:
         if not isinstance(result, ChartRequestView):
             raise ValueError(UNSUPPORTED)
         return result
+
+    def sector_chart(self) -> ChartRequestView:
+        return self.chart(["MARKET"])
 
     def _optional(self, method: str, argument: str) -> str:
         handler = getattr(self.data, method, None)

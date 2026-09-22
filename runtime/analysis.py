@@ -7,6 +7,8 @@ Nothing here performs I/O.  Every function returns ``None`` or an explicit
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from math import log
+from statistics import pstdev
 from typing import Sequence
 
 from data.indicators import (
@@ -199,14 +201,62 @@ def _distinct_levels(levels: list[LevelView]) -> list[LevelView]:
     return result
 
 
+def _calculate_hurst(closes: Sequence[float]) -> float | None:
+    """Calculate the rescaled range (R/S) Hurst exponent."""
+    if len(closes) < 20:
+        return None
+    returns = [log(b / a) for a, b in zip(closes, closes[1:])]
+    mean = sum(returns) / len(returns)
+    cumulative = []
+    val = 0.0
+    for item in returns:
+        val += item - mean
+        cumulative.append(val)
+    span = max(cumulative) - min(cumulative)
+    dev = pstdev(returns)
+    if span <= 0 or dev <= 0 or len(returns) <= 1:
+        return 0.5
+    h = log(span / dev) / log(len(returns))
+    return min(1.0, max(0.0, h))
+
+
+def _calculate_volatility_percentile(
+    bars: Sequence[OHLCVBar],
+    window: int = 20,
+    lookback: int = 100,
+) -> float | None:
+    """Calculate rolling 20-session realized vol percentile over lookback sessions."""
+    if len(bars) < window + 2:
+        return None
+    closes = [b.close for b in bars]
+    log_returns = [log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
+    if len(log_returns) < window:
+        return None
+
+    current_std = pstdev(log_returns[-window:])
+    start_idx = max(0, len(log_returns) - lookback)
+    rolling_vols = [
+        pstdev(log_returns[i : i + window])
+        for i in range(start_idx, len(log_returns) - window + 1)
+    ]
+    if not rolling_vols:
+        return None
+
+    count_le = sum(1 for v in rolling_vols if v <= current_std)
+    return (count_le / len(rolling_vols)) * 100.0
+
+
 def build_market_view(
     bars: Sequence[OHLCVBar],
     *,
     breadth: str | None = None,
     liquidity: str | None = None,
     foreign_flow: str | None = None,
+    top_sectors: Sequence[str] = (),
+    weakest_sector: str | None = None,
+    weakest_sector_score: float | None = None,
 ) -> MarketContextView | None:
-    """Classify VNINDEX with trend only; breadth is never inferred from price."""
+    """Classify VNINDEX with trend and advanced quantitative context."""
     if not bars:
         return None
     latest = bars[-1]
@@ -214,8 +264,35 @@ def build_market_view(
     change = None if previous in (None, 0) else (latest.close / previous - 1.0) * 100.0
     ema20_value = ema(bars, 20)[-1]
     ema50_value = ema(bars, 50)[-1]
+    ma50_value = _sma_close(bars, 50)
     ma200_value = _sma_close(bars, 200)
     trend = _trend_label(latest.close, ema20_value, ema50_value, ma200_value)
+
+    # Quantitative Hurst exponent & Realized Volatility Percentile
+    hurst_lookback = 100
+    closes = [b.close for b in bars]
+    hurst = None
+    if len(closes) >= 20:
+        sample = closes[-(hurst_lookback + 1):]
+        hurst = _calculate_hurst(sample)
+
+    volatility_percentile = _calculate_volatility_percentile(bars, window=20, lookback=100)
+
+    ma50_status = None
+    ma200_status = None
+    trend_stability_reason = None
+    if ma50_value is not None and ma200_value is not None:
+        ma50_status = "TRÊN MA50" if latest.close >= ma50_value else "DƯỚI MA50"
+        ma200_status = "TRÊN MA200" if latest.close >= ma200_value else "DƯỚI MA200"
+        if latest.close >= ma50_value and latest.close >= ma200_value:
+            trend_stability_reason = "Chỉ số đứng vững trên cả MA50 và MA200 -> xu hướng tăng bền vững."
+        elif latest.close < ma50_value and latest.close < ma200_value:
+            trend_stability_reason = "Chỉ số nằm dưới cả MA50 và MA200 -> xu hướng giảm chiếm ưu thế."
+        else:
+            trend_stability_reason = "Chỉ số chưa đứng vững trên cả MA50 và MA200 -> xu hướng chưa chắc chắn."
+    elif ma50_value is not None:
+        ma50_status = "TRÊN MA50" if latest.close >= ma50_value else "DƯỚI MA50"
+        trend_stability_reason = "Chỉ số chưa đứng vững trên cả MA50 và MA200 -> xu hướng chưa chắc chắn."
 
     unavailable: list[str] = []
     if breadth is None:
@@ -252,6 +329,15 @@ def build_market_view(
         foreign_flow=foreign_flow,
         risk_flags=tuple(risk_flags),
         unavailable=tuple(unavailable),
+        hurst=hurst,
+        volatility_percentile=volatility_percentile,
+        hurst_lookback=hurst_lookback,
+        ma50_status=ma50_status,
+        ma200_status=ma200_status,
+        trend_stability_reason=trend_stability_reason,
+        top_sectors=tuple(top_sectors),
+        weakest_sector=weakest_sector,
+        weakest_sector_score=weakest_sector_score,
     )
 
 

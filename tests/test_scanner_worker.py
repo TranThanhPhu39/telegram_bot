@@ -1,0 +1,243 @@
+"""Tests for MarketScannerWorker, snapshot persistence, and strategy-aware /scan."""
+
+from __future__ import annotations
+
+import sqlite3
+import time
+
+import pytest
+
+from data.database import connect_database
+from data.migrations import bootstrap_schema
+from data.models import OHLCVBar
+from runtime.bot_service import RuntimeBotDataService
+from runtime.scanner_worker import (
+    MarketScannerWorker,
+    ScannerWorkerConfig,
+    load_latest_scan_snapshot,
+    run_scan_cycle,
+    save_scan_snapshot,
+)
+from runtime.views import ScanRowView
+from scanner.universe import ScannerInstrument
+from telegram_bot.commands import TelegramCommandService
+
+
+def make_test_db() -> sqlite3.Connection:
+    conn = connect_database("sqlite:///:memory:")
+    bootstrap_schema(conn)
+    return conn
+
+
+def seed_test_universe(conn: sqlite3.Connection) -> None:
+    with conn:
+        conn.executemany(
+            "INSERT INTO symbols (symbol, exchange, instrument_type, is_active) VALUES (?, ?, 'STOCK', 1)",
+            [
+                ("FPT", "HOSE"),
+                ("MWG", "HOSE"),
+                ("VNM", "HOSE"),
+                ("PENNY", "UPCOM"),
+            ],
+        )
+        # Seed daily candles (25 days)
+        now_ts = 1_700_000_000
+        for sym, base_p, vol in [
+            ("FPT", 100_000.0, 50_000.0),
+            ("MWG", 50_000.0, 40_000.0),
+            ("VNM", 70_000.0, 30_000.0),
+            ("PENNY", 2_000.0, 100.0),  # Illiquid
+            ("VNINDEX", 1100.0, 1_000_000.0),
+        ]:
+            if sym == "VNINDEX":
+                conn.execute("INSERT OR IGNORE INTO symbols (symbol, instrument_type) VALUES ('VNINDEX', 'INDEX')")
+            bars = [
+                (
+                    sym,
+                    "ONE_DAY",
+                    now_ts - (25 - i) * 86400,
+                    base_p + i * 0.2,
+                    base_p + i * 0.2 + 1.0,
+                    base_p + i * 0.2 - 1.0,
+                    base_p + i * 0.2,
+                    vol,
+                )
+                for i in range(25)
+            ]
+            conn.executemany(
+                "INSERT INTO candles (symbol, timeframe, timestamp, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                bars,
+            )
+
+
+def test_snapshot_save_and_load_roundtrip() -> None:
+    conn = make_test_db()
+    rows = [
+        ScanRowView("FPT", "TĂNG", "+2.5% vs VNINDEX", "PASS", "PASS", "THEO DÕI"),
+        ScanRowView("MWG", "TĂNG", "+1.2% vs VNINDEX", "PASS", "PASS", "WATCH"),
+    ]
+    snapshot_id = save_scan_snapshot(
+        conn,
+        strategy="CL1",
+        as_of_date="2026-09-21",
+        scanned_at=1_700_000_000,
+        total_universe=100,
+        screened_count=2,
+        rows=rows,
+    )
+    assert snapshot_id > 0
+
+    loaded = load_latest_scan_snapshot(conn, "CL1")
+    assert loaded is not None
+    assert loaded.strategy == "CL1"
+    assert loaded.as_of_date == "2026-09-21"
+    assert loaded.total_universe == 100
+    assert loaded.screened_count == 2
+    assert len(loaded.rows) == 2
+    assert loaded.rows[0].symbol == "FPT"
+    assert loaded.rows[1].symbol == "MWG"
+
+    # Non-existent strategy returns None
+    assert load_latest_scan_snapshot(conn, "UNKNOWN") is None
+
+
+def test_snapshot_pruning_removes_old_records() -> None:
+    conn = make_test_db()
+    old_ts = 1_700_000_000 - 10 * 86400
+    new_ts = 1_700_000_000
+    save_scan_snapshot(
+        conn,
+        strategy="CL1",
+        as_of_date="2026-09-11",
+        scanned_at=old_ts,
+        total_universe=50,
+        screened_count=1,
+        rows=[ScanRowView("OLD", "GIẢM", "N/A", "PASS", "PASS", "N/A")],
+    )
+    # Save a fresh snapshot which triggers pruning (>7 days)
+    save_scan_snapshot(
+        conn,
+        strategy="CL1",
+        as_of_date="2026-09-21",
+        scanned_at=new_ts,
+        total_universe=50,
+        screened_count=1,
+        rows=[ScanRowView("NEW", "TĂNG", "N/A", "PASS", "PASS", "N/A")],
+    )
+    count = conn.execute("SELECT COUNT(*) FROM scan_snapshots").fetchone()[0]
+    assert count == 1
+    loaded = load_latest_scan_snapshot(conn, "CL1")
+    assert loaded.rows[0].symbol == "NEW"
+
+
+def test_run_scan_cycle_filters_liquidity_and_persists() -> None:
+    conn = make_test_db()
+    seed_test_universe(conn)
+
+    cfg = ScannerWorkerConfig(
+        lookback_days=20,
+        minimum_average_daily_volume=10_000.0,
+        minimum_average_daily_value=1_000_000_000.0,  # 1B VND
+        maximum_watch_symbols=10,
+    )
+    results = run_scan_cycle(conn, cfg, now=1_700_000_000)
+
+    assert "CL1" in results
+    cl1_snap = results["CL1"]
+    assert cl1_snap.total_universe == 4  # FPT, MWG, VNM, PENNY
+    # PENNY is filtered out by liquidity
+    symbols = [r.symbol for r in cl1_snap.rows]
+    assert "PENNY" not in symbols
+    assert "FPT" in symbols
+
+    # Check persistence
+    loaded = load_latest_scan_snapshot(conn, "CL1")
+    assert loaded is not None
+    assert loaded.id == cl1_snap.id
+
+
+def test_scanner_worker_daemon_lifecycle(tmp_path) -> None:
+    db_path = f"sqlite:///{(tmp_path / 'worker.sqlite3').as_posix()}"
+    init_conn = connect_database(db_path)
+    bootstrap_schema(init_conn)
+    seed_test_universe(init_conn)
+    init_conn.close()
+
+    worker = MarketScannerWorker(
+        connection_factory=lambda: connect_database(db_path),
+        config=ScannerWorkerConfig(scan_interval_seconds=1),
+        now=lambda: 1_700_000_000,
+    )
+    thread = worker.start()
+    assert worker.running
+    time.sleep(0.5)
+    worker.stop(timeout=2.0)
+    assert not worker.running
+    assert worker.cycles_completed >= 1
+
+
+def test_scan_overview_reads_persisted_snapshot() -> None:
+    conn = make_test_db()
+    seed_test_universe(conn)
+
+    # Seed snapshot
+    save_scan_snapshot(
+        conn,
+        strategy="CL1",
+        as_of_date="2026-09-21",
+        scanned_at=1_700_000_000,
+        total_universe=1600,
+        screened_count=2,
+        rows=[
+            ScanRowView("FPT", "TĂNG", "+3.5% vs VNINDEX", "PASS", "PASS", "THEO DÕI"),
+            ScanRowView("MWG", "TĂNG", "+2.1% vs VNINDEX", "PASS", "PASS", "WATCH"),
+        ],
+    )
+
+    class DummyClient:
+        def get_gap_chart(self, *args, **kwargs):
+            return []
+
+    service = RuntimeBotDataService(
+        DummyClient(),
+        conn,
+        instruments=(),  # Empty watch symbols: proves it uses snapshot, not BOT_WATCH_SYMBOLS
+        now=lambda: 1_700_000_000,
+    )
+
+    text = service.scan_overview("CL1")
+    assert "KẾT QUẢ QUÉT" in text
+    assert "Toàn thị trường: 2/1600 mã đạt lọc" in text
+    assert "1. FPT" in text
+    assert "2. MWG" in text
+    assert "THEO DÕI" in text
+
+
+def test_telegram_commands_scan_routing() -> None:
+    conn = make_test_db()
+    save_scan_snapshot(
+        conn,
+        strategy="ASMF",
+        as_of_date="2026-09-21",
+        scanned_at=1_700_000_000,
+        total_universe=1600,
+        screened_count=1,
+        rows=[ScanRowView("VHM", "TĂNG", "+1.0% vs VNINDEX", "PASS", "PASS", "CHƯA ĐỦ ĐIỀU KIỆN")],
+    )
+
+    class DummyClient:
+        def get_gap_chart(self, *args, **kwargs):
+            return []
+
+    service = RuntimeBotDataService(
+        DummyClient(),
+        conn,
+        instruments=(),
+        now=lambda: 1_700_000_000,
+    )
+    cmds = TelegramCommandService(service)
+
+    # /scan ASMF routes to ASMF snapshot
+    text = cmds.scan(["ASMF"])
+    assert "CHIẾN LƯỢC ASMF" in text
+    assert "VHM" in text

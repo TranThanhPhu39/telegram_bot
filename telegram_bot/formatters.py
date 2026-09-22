@@ -174,7 +174,7 @@ def format_why(view: StockAnalysisView, interpretations: Sequence[str]) -> str:
         limitations.extend(view.technical.missing)
     if limitations:
         blocks.append("Giới hạn dữ liệu:\n" + "\n".join(f"- {item}" for item in dict.fromkeys(limitations)))
-    blocks.append(_data_quality_block(view))
+    blocks.append(format_data_quality(view.data_quality, include_notes=False))
     blocks.append("Đây là context lịch sử; không phải khuyến nghị mua/bán.")
     return "\n\n".join(blocks)
 
@@ -186,19 +186,70 @@ def format_market(
 ) -> str:
     if view is None:
         return "Chưa có dữ liệu lịch sử VNINDEX."
-    blocks = [
-        "🌐 THỊ TRƯỜNG",
-        (
-            f"{view.symbol}\n"
-            f"Điểm số: {number(view.close)} ({percent(view.change_percent)})\n"
-            f"Xu hướng: {view.trend}\n"
-            f"EMA20: {number(view.ema20)} | EMA50: {number(view.ema50)}"
-        ),
-        f"REGIME: {view.regime}\nCơ sở: {view.regime_reason}",
-        f"BREADTH: {view.breadth or 'unavailable'}",
-        f"LIQUIDITY: {view.liquidity or 'unavailable'}",
-        f"DÒNG TIỀN NGOẠI/TỰ DOANH: {view.foreign_flow or 'unavailable'}",
-    ]
+
+    trend_icon = "📈" if "TĂNG" in view.trend else "📉" if "GIẢM" in view.trend else "➡️"
+    index_label = f"VN-Index ({view.symbol})" if view.symbol == "VNINDEX" else view.symbol
+    header_block = (
+        "🌐 BỐI CẢNH THỊ TRƯỜNG\n"
+        f"• {index_label}: {number(view.close)} ({percent(view.change_percent)})\n"
+        f"• Xu hướng: {trend_icon} {view.trend}\n"
+        f"• EMA20: {number(view.ema20)} | EMA50: {number(view.ema50)}"
+    )
+
+    blocks = [header_block]
+
+    quant_lines = []
+    if view.hurst is not None:
+        if view.hurst > 0.55:
+            cmp_str = "> 0.55"
+            interp = f"Hurst = {view.hurst:.2f} > 0.55 -> thị trường có quán tính xu hướng."
+        elif view.hurst < 0.45:
+            cmp_str = "< 0.45"
+            interp = f"Hurst = {view.hurst:.2f} < 0.45 -> thị trường có tính hồi quy trung bình (mean-reverting)."
+        else:
+            cmp_str = "0.45 - 0.55"
+            interp = f"Hurst = {view.hurst:.2f} ≈ 0.50 -> thị trường dao động ngẫu nhiên (random walk)."
+
+        vol_pct_str = (
+            f"{int(round(view.volatility_percentile))}%"
+            if view.volatility_percentile is not None
+            else "N/A"
+        )
+        quant_lines.append(
+            f"• Số mũ Hurst = {view.hurst:.2f} ({cmp_str}) - Phân vị biến động = {vol_pct_str}\n"
+            f"(Dựa trên {view.hurst_lookback} phiên gần nhất)\n"
+            f"• {interp}"
+        )
+    if view.trend_stability_reason:
+        quant_lines.append(f"• {view.trend_stability_reason}")
+
+    if quant_lines:
+        blocks.append("\n".join(quant_lines))
+
+    if view.top_sectors:
+        sector_lines = ["🏭 Ngành mạnh nhất"]
+        medals = ("🥇", "🥈", "🥉")
+        for idx, sec in enumerate(view.top_sectors[:3]):
+            medal = medals[idx] if idx < len(medals) else "•"
+            sector_lines.append(f"{medal} {sec}")
+        if view.weakest_sector:
+            score_str = (
+                f"{int(round(view.weakest_sector_score))}/100"
+                if view.weakest_sector_score is not None
+                else "N/A"
+            )
+            sector_lines.append(f"\nYếu nhất: {view.weakest_sector} — {score_str}")
+        blocks.append("\n".join(sector_lines))
+
+    blocks.extend(
+        [
+            f"REGIME: {view.regime}\nCơ sở: {view.regime_reason}",
+            f"BREADTH: {view.breadth or 'unavailable'}",
+            f"LIQUIDITY: {view.liquidity or 'unavailable'}",
+            f"DÒNG TIỀN NGOẠI/TỰ DOANH: {view.foreign_flow or 'unavailable'}",
+        ]
+    )
+
     if sentiment is not None:
         blocks.append("📰 NEWS SENTIMENT\n" + _sentiment_line(sentiment))
     if view.risk_flags:
@@ -206,6 +257,11 @@ def format_market(
     if view.unavailable:
         blocks.append("Chưa khả dụng:\n" + "\n".join(f"- {item}" for item in view.unavailable))
     blocks.append(data_quality_text)
+
+    blocks.append(
+        "👉 Chọn một mục bên dưới để xem chi tiết:\n\n"
+        "🔎 Chatbot này chỉ dùng với mục đích tham khảo."
+    )
     return "\n\n".join(blocks)
 
 
@@ -222,9 +278,9 @@ def format_fundamental(view: StockAnalysisView) -> str:
 def format_sentiment(symbol: str, view: SentimentView | None) -> str:
     if view is None or not view.available:
         note = (view.note if view is not None and view.note else "News sentiment unavailable.")
-        return f"📰 {symbol} — SENTIMENT 24H\n{note}"
+        return f"📰 {symbol} — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)\n{note}"
     lines = [
-        f"📰 {symbol} — SENTIMENT 24H",
+        f"📰 {symbol} — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)",
         f"Nhãn tổng hợp: {view.label}",
         f"Score: {view.score:+.2f} (thang -1..+1, có giảm trọng số theo thời gian)",
         f"Model confidence: {number(view.model_confidence)} (độ tin cậy của bộ phân loại, "
@@ -272,10 +328,25 @@ def format_sector(view: SectorView | None) -> str:
     return "\n".join(lines)
 
 
-def format_scan(rows: Sequence[ScanRowView]) -> str:
+def format_scan(
+    rows: Sequence[ScanRowView],
+    *,
+    as_of: str | None = None,
+    scanned_at: int | None = None,
+    total_universe: int | None = None,
+    strategy: str = "CL1",
+) -> str:
     if not rows:
         return "Chưa có mã đạt bộ lọc."
-    lines = ["🔎 KẾT QUẢ QUÉT"]
+    header = f"🔎 KẾT QUẢ QUÉT — CHIẾN LƯỢC {strategy}" if strategy != "CL1" else "🔎 KẾT QUẢ QUÉT"
+    lines = [header]
+    if total_universe is not None or as_of is not None:
+        info = []
+        if total_universe is not None:
+            info.append(f"Toàn thị trường: {len(rows)}/{total_universe} mã đạt lọc")
+        if as_of is not None:
+            info.append(f"Ngày: {as_of}")
+        lines.append(" | ".join(info))
     for index, row in enumerate(rows, start=1):
         lines.append(
             f"{index}. {row.symbol}\n"
@@ -316,11 +387,24 @@ def _market_summary(market: MarketContextView) -> str:
 def _strategy_block(strategy) -> str:
     lines = [f"🎯 Chiến lược {strategy.name}: {strategy.state}"]
     if strategy.score is not None:
-        lines.append(f"Điểm hiện có: {strategy.score:.1f}/100 (chưa hiệu chuẩn lịch sử)")
+        lines.append(f"Điểm bằng chứng (Evidence score): {strategy.score:.1f}/100 (tổng hợp điểm, không phải xác suất)")
     if strategy.evidence_total:
         lines.append(f"Độ phủ bằng chứng: {strategy.evidence_covered}/{strategy.evidence_total}")
     if strategy.layers:
-        lines.append("Tầng: " + " | ".join(f"{i.name}={i.status.value}" for i in strategy.layers))
+        def _layer_label(item):
+            name = "ASMF Market Filter" if strategy.name == "ASMF" and item.name == "Market" else item.name
+            return f"{name}={item.status.value}"
+        if strategy.name == "ASMF":
+            core_layers = [i for i in strategy.layers if i.name != "Sentiment"]
+            sentiment_layers = [i for i in strategy.layers if i.name == "Sentiment"]
+            core_covered = sum(1 for i in core_layers if i.status.value != "MISSING")
+            lines.append(f"Độ phủ tầng cốt lõi: {core_covered}/{len(core_layers)} tầng")
+            lines.append("Tầng: " + " | ".join(_layer_label(i) for i in strategy.layers))
+            if sentiment_layers:
+                s = sentiment_layers[0]
+                lines.append(f"Lớp bổ trợ (Sentiment context): {s.status.value}" + (f" ({s.detail})" if s.detail else ""))
+        else:
+            lines.append("Tầng: " + " | ".join(_layer_label(i) for i in strategy.layers))
     if strategy.positive:
         lines.append("Đạt: " + "; ".join(strategy.positive))
     if strategy.negative:
@@ -358,7 +442,7 @@ def _fundamental_block(fundamental, *, compact: bool = False) -> str:
 
 
 def _sentiment_block(sentiment: SentimentView, *, compact: bool = False) -> str:
-    return "📰 TIN 24H\n" + _sentiment_line(sentiment)
+    return "📰 SENTIMENT (5 TIN MỚI NHẤT)\n" + _sentiment_line(sentiment)
 
 
 def _sentiment_line(sentiment: SentimentView) -> str:
@@ -377,7 +461,7 @@ def _data_quality_block(view: StockAnalysisView) -> str:
     return format_data_quality(view.data_quality)
 
 
-def format_data_quality(quality) -> str:
+def format_data_quality(quality, *, include_notes: bool = True) -> str:
     lines = ["🕒 DỮ LIỆU"]
     label = FRESHNESS_LABELS.get(quality.freshness, quality.freshness.value)
     if quality.staleness_days:
@@ -391,8 +475,9 @@ def format_data_quality(quality) -> str:
         )
     if quality.news_source:
         lines.append(f"Nguồn tin: {quality.news_source} (mới nhất {_time(quality.news_latest_at)})")
-    for note in quality.notes:
-        lines.append(f"- {note}")
+    if include_notes:
+        for note in quality.notes:
+            lines.append(f"- {note}")
     return "\n".join(lines)
 
 
