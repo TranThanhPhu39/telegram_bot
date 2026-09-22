@@ -118,7 +118,7 @@ không ghi token/cookie vào log.
 ## Chạy bot
 
 ```powershell
-py -3.12 scripts\run_telegram_bot.py
+py -3.12 -m scripts.run_telegram_bot
 ```
 
 Tiến trình này khởi tạo runtime, SQLite migrations, Telegram polling, sector
