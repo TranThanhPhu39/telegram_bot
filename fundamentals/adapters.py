@@ -30,33 +30,61 @@ from asmf_data.models import FinancialReport, InstitutionalFlow
 from fundamentals.providers.base import FlowRow, StatementRow
 
 
+#: Minimum evidence a raw provider row must carry before it can leave staging
+#: and enter the point-in-time canonical ``financial_reports`` table. Kept as
+#: one ordered list of checks so :func:`corporate_promotion_gap` (diagnostic)
+#: and :func:`promote_corporate_statement` (enforcement) can never drift apart.
+def corporate_promotion_gap(row: StatementRow) -> str | None:
+    """Return why ``row`` cannot be promoted yet, or None if it is ready.
+
+    This mirrors :func:`promote_corporate_statement`'s own requirements
+    exactly. It exists so acquisition/coverage code can explain *why* a raw
+    provider row with real values (revenue, equity, ...) still never reached
+    the point-in-time table — e.g. "the provider never established a
+    public_date" — instead of that gap silently looking identical to a fully
+    promoted row everywhere except the one table nobody watches.
+    """
+    if row.public_date is None:
+        return "no public_date established by provider"
+    revenue = row.get("revenue")
+    if revenue is None or revenue < 0:
+        return "no usable revenue value"
+    net_profit = row.get("net_income_parent")
+    if net_profit is None:
+        net_profit = row.get("net_income")
+    if net_profit is None:
+        return "no net_income or net_income_parent value"
+    equity = row.get("total_equity")
+    if equity is None or equity <= 0:
+        return "no usable total_equity value"
+    short_debt = row.get("short_term_debt")
+    long_debt = row.get("long_term_debt")
+    if short_debt is None or long_debt is None:
+        return "missing short_term_debt or long_term_debt"
+    if short_debt + long_debt < 0:
+        return "negative combined debt"
+    return None
+
+
 def promote_corporate_statement(row: StatementRow, *, source: str) -> FinancialReport | None:
     """Build a canonical :class:`FinancialReport`, or None if evidence is short.
 
     Every input the model requires as NOT NULL must be present and valid, and
     total debt is only computed when *both* the short- and long-term legs are
-    known — a missing leg is not the same as a zero leg.
+    known — a missing leg is not the same as a zero leg. See
+    :func:`corporate_promotion_gap` for the same rule with a human-readable
+    reason attached.
     """
-    if row.public_date is None:
+    if corporate_promotion_gap(row) is not None:
         return None
     revenue = row.get("revenue")
-    if revenue is None or revenue < 0:
-        return None
     net_profit = row.get("net_income_parent")
     if net_profit is None:
         net_profit = row.get("net_income")
-    if net_profit is None:
-        return None
     equity = row.get("total_equity")
-    if equity is None or equity <= 0:
-        return None
     short_debt = row.get("short_term_debt")
     long_debt = row.get("long_term_debt")
-    if short_debt is None or long_debt is None:
-        return None
     total_debt = short_debt + long_debt
-    if total_debt < 0:
-        return None
     try:
         return FinancialReport(
             symbol=row.symbol, report_period=row.period,

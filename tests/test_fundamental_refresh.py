@@ -17,6 +17,7 @@ from asmf_data.models import FinancialReport
 from data.database import connect_database
 from data.migrations import bootstrap_schema
 from fundamentals.adapters import (
+    corporate_promotion_gap,
     flow_row_to_institutional_flow,
     promote_bank_statement,
     promote_corporate_statement,
@@ -168,6 +169,56 @@ def test_partial_result_is_staged_but_not_promoted_to_canonical(connection) -> N
     assert latest_financial_reports(connection, "FPT", date(2026, 12, 31)) == ()
 
 
+# -------------------------------------------- Issue 9: point-in-time gap
+def test_usable_result_missing_public_date_for_every_period_is_visible_in_coverage_reason(
+    connection,
+) -> None:
+    """Reproduces the real VNStock/KBS symptom: the provider answers AVAILABLE
+    with real revenue/equity values but never establishes a public_date, so
+    nothing reaches point-in-time financial_reports. Before this fix that
+    looked identical, in symbol_data_coverage, to a fully-promoted READY row —
+    now the gap is explicit and diagnosable without fabricating a public_date."""
+    row = statement("FPT", "2026Q2", None, revenue=1000.0, net_income=100.0,
+                     total_equity=2000.0, short_term_debt=5.0, long_term_debt=5.0)
+    chain = ProviderChain([StubProvider(statements=(row,), status=ProviderStatus.AVAILABLE)])
+
+    outcome = refresh_financials(connection, chain, "FPT")
+
+    assert outcome.result is RefreshResult.SUCCESS  # the raw fetch genuinely succeeded
+    assert outcome.rows_stored == 1 and outcome.rows_promoted == 0
+    assert latest_financial_reports(connection, "FPT", date(2026, 12, 31)) == ()
+    assert outcome.coverage.status == "READY"  # coverage vocabulary is unchanged
+    assert outcome.coverage.error_reason is not None
+    assert "BLOCKED BY DATA SOURCE" in outcome.coverage.error_reason
+    assert "public_date" in outcome.coverage.error_reason
+    assert outcome.error_reason == outcome.coverage.error_reason
+
+
+def test_fully_promoted_result_keeps_coverage_reason_clean(connection) -> None:
+    row = statement("FPT", "2026Q2", date(2026, 8, 15), revenue=1.0, net_income=1.0,
+                     total_equity=1.0, short_term_debt=0.0, long_term_debt=0.0)
+    chain = ProviderChain([StubProvider(statements=(row,))])
+
+    outcome = refresh_financials(connection, chain, "FPT")
+
+    assert outcome.rows_promoted == 1
+    assert outcome.error_reason is None
+    assert outcome.coverage.error_reason is None
+
+
+def test_partially_promoted_result_reports_the_exact_promoted_ratio(connection) -> None:
+    good = statement("FPT", "2026Q2", date(2026, 8, 15), revenue=1.0, net_income=1.0,
+                      total_equity=1.0, short_term_debt=0.0, long_term_debt=0.0)
+    bad = statement("FPT", "2026Q1", None, revenue=1.0, net_income=1.0,
+                     total_equity=1.0, short_term_debt=0.0, long_term_debt=0.0)
+    chain = ProviderChain([StubProvider(statements=(good, bad), status=ProviderStatus.AVAILABLE)])
+
+    outcome = refresh_financials(connection, chain, "FPT")
+
+    assert outcome.rows_promoted == 1 and outcome.rows_stored == 2
+    assert "1/2" in outcome.coverage.error_reason
+
+
 def test_missing_result_is_recorded_for_a_brand_new_symbol_without_crashing(connection) -> None:
     chain = ProviderChain([StubProvider()])  # no statements at all -> MISSING
 
@@ -244,6 +295,25 @@ def test_promote_corporate_statement_requires_public_date() -> None:
     row = statement("FPT", "2026Q2", None, revenue=1.0, net_income=1.0,
                      total_equity=1.0, short_term_debt=0.0, long_term_debt=0.0)
     assert promote_corporate_statement(row, source="VNStock") is None
+
+
+def test_corporate_promotion_gap_names_the_missing_public_date() -> None:
+    row = statement("FPT", "2026Q2", None, revenue=1.0, net_income=1.0,
+                     total_equity=1.0, short_term_debt=0.0, long_term_debt=0.0)
+    assert corporate_promotion_gap(row) == "no public_date established by provider"
+
+
+def test_corporate_promotion_gap_names_missing_debt_legs() -> None:
+    row = statement("FPT", "2026Q2", date(2026, 8, 15), revenue=1.0, net_income=1.0,
+                     total_equity=1.0, short_term_debt=1.0)  # long_term_debt missing
+    assert corporate_promotion_gap(row) == "missing short_term_debt or long_term_debt"
+
+
+def test_corporate_promotion_gap_is_none_exactly_when_the_row_promotes() -> None:
+    row = statement("FPT", "2026Q2", date(2026, 8, 15), revenue=1.0, net_income=1.0,
+                     total_equity=1.0, short_term_debt=0.0, long_term_debt=0.0)
+    assert corporate_promotion_gap(row) is None
+    assert promote_corporate_statement(row, source="VNStock") is not None
 
 
 def test_promote_corporate_statement_requires_both_debt_legs_not_a_zero_guess() -> None:
