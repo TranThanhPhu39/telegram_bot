@@ -117,10 +117,19 @@ def build_default_chain(
     *,
     vnstock_module: object | None = None,
     yfinance_module: object | None = None,
+    tcbs_session: object | None = None,
     source_preference: Sequence[str] | None = None,
     yfinance_enabled: bool = True,
+    tcbs_enabled: bool = True,
 ) -> ProviderChain:
-    """VNStock first, Yahoo strictly as fallback."""
+    """VNStock first, TCBS second, Yahoo strictly as last-resort fallback.
+
+    TCBS sits ahead of yfinance because it is a Vietnamese-market-specific
+    source (see ``tcbs_provider.py``), so it is a closer analog to VNStock
+    than the Yahoo fallback is; it is still tried after VNStock so a healthy
+    primary source is never skipped.
+    """
+    from fundamentals.providers.tcbs_provider import TCBSProvider
     from fundamentals.providers.vnstock_provider import (
         DEFAULT_SOURCE_PREFERENCE, VNStockProvider,
     )
@@ -131,5 +140,6 @@ def build_default_chain(
             module=vnstock_module,
             source_preference=source_preference or DEFAULT_SOURCE_PREFERENCE,
         ),
+        TCBSProvider(session=tcbs_session, enabled=tcbs_enabled),
         YFinanceProvider(module=yfinance_module, enabled=yfinance_enabled),
     ))

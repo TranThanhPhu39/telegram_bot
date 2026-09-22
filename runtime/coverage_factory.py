@@ -48,6 +48,7 @@ def build_chain_from_env(environ: Mapping[str, str] | None = None) -> ProviderCh
     return build_default_chain(
         source_preference=parse_source_preference(source.get("VNSTOCK_SOURCE_PREFERENCE")),
         yfinance_enabled=_flag(source.get("YFINANCE_ENABLED"), True),
+        tcbs_enabled=_flag(source.get("TCBS_ENABLED"), True),
     )
 
 

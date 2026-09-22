@@ -18,7 +18,8 @@ from fundamentals.providers.base import (
     normalize_period,
     period_end_date,
 )
-from fundamentals.providers.provider_chain import ProviderChain
+from fundamentals.providers.provider_chain import ProviderChain, build_default_chain
+from fundamentals.providers.tcbs_provider import REPORT_TYPES, TCBSProvider
 from fundamentals.providers.vnstock_provider import DEFAULT_SOURCE_PREFERENCE, VNStockProvider
 from fundamentals.providers.yfinance_provider import YFinanceProvider, candidate_tickers
 
@@ -369,6 +370,121 @@ def test_yfinance_never_supplies_institutional_flow() -> None:
     provider = YFinanceProvider(module=types.SimpleNamespace())
     result = provider.fetch_institutional_flow("FPT")
     assert result.status is ProviderStatus.MISSING
+
+
+# ------------------------------------------------------------------- TCBS
+class _FakeTCBSResponse:
+    def __init__(self, payload: object) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> object:
+        return self._payload
+
+
+class _FakeTCBSSession:
+    """Maps report_type (parsed from the URL) to a canned payload or error."""
+
+    def __init__(self, payloads: dict[str, object], *, raise_for: frozenset[str] = frozenset()) -> None:
+        self._payloads = payloads
+        self._raise_for = raise_for
+        self.calls: list[str] = []
+
+    def get(self, url: str, **kwargs: object) -> _FakeTCBSResponse:
+        report_type = url.rsplit("/", 1)[-1]
+        self.calls.append(report_type)
+        if report_type in self._raise_for:
+            raise ConnectionError(f"{report_type} unreachable")
+        return _FakeTCBSResponse(self._payloads.get(report_type, []))
+
+
+def test_tcbs_normalizes_a_quarterly_statement_set() -> None:
+    session = _FakeTCBSSession({
+        "incomestatement": [
+            {"year": 2026, "quarter": 2, "revenue": 500.0, "grossProfit": 120.0,
+             "operationProfit": 80.0, "postTaxProfit": 60.0, "shareHolderIncome": 58.0},
+        ],
+        "balancesheet": [
+            {"year": 2026, "quarter": 2, "cash": 40.0, "asset": 900.0, "equity": 300.0},
+        ],
+        "cashflow": [
+            {"year": 2026, "quarter": 2, "fromSale": 70.0},
+        ],
+    })
+    provider = TCBSProvider(session=session)
+    result = provider.fetch_financials("FPT")
+
+    assert result.status is ProviderStatus.AVAILABLE
+    assert result.provider_source == "TCAnalysis"
+    row = result.statements[0]
+    assert row.period == "2026Q2"
+    assert row.public_date is None  # TCBS never carries a VN announcement date
+    assert row.get("revenue") == 500.0
+    assert row.get("net_income_parent") == 58.0
+    assert row.get("total_equity") == 300.0
+    # cashflow endpoint's buckets are deliberately unmapped (see module docstring)
+    assert row.get("operating_cash_flow") is None
+    assert row.get("capex") is None
+
+
+def test_tcbs_disabled_is_missing_without_a_network_call() -> None:
+    session = _FakeTCBSSession({})
+    provider = TCBSProvider(session=session, enabled=False)
+    result = provider.fetch_financials("FPT")
+    assert result.status is ProviderStatus.MISSING
+    assert session.calls == []
+
+
+def test_tcbs_partial_when_one_endpoint_fails_but_others_answer() -> None:
+    session = _FakeTCBSSession(
+        {"incomestatement": [{"year": 2026, "quarter": 2, "revenue": 500.0}]},
+        raise_for=frozenset({"balancesheet", "cashflow"}),
+    )
+    provider = TCBSProvider(session=session)
+    result = provider.fetch_financials("FPT")
+    assert result.status is ProviderStatus.PARTIAL  # total_equity never established
+    assert result.statements[0].get("revenue") == 500.0
+    assert "balancesheet:ConnectionError" in result.attempted
+    assert "cashflow:ConnectionError" in result.attempted
+
+
+def test_tcbs_error_when_every_endpoint_fails() -> None:
+    session = _FakeTCBSSession({}, raise_for=frozenset(REPORT_TYPES))
+    provider = TCBSProvider(session=session)
+    result = provider.fetch_financials("FPT")
+    assert result.status is ProviderStatus.ERROR
+    assert "incomestatement" in (result.error_reason or "")
+
+
+def test_tcbs_annual_rollup_rows_are_skipped_in_quarterly_mode() -> None:
+    # yearly=0 responses may still include a quarter=0 annual roll-up row;
+    # only quarter 1-4 rows are genuine quarterly periods.
+    session = _FakeTCBSSession({
+        "incomestatement": [
+            {"year": 2026, "quarter": 0, "revenue": 2000.0},
+            {"year": 2026, "quarter": 2, "revenue": 500.0},
+        ],
+    })
+    provider = TCBSProvider(session=session)
+    result = provider.fetch_financials("FPT")
+    assert [row.period for row in result.statements] == ["2026Q2"]
+
+
+def test_tcbs_never_supplies_institutional_flow() -> None:
+    provider = TCBSProvider(session=_FakeTCBSSession({}))
+    result = provider.fetch_institutional_flow("FPT")
+    assert result.status is ProviderStatus.MISSING
+
+
+def test_build_default_chain_tries_tcbs_between_vnstock_and_yfinance() -> None:
+    chain = build_default_chain(
+        vnstock_module=types.SimpleNamespace(),
+        yfinance_module=types.SimpleNamespace(),
+        tcbs_session=_FakeTCBSSession({}),
+    )
+    assert [provider.name for provider in chain.providers] == ["VNStock", "TCBS", "yfinance"]
 
 
 # ------------------------------------------------------------- provider chain
