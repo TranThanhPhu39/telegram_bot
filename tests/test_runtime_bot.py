@@ -1,6 +1,7 @@
 """Tests for historical-first runtime orchestration."""
 
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 
 from asmf_data.models import SectorMembership
 from asmf_data.store import upsert_sector_memberships
@@ -227,6 +228,138 @@ def test_asmf_buy_is_blocked_only_when_severe_news_exists(monkeypatch) -> None:
     monkeypatch.setattr("runtime.bot_service.institutional_flow_score", lambda *a: 80.0)
     monkeypatch.setattr("runtime.bot_service.sector_strength_score", lambda *a: 80.0)
     assert "CHƯA ĐỦ ĐIỀU KIỆN" in runtime.symbol_overview("FPT", "ASMF")
+
+
+# --- Issue 5: /tin and /sentiment enqueue a targeted refresh on MISSING ----
+
+
+class EmptyNews:
+    """No eligible articles for any ticker -- matches the live NEWS MISSING
+    coverage evidence in Issue 5 (e.g. HC1/VIC/ACB)."""
+
+    def latest_news(self, *args, **kwargs):
+        return ()
+
+    def ticker_sentiment(self, *args, **kwargs):
+        return None
+
+    def severe_negative(self, *args, **kwargs):
+        return None
+
+
+def test_latest_news_queues_targeted_refresh_when_coverage_is_missing() -> None:
+    requested: list[str] = []
+
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        news_service=EmptyNews(), now=lambda: 1_800_000_000,
+        news_refresh_requester=lambda symbol: requested.append(symbol) or True,
+    )
+
+    result = runtime.latest_news("hc1")
+
+    assert requested == ["HC1"]
+    assert "Không có tin gần đây cho HC1." in result
+    assert "Đã xếp HC1 vào hàng đợi làm mới tin nền." in result
+
+
+def test_latest_news_reports_cooldown_without_reenqueuing() -> None:
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        news_service=EmptyNews(), now=lambda: 1_800_000_000,
+        news_refresh_requester=lambda symbol: False,  # already in-flight/cooldown
+    )
+
+    result = runtime.latest_news("HC1")
+
+    assert "đang trong thời gian chống gọi lặp" in result
+
+
+def test_latest_news_does_not_enqueue_when_articles_exist() -> None:
+    fake_article = SimpleNamespace(
+        published_at=datetime(2026, 9, 20, tzinfo=timezone.utc),
+        title="FPT tăng trưởng", source="cafef_rss", event_type="EARNINGS",
+        sentiment=None,
+    )
+
+    class News(EmptyNews):
+        def latest_news(self, *args, **kwargs):
+            return (fake_article,)
+
+    requested: list[str] = []
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        news_service=News(), now=lambda: 1_800_000_000,
+        news_refresh_requester=lambda symbol: requested.append(symbol) or True,
+    )
+
+    runtime.latest_news("FPT")
+
+    assert requested == []
+
+
+def test_sentiment_overview_queues_targeted_refresh_when_coverage_is_missing() -> None:
+    requested: list[str] = []
+
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        news_service=EmptyNews(), now=lambda: 1_800_000_000,
+        news_refresh_requester=lambda symbol: requested.append(symbol) or True,
+    )
+
+    result = runtime.sentiment_overview("hc1")
+
+    assert requested == ["HC1"]
+    assert "Đã xếp HC1 vào hàng đợi làm mới tin nền." in result
+
+
+def test_market_overview_never_enqueues_a_refresh_for_vnindex() -> None:
+    requested: list[str] = []
+
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        news_service=EmptyNews(), now=lambda: 1_800_000_000,
+        news_refresh_requester=lambda symbol: requested.append(symbol) or True,
+    )
+
+    runtime.market_overview()
+
+    assert requested == []
+
+
+def test_news_refresh_requester_failure_is_reported_without_raising() -> None:
+    def failing(symbol: str) -> bool:
+        raise RuntimeError("queue full")
+
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        news_service=EmptyNews(), now=lambda: 1_800_000_000,
+        news_refresh_requester=failing,
+    )
+
+    result = runtime.latest_news("HC1")
+
+    assert "Không thể xếp lịch làm mới tin nền." in result
+
+
+def test_set_news_refresh_requester_attaches_after_construction() -> None:
+    requested: list[str] = []
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connect_database("sqlite:///:memory:"),
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        news_service=EmptyNews(), now=lambda: 1_800_000_000,
+    )
+    runtime.set_news_refresh_requester(lambda symbol: requested.append(symbol) or True)
+
+    runtime.latest_news("HC1")
+
+    assert requested == ["HC1"]
 
 
 # --- Issue 2: realtime breadth shared by /market and /soi -----------------

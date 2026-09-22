@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import logging
 import os
 import re
+import threading
 from typing import Protocol
 
 from intelligence.news.models import NewsItem, SentimentLabel, SentimentResult
@@ -100,3 +101,27 @@ def build_sentiment_model() -> SentimentModel:
     )
     return FallbackSentimentModel(primary, lexicon) if os.getenv(
         "SENTIMENT_FALLBACK_ENABLED", "true").lower() == "true" else primary
+
+
+_shared_model: SentimentModel | None = None
+_shared_model_lock = threading.Lock()
+
+
+def get_shared_sentiment_model() -> SentimentModel:
+    """Process-wide singleton over ``build_sentiment_model()``.
+
+    PhoBERT (via :class:`PhoBERTSentimentModel`) is expensive to load and is
+    meant to be loaded at most once per process (see
+    ``runtime/news_refresh.py``'s module docstring). Before Issue 5's
+    on-demand targeted refresh worker, only one caller (the periodic
+    coverage-worker ``NewsRefreshRunner``) ever built a sentiment model, so a
+    plain per-runner instance was enough. With a second, independently
+    threaded runner now also analyzing articles, both must share this one
+    instance instead of each loading their own copy of the model.
+    """
+    global _shared_model
+    if _shared_model is None:
+        with _shared_model_lock:
+            if _shared_model is None:
+                _shared_model = build_sentiment_model()
+    return _shared_model

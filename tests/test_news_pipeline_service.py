@@ -12,6 +12,7 @@ from intelligence.news.pipeline import (
     classify_event,
 )
 from intelligence.news.repository import SQLiteNewsRepository
+from intelligence.news import sentiment as sentiment_module
 from intelligence.news.sentiment import LexiconSentimentModel
 from intelligence.news.service import SentimentQueryService
 
@@ -172,6 +173,24 @@ def test_catalog_failure_falls_back_to_all_sqlite_symbols():
     assert linker.link(NewsItem(
         "fallback", "x", "https://x/fallback", NOW, "KDH tăng giá",
     )).tickers == ("KDH",)
+
+
+# --- Issue 5: shared sentiment model singleton across news runners --------
+
+
+def test_get_shared_sentiment_model_is_a_process_wide_singleton(monkeypatch):
+    """The periodic NewsRefreshRunner and the new on-demand
+    TargetedNewsRefreshWorker (runtime/news_refresh.py) each build their own
+    runner, but both must reuse one sentiment model instance -- PhoBERT is
+    meant to load at most once per process."""
+    monkeypatch.setattr(sentiment_module, "_shared_model", None)
+    monkeypatch.setenv("SENTIMENT_MODEL_BACKEND", "lexicon")  # cheap, no network
+
+    first = sentiment_module.get_shared_sentiment_model()
+    second = sentiment_module.get_shared_sentiment_model()
+
+    assert first is second
+    assert isinstance(first, LexiconSentimentModel)
 
 
 def test_latest_five_sentiment_and_canonical_selection(tmp_path):

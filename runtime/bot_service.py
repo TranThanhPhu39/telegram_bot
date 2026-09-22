@@ -141,6 +141,7 @@ class RuntimeBotDataService:
         fundamentals_csv_path: str | None = None,
         sector_history_requester: Callable[[str], bool] | None = None,
         index_state: object | None = None,
+        news_refresh_requester: Callable[[str], bool] | None = None,
     ) -> None:
         self.client = client
         self.connection = connection
@@ -151,6 +152,7 @@ class RuntimeBotDataService:
         self.fundamentals_csv_path = fundamentals_csv_path
         self.sector_history_requester = sector_history_requester
         self.index_state = index_state
+        self.news_refresh_requester = news_refresh_requester
         bootstrap_schema(connection)
         self.portfolio = PortfolioRuntime(
            connection, self._history, lambda: self.now(), PortfolioConfig.from_env() 
@@ -161,6 +163,31 @@ class RuntimeBotDataService:
     ) -> None:
         """Attach the non-blocking background queue after runtime construction."""
         self.sector_history_requester = requester
+
+    def set_news_refresh_requester(
+        self, requester: Callable[[str], bool]
+    ) -> None:
+        """Attach the on-demand targeted news refresh queue (Issue 5)."""
+        self.news_refresh_requester = requester
+
+    def _request_news_refresh(self, symbol: str) -> str:
+        """Enqueue a background per-ticker news refresh; never blocks Telegram.
+
+        Returns a short Vietnamese status fragment describing what happened,
+        to be appended to the existing "no news"/"unavailable" message so the
+        gap is still reported honestly -- this never claims news exists.
+        """
+        if self.news_refresh_requester is None:
+            return ""
+        try:
+            queued = self.news_refresh_requester(symbol)
+        except (RuntimeError, ValueError):
+            return " Không thể xếp lịch làm mới tin nền."
+        return (
+            f" Đã xếp {symbol} vào hàng đợi làm mới tin nền."
+            if queued
+            else " Đang làm mới tin nền hoặc đang trong thời gian chống gọi lặp."
+        )
 
     def sector_history_needs_sync(self, symbol: str) -> bool:
         """Return whether the current sector has fewer than five usable histories."""
@@ -463,11 +490,12 @@ class RuntimeBotDataService:
     def latest_news(self, symbol: str) -> str:
         if self.news_service is None:
             return NEWS_UNAVAILABLE
+        symbol = symbol.strip().upper()
         try:
             items = self.news_service.latest_news(symbol, 5)
         except Exception:
             return NEWS_UNAVAILABLE
-        return format_news(symbol.strip().upper(), tuple(
+        rendered = format_news(symbol, tuple(
             NewsItemView(
                 published_at=item.published_at, title=item.title, source=item.source,
                 event_type=item.event_type,
@@ -475,6 +503,13 @@ class RuntimeBotDataService:
             )
             for item in items
         ))
+        # Issue 5: no eligible coverage for this ticker -- enqueue an
+        # on-demand targeted refresh instead of only waiting on the next
+        # periodic sweep. Never blocks this response; the gap is still
+        # reported honestly, just with a note that a refresh was queued.
+        if not items:
+            rendered += self._request_news_refresh(symbol)
+        return rendered
 
     def scan_results(self) -> tuple[str, ...]:
         """Preserved contract: ordered ticker tuple for backward compatibility."""
@@ -724,13 +759,22 @@ class RuntimeBotDataService:
         )
 
     def _sentiment_view(self, symbol: str) -> SentimentView:
+        symbol = symbol.strip().upper()
         if self.news_service is None:
             return SentimentView(available=False, note=NEWS_UNAVAILABLE)
         try:
-            aggregate = self.news_service.ticker_sentiment(symbol.strip().upper())
+            aggregate = self.news_service.ticker_sentiment(symbol)
         except Exception:
             return SentimentView(available=False, note=NEWS_UNAVAILABLE)
-        return build_sentiment_view(aggregate)
+        view = build_sentiment_view(aggregate)
+        # Issue 5: same on-demand targeted refresh as latest_news(), for the
+        # /soi and /sentiment paths. VNINDEX is the market-wide benchmark
+        # symbol used internally by market_overview(), not a listed ticker
+        # CafeF/the ticker linker covers, so it is excluded here.
+        if not view.available and symbol != "VNINDEX":
+            note = (view.note or "") + self._request_news_refresh(symbol)
+            view = replace(view, note=note.strip())
+        return view
 
     def _fundamental_facts(self, symbol: str, timestamp: int) -> FundamentalFacts | None:
         as_of = datetime.fromtimestamp(timestamp, VIETNAM_TIMEZONE).date()

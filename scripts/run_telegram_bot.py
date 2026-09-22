@@ -12,6 +12,7 @@ from telegram_bot.sector_notifications import SectorSyncNotificationBroker
 from runtime.bot_service import build_runtime_service_from_env
 from runtime.coverage_factory import start_coverage_worker_from_env
 from runtime.index_stream_worker import start_index_stream_worker_from_env
+from runtime.news_refresh import build_targeted_news_refresh_worker_from_env
 from runtime.redaction import configure_logging
 from runtime.scanner_worker import start_scanner_worker_from_env
 from runtime.sector_history_sync import start_sector_history_background_sync
@@ -74,6 +75,19 @@ if __name__ == "__main__":
     index_stream_worker = None
     if service.index_state is not None:
         index_stream_worker = start_index_stream_worker_from_env(service.index_state)
+    # Issue 5 fix: on-demand, per-ticker news refresh. Without this, /tin and
+    # /sentiment could only ever surface whatever the periodic NEWS coverage
+    # sweep happened to catch out of a ~1,500-symbol universe, which is why
+    # most tickers showed NEWS MISSING even when CafeF had a relevant
+    # article. A DB-connection factory is passed in (not a live connection)
+    # so the worker's own daemon thread opens its own thread-affine
+    # sqlite3 connection, matching the sector-history worker's pattern.
+    database_url = os.getenv("DATABASE_URL", "sqlite:///stock_bot.db")
+    news_refresh_worker = build_targeted_news_refresh_worker_from_env(
+        lambda: connect_database(database_url)
+    )
+    news_refresh_worker.start()
+    service.set_news_refresh_requester(news_refresh_worker.request)
     try:
         run_polling(TelegramCommandService(service), sector_notifications)
     finally:
@@ -83,4 +97,6 @@ if __name__ == "__main__":
             coverage_worker.stop(timeout=10.0)
         if index_stream_worker is not None:
             index_stream_worker.stop(timeout=10.0)
+        news_refresh_worker.stop(timeout=10.0)
+        news_refresh_worker.close()
         sector_worker.stop(timeout=10.0)

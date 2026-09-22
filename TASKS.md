@@ -921,7 +921,67 @@ iteration, each stopped for explicit live confirmation before the next.
   docs/support before integrating.
 
 ### Issue 5 — News ingestion không phủ đủ theo ticker
-- [ ] NOT STARTED
+- [x] Root cause: `NewsIngestionService.run_once()` only ever ingests one
+      generic CafeF market-wide RSS feed, bounded to `NEWS_INGEST_LIMIT`
+      (default 30 items), on the periodic coverage-worker cadence. With
+      universe=1524 that sweep only links a small fraction of tickers by
+      chance (`linked_tickers=12` live evidence) -- there was no on-demand,
+      per-ticker refresh path, so `/tin`/`/sentiment` could only ever read
+      whatever the generic sweep happened to catch.
+- [x] Added `runtime/news_refresh.py::TargetedNewsRefreshWorker`: bounded
+      daemon-thread worker (mirrors `SectorHistorySyncWorker`), in-process
+      queue, per-symbol in-flight/cooldown dedup via `request(symbol) ->
+      bool`. Reuses the existing CafeF RSS -> ticker link (ticker code +
+      company name + aliases, via the existing `build_ticker_linker`) ->
+      sentiment -> SQLite pipeline with a larger on-demand fetch limit
+      (`NEWS_TARGETED_FETCH_LIMIT`, default 60) instead of a new provider.
+      `NEWS_TARGETED_COOLDOWN_SECONDS` (default 300) bounds re-fetch rate
+      per symbol.
+- [x] Caught and fixed a regression before it shipped: a second,
+      independently threaded runner would have loaded a second PhoBERT
+      model into memory. Added
+      `intelligence/news/sentiment.py::get_shared_sentiment_model()`
+      (process-wide singleton) and switched
+      `build_news_runner_from_env()`'s `sentiment_factory` to it, so the
+      periodic and on-demand runners now share one model instance.
+- [x] Wired `RuntimeBotDataService.news_refresh_requester` /
+      `set_news_refresh_requester()` (mirrors `sector_history_requester`).
+      `latest_news()` (`/tin`) and `_sentiment_view()` (`/soi`,
+      `/sentiment`) enqueue a targeted refresh, non-blocking, only when the
+      ticker currently has zero eligible articles; the existing MISSING/
+      unavailable message is still shown, with a short queued/cooldown note
+      appended -- this never claims news exists before it does.
+      `market_overview()`'s internal `VNINDEX` sentiment lookup is excluded
+      (not a listed ticker).
+- [x] Started/stopped in `scripts/run_telegram_bot.py` alongside the other
+      workers via `build_targeted_news_refresh_worker_from_env()`.
+- [x] "CafeF ticker-page fallback" from the original ask was **not**
+      implemented: no existing, verified per-ticker CafeF search/page
+      endpoint was found in this repo, and this environment has no live
+      network access to verify one safely. Consistent with how Issues 3/4
+      treated an unavailable/unverifiable data source, this is reported as
+      researched-not-implemented rather than shipping an unverified
+      scraper.
+- [x] Tests: new `tests/test_news_refresh_worker.py` (8 tests: invalid
+      fetch_limit/cooldown rejected, stop-before-start no-op, request after
+      stop rejected, blank symbol rejected, in-flight/cooldown dedup,
+      refresh persists via the existing pipeline, configured fetch_limit is
+      passed to the provider, sentiment model built at most once across two
+      different symbol refreshes). New test in
+      `tests/test_news_pipeline_service.py` for the shared-singleton
+      contract. Extended `tests/test_runtime_bot.py` (+8 tests: `/tin`
+      enqueues on MISSING, cooldown reported without re-enqueuing, no
+      enqueue when articles already exist, `/sentiment` enqueues on
+      MISSING, `VNINDEX` never enqueues, requester failure reported without
+      raising, `set_news_refresh_requester` attaches post-construction).
+      Sandbox has no `pytest`/network, so these were run with a small ad-hoc
+      manual test runner reproducing pytest's fixtures
+      (`tmp_path`/`monkeypatch`/`pytest.raises`) — all 8 + 9 + 24 (existing,
+      unaffected) + 6 (existing sector-history worker, unaffected) tests
+      passed. Full `python -m pytest tests/ -q` still needs to be run by the
+      user in their actual environment (as with prior issues) before this
+      is marked PASS.
+- [ ] Live acceptance pending user confirmation (see report below).
 
 ### Issue 6 — News freshness đang dùng 7 ngày thay vì 30 ngày
 - [ ] NOT STARTED

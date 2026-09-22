@@ -3598,15 +3598,103 @@ docs (hdsd.dnse.com.vn) list a narrower topic set with no foreign-investor
 topic visible in what was checked — the two DNSE doc surfaces were not
 fully reconciled; confirm directly with DNSE before integrating.
 
+### Issue 5 — News ingestion không phủ đủ theo ticker
+
+**Root cause:** `NewsIngestionService.run_once()` (the only ingestion path
+that existed) samples a single generic CafeF market-wide RSS feed, bounded
+to `NEWS_INGEST_LIMIT` (default 30 items), on the periodic coverage
+worker's cadence. Against a ~1,524-symbol universe that sweep only links a
+handful of tickers by chance (live evidence: `linked_tickers=12`), which is
+why most symbols (HC1, VIC, ACB, ...) showed `NEWS MISSING` even when CafeF
+had a relevant article somewhere on the site: there was no on-demand,
+per-ticker refresh path for `/tin`/`/sentiment` to fall back on.
+
+**Implementation (hybrid A + B, as specified):**
+
+- **A. Generic ingestion** — unchanged: the existing periodic
+  `NewsRefreshRunner`/coverage-worker sweep.
+- **B. Targeted on-demand refresh** — new
+  `runtime/news_refresh.py::TargetedNewsRefreshWorker`, mirroring
+  `SectorHistorySyncWorker`'s already-proven shape: one bounded daemon
+  thread, an in-process queue, and per-symbol in-flight/cooldown dedup
+  (`request(symbol) -> bool`, never blocks, never raises for a normal
+  duplicate call). It reuses the existing CafeF RSS → ticker-link (ticker
+  code + company name + aliases, via the existing `build_ticker_linker`) →
+  sentiment → SQLite pipeline with a larger, bounded on-demand fetch limit
+  (`NEWS_TARGETED_FETCH_LIMIT`, default 60) rather than a new provider.
+  `NEWS_TARGETED_COOLDOWN_SECONDS` (default 300) bounds re-fetch rate per
+  symbol so repeated/concurrent Telegram queries for the same under-covered
+  ticker do not pile up duplicate CafeF fetches.
+- Wired into `RuntimeBotDataService` as `news_refresh_requester` /
+  `set_news_refresh_requester()` (mirrors `sector_history_requester`).
+  `latest_news()` (`/tin`) and `_sentiment_view()` (`/soi`, `/sentiment`)
+  enqueue a refresh, non-blocking, only when the ticker currently has zero
+  eligible articles; the existing MISSING/unavailable message is still
+  shown honestly, with a short queued/cooldown note appended — this never
+  claims news exists before it actually does. `market_overview()`'s
+  internal `VNINDEX` sentiment lookup is excluded (not a listed ticker).
+- Started/stopped in `scripts/run_telegram_bot.py` alongside the sector,
+  coverage, scanner, and index-stream workers.
+- **Regression caught before shipping:** a second, independently threaded
+  runner would otherwise have loaded a second PhoBERT model into memory.
+  Added `intelligence/news/sentiment.py::get_shared_sentiment_model()` (a
+  process-wide singleton) and switched `build_news_runner_from_env()`'s
+  `sentiment_factory` to it, so the periodic and the new on-demand runner
+  now share one model instance instead of two.
+- **Not implemented:** the "CafeF ticker-page fallback" mentioned in the
+  original ask. No existing, verified per-ticker CafeF search/page endpoint
+  was found in this repo, and this environment has no live network access
+  to verify one safely — an unverified scraper risks silently returning
+  wrong data or breaking on the next CafeF markup change, which is worse
+  than the current honest MISSING. Reported as researched-not-implemented,
+  consistent with how Issues 3 and 4 treated an unavailable/unverifiable
+  data source.
+
+**Verification:**
+
+- New `tests/test_news_refresh_worker.py` (8 tests): invalid
+  `fetch_limit`/`cooldown_seconds` rejected, `stop()` before `start()` is a
+  no-op, `request()` after `stop()` is rejected, blank symbol rejected,
+  in-flight/cooldown dedup (mirrors the sector-worker blocking test),
+  refresh persists via the existing pipeline and reports
+  `articles_found`/`inserted`, the configured `fetch_limit` reaches the
+  provider, and the sentiment model is built at most once across two
+  different symbols' refreshes.
+- New test in `tests/test_news_pipeline_service.py` for the shared-model
+  singleton contract.
+- Extended `tests/test_runtime_bot.py` (+8 tests): `/tin` enqueues on
+  MISSING and reports the queued note; cooldown reported without
+  re-enqueuing; no enqueue when articles already exist; `/sentiment`
+  enqueues on MISSING; `VNINDEX` (market-wide) never enqueues; a requester
+  exception is reported in the message instead of raising;
+  `set_news_refresh_requester()` attaches correctly after construction.
+- This sandbox has no `pytest`, `transformers`, or live network access, so
+  the new/extended tests above (17 total) plus every pre-existing test in
+  `tests/test_runtime_bot.py` (24) and `tests/test_sector_history_sync.py`
+  (6) — the two suites most exposed to this change — were run with a small
+  ad-hoc runner reproducing pytest's `tmp_path`/`monkeypatch`/
+  `pytest.raises` fixtures: **47/47 passed**, no regressions. The full
+  `python -m pytest tests/ -q` still needs to be run by the user in their
+  actual environment, as with every prior Phase 28 issue, before this is
+  marked PASS.
+- Live acceptance (pending): `/tin HC1` and `/sentiment HC1` (or another
+  currently-MISSING symbol) should show the existing MISSING message plus a
+  "Đã xếp HC1 vào hàng đợi làm mới tin nền." note on first ask, the bot log
+  should show `targeted news refresh finished symbol=HC1 ...`, and a
+  second `/tin HC1` a few seconds later should show the same MISSING
+  message (not a false "cooldown" bug) unless CafeF's current front feed
+  actually carried an HC1-relevant article in that window — this is
+  expected: the on-demand refresh widens the sampled window, it does not
+  guarantee an article exists right now.
+
 ### Remaining
 
-Issues 5–10 (news ingestion coverage, news freshness window, per-article
-sentiment output, stale "24h" wording, fundamentals PARTIAL/MISSING,
-coverage-vs-ASMF-readiness semantics) are not started; see `TASKS.md`
-Phase 28 for the full list. Per the working agreement, each is audited and
-fixed one at a time with an explicit live-confirmation stop before starting
-the next. A follow-up decision is also open (not an "issue" in this list):
-whether to keep `/market`'s `DÒNG TIỀN NGOẠI/TỰ DOANH: unavailable` line
-visible (current behavior, matches the "mark unavailable rõ ràng"
-requirement) or remove it from output entirely — awaiting the user's
-choice.
+Issues 6–10 (news freshness window, per-article sentiment output, stale
+"24h" wording, fundamentals PARTIAL/MISSING, coverage-vs-ASMF-readiness
+semantics) are not started; see `TASKS.md` Phase 28 for the full list. Per
+the working agreement, each is audited and fixed one at a time with an
+explicit live-confirmation stop before starting the next. A follow-up
+decision is also open (not an "issue" in this list): whether to keep
+`/market`'s `DÒNG TIỀN NGOẠI/TỰ DOANH: unavailable` line visible (current
+behavior, matches the "mark unavailable rõ ràng" requirement) or remove it
+from output entirely — awaiting the user's choice.
