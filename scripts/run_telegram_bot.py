@@ -12,6 +12,7 @@ from telegram_bot.sector_notifications import SectorSyncNotificationBroker
 from runtime.bot_service import build_runtime_service_from_env
 from runtime.coverage_factory import start_coverage_worker_from_env
 from runtime.redaction import configure_logging
+from runtime.scanner_worker import start_scanner_worker_from_env
 from runtime.sector_history_sync import start_sector_history_background_sync
 
 
@@ -58,9 +59,16 @@ if __name__ == "__main__":
     # never waits on a full-market refresh. It reuses the sector worker for
     # sector histories and records that worker's results as coverage.
     coverage_worker = start_coverage_worker_from_env(sector_worker)
+    # Phase 25/Issue 1 fix: persist market-wide /scan snapshots on a daemon
+    # thread. Without this, /scan had no snapshot to read and silently fell
+    # back to the small legacy BOT_WATCH_SYMBOLS watch list (e.g. FPT/ACB)
+    # instead of the full HOSE/HNX/UPCoM universe.
+    scanner_worker = start_scanner_worker_from_env()
     try:
         run_polling(TelegramCommandService(service), sector_notifications)
     finally:
+        if scanner_worker is not None:
+            scanner_worker.stop(timeout=10.0)
         if coverage_worker is not None:
             coverage_worker.stop(timeout=10.0)
         sector_worker.stop(timeout=10.0)

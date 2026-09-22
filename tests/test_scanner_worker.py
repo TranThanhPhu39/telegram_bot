@@ -156,6 +156,7 @@ def test_run_scan_cycle_filters_liquidity_and_persists() -> None:
     assert loaded.id == cl1_snap.id
 
 
+
 def test_scanner_worker_daemon_lifecycle(tmp_path) -> None:
     db_path = f"sqlite:///{(tmp_path / 'worker.sqlite3').as_posix()}"
     init_conn = connect_database(db_path)
@@ -175,6 +176,77 @@ def test_scanner_worker_daemon_lifecycle(tmp_path) -> None:
     assert not worker.running
     assert worker.cycles_completed >= 1
 
+def test_start_scanner_worker_from_env_persists_market_wide_snapshot(tmp_path) -> None:
+    """Regression for Issue 1: production never started MarketScannerWorker, so
+    /scan permanently fell back to the tiny BOT_WATCH_SYMBOLS list instead of
+    the full HOSE/HNX/UPCoM universe. This exercises the same factory that
+    scripts/run_telegram_bot.py now calls at startup."""
+    from runtime.scanner_worker import start_scanner_worker_from_env
+
+    db_path = f"sqlite:///{(tmp_path / 'prod_worker.sqlite3').as_posix()}"
+    init_conn = connect_database(db_path)
+    bootstrap_schema(init_conn)
+    seed_test_universe(init_conn)
+    init_conn.close()
+
+    environ = {
+        "DATABASE_URL": db_path,
+        "SCANNER_INTERVAL_SECONDS": "1",
+    }
+    worker = start_scanner_worker_from_env(environ=environ)
+    assert worker is not None
+    try:
+        assert worker.running
+        for _ in range(50):
+            if worker.cycles_completed >= 1:
+                break
+            time.sleep(0.1)
+        assert worker.cycles_completed >= 1
+    finally:
+        worker.stop(timeout=2.0)
+
+    conn = connect_database(db_path)
+    snapshot = load_latest_scan_snapshot(conn, "CL1")
+    assert snapshot is not None
+    # Full seeded universe (4 symbols), not the 2-symbol BOT_WATCH_SYMBOLS default.
+    assert snapshot.total_universe == 4
+
+
+def test_start_scanner_worker_from_env_can_be_disabled(tmp_path) -> None:
+    from runtime.scanner_worker import start_scanner_worker_from_env
+
+    db_path = f"sqlite:///{(tmp_path / 'disabled.sqlite3').as_posix()}"
+    worker = start_scanner_worker_from_env(
+        environ={"DATABASE_URL": db_path, "SCANNER_WORKER_ENABLED": "false"}
+    )
+    assert worker is None
+
+
+def test_scan_overview_flags_stale_snapshot() -> None:
+    """Regression for Issue 1's staleness requirement: an old snapshot must be
+    labelled stale rather than presented as a fresh full-market read."""
+    conn = make_test_db()
+    seed_test_universe(conn)
+    save_scan_snapshot(
+        conn,
+        strategy="CL1",
+        as_of_date="2026-09-01",
+        scanned_at=1_700_000_000,
+        total_universe=1600,
+        screened_count=1,
+        rows=[ScanRowView("FPT", "TĂNG", "+1.0% vs VNINDEX", "PASS", "PASS", "WATCH")],
+    )
+
+    class DummyClient:
+        def get_gap_chart(self, *args, **kwargs):
+            return []
+
+    # now() is far past the snapshot's scanned_at + the stale threshold.
+    service = RuntimeBotDataService(
+        DummyClient(), conn, instruments=(), now=lambda: 1_700_000_000 + 7200,
+    )
+    text = service.scan_overview("CL1")
+    assert "cũ" in text.lower()
 
 def test_scan_overview_reads_persisted_snapshot() -> None:
     conn = make_test_db()

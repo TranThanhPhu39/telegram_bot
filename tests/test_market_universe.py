@@ -28,6 +28,22 @@ def test_unknown_exchange_is_kept_because_sector_import_leaves_it_null(tmp_path)
     seed_symbols(connection, [("VIX", None, "STOCK", 1), ("BAD", "OTC", "STOCK", 1)])
     assert [item.symbol for item in load_market_universe(connection)] == ["VIX"]
 
+def test_index_auto_created_as_stock_is_still_excluded(tmp_path) -> None:
+    """Regression: several write paths (RuntimeBotDataService._store,
+    sector_history_sync, fundamentals.coverage_store, asmf_data.store,
+    portfolio.repository) auto-create a `symbols` row the first time a
+    ticker's bars are cached, defaulting instrument_type to 'STOCK' with no
+    exchange. VNINDEX gets its bars cached constantly as the benchmark, so it
+    ends up with exactly this shape — indistinguishable from a real stock by
+    instrument_type/exchange alone — and slipped into live /scan results."""
+    connection = make_connection(tmp_path)
+    seed_symbols(connection, [
+        ("FPT", "HOSE", "STOCK", 1),
+        ("VNINDEX", None, "STOCK", 1),   # exactly what `_store()` creates
+        ("VN30", None, "STOCK", 1),
+        ("HNXINDEX", None, "STOCK", 1),
+    ])
+    assert [item.symbol for item in load_market_universe(connection)] == ["FPT"]
 
 def test_hsx_is_presented_to_providers_as_hose(tmp_path) -> None:
     connection = make_connection(tmp_path)

@@ -12,10 +12,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 from asmf_data.store import latest_financial_reports
 from data.models import OHLCVBar
@@ -329,3 +330,42 @@ class MarketScannerWorker:
                 self._stop.wait(self.config.scan_interval_seconds)
         finally:
             connection.close()
+
+def _flag(raw: str | None, default: bool) -> bool:
+    value = (raw or "").strip().lower()
+    if not value:
+        return default
+    return value not in {"0", "false", "no", "off"}
+
+
+def start_scanner_worker_from_env(
+    *, environ: Mapping[str, str] | None = None,
+) -> "MarketScannerWorker | None":
+    """Start the background market scanner worker; returns ``None`` when disabled.
+
+    Never blocks the Telegram polling loop: the worker runs its scan cycles on
+    its own daemon thread. This is what lets ``/scan`` read a persisted,
+    market-wide snapshot instead of ever prescreening the full universe
+    synchronously inside a command handler.
+    """
+    source = os.environ if environ is None else environ
+    if not _flag(source.get("SCANNER_WORKER_ENABLED"), True):
+        LOGGER.info("Market scanner worker disabled (SCANNER_WORKER_ENABLED=false)")
+        return None
+
+    # Imported lazily to avoid a module-level dependency between the two
+    # worker modules; both already depend on `data.database` independently.
+    from runtime.coverage_factory import connection_factory_from_env
+
+    connection_factory = connection_factory_from_env(environ)
+    config = ScannerWorkerConfig(
+        scan_interval_seconds=int(
+            source.get("SCANNER_INTERVAL_SECONDS", "") or ScannerWorkerConfig().scan_interval_seconds
+        ),
+    )
+    worker = MarketScannerWorker(connection_factory, config)
+    worker.start()
+    LOGGER.info(
+        "Market scanner worker started interval=%.0fs", config.scan_interval_seconds
+    )
+    return worker

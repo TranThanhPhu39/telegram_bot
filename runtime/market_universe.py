@@ -24,8 +24,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import sqlite3
 
+from portfolio.repository import NON_STOCK_SYMBOLS
 from scanner.universe import COMMON_STOCK_TYPES, SUPPORTED_EXCHANGES
-
 #: ``HSX`` is what the Vietcap catalog calls HOSE; scanner.universe only lists HOSE.
 UNIVERSE_EXCHANGES = frozenset(SUPPORTED_EXCHANGES | {"HSX"})
 
@@ -52,12 +52,14 @@ def load_market_universe(
     """
     type_marks = ",".join("?" for _ in COMMON_STOCK_TYPES)
     exchange_marks = ",".join("?" for _ in UNIVERSE_EXCHANGES)
+    index_marks = ",".join("?" for _ in NON_STOCK_SYMBOLS)
     rows = connection.execute(
         "SELECT symbol, exchange FROM symbols WHERE is_active=1 "
         f"AND instrument_type IN ({type_marks}) "
         f"AND (exchange IS NULL OR exchange IN ({exchange_marks})) "
+        f"AND symbol NOT IN ({index_marks}) "
         "ORDER BY symbol",
-        (*sorted(COMMON_STOCK_TYPES), *sorted(UNIVERSE_EXCHANGES)),
+        (*sorted(COMMON_STOCK_TYPES), *sorted(UNIVERSE_EXCHANGES), *sorted(NON_STOCK_SYMBOLS)),
     ).fetchall()
     universe = tuple(MarketSymbol(row["symbol"], row["exchange"]) for row in rows)
     if symbols is None:

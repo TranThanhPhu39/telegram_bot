@@ -335,6 +335,7 @@ def format_scan(
     scanned_at: int | None = None,
     total_universe: int | None = None,
     strategy: str = "CL1",
+    stale: bool = False,
 ) -> str:
     if not rows:
         return "Chưa có mã đạt bộ lọc."
@@ -347,6 +348,8 @@ def format_scan(
         if as_of is not None:
             info.append(f"Ngày: {as_of}")
         lines.append(" | ".join(info))
+    if stale:
+        lines.append("⚠️ Dữ liệu quét đã cũ (worker chưa cập nhật gần đây) — kết quả có thể không còn mới.")
     for index, row in enumerate(rows, start=1):
         lines.append(
             f"{index}. {row.symbol}\n"

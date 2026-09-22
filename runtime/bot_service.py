@@ -78,6 +78,10 @@ from telegram_bot.formatters import (
 
 VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
 NEWS_UNAVAILABLE = "News sentiment unavailable."
+#: A persisted /scan snapshot older than this is flagged stale rather than
+#: presented as a fresh full-market read (Issue 1: MarketScannerWorker cycles
+#: every ScannerWorkerConfig.scan_interval_seconds, default 300s).
+SCAN_SNAPSHOT_STALE_AFTER_SECONDS = 1800
 MINIMUM_SECTOR_HISTORY = 126
 
 
@@ -440,12 +444,14 @@ class RuntimeBotDataService:
         from runtime.scanner_worker import load_latest_scan_snapshot, save_scan_snapshot
         snapshot = load_latest_scan_snapshot(self.connection, strategy=strategy_upper)
         if snapshot is not None and snapshot.rows:
+            is_stale = (self.now() - snapshot.scanned_at) > SCAN_SNAPSHOT_STALE_AFTER_SECONDS
             return format_scan(
                 snapshot.rows,
                 as_of=snapshot.as_of_date,
                 scanned_at=snapshot.scanned_at,
                 total_universe=snapshot.total_universe,
                 strategy=strategy_upper,
+                stale=is_stale,
             )
         symbols = self.scan_results()
         if not symbols:
