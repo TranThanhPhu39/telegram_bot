@@ -56,6 +56,15 @@ from fundamentals.providers.base import (
 
 LOGGER = logging.getLogger(__name__)
 
+
+class _NoStatementData(Exception):
+    """TCBS returned HTTP 400/404: the ticker has no report of this type.
+
+    This is a legitimate MISSING, distinct from a transport/server error —
+    it must never be treated as retryable or count toward tripping the
+    FINANCIALS circuit breaker for genuinely-down providers.
+    """
+
 TCBS_BASE_URL = "https://apipubaws.tcbs.com.vn/tcanalysis/v1/finance"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
@@ -126,13 +135,25 @@ class TCBSProvider(FundamentalProvider):
         return self._enabled
 
     def _fetch_report(self, symbol: str, report_type: str) -> list[dict[str, object]]:
-        """One statement endpoint, quarterly. Raises on any transport error."""
+        """One statement endpoint, quarterly.
+
+        Raises ``_NoStatementData`` when TCBS itself says there is nothing to
+        return for this ticker (HTTP 404/400) — that is a legitimate MISSING,
+        not a transport failure, and callers must not retry it. Any other
+        exception (timeout, connection error, 5xx, malformed payload) is a
+        real transport/error condition and propagates as-is so it is retried.
+        """
         url = f"{TCBS_BASE_URL}/{symbol}/{report_type}"
         response = self._session.get(
             url,
             params={"yearly": 0, "isAll": "true"},
             timeout=self._timeout_seconds,
         )
+        if response.status_code in (400, 404):
+            raise _NoStatementData(
+                f"TCBS has no {report_type} data for {symbol} "
+                f"(HTTP {response.status_code})"
+            )
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, list):
@@ -150,6 +171,7 @@ class TCBSProvider(FundamentalProvider):
         merged: dict[str, dict[str, float | None]] = {}
         attempted: list[str] = []
         errors: list[str] = []
+        no_data: list[str] = []
 
         for report_type, aliases in (
             ("incomestatement", INCOME_ALIASES),
@@ -158,7 +180,16 @@ class TCBSProvider(FundamentalProvider):
         ):
             try:
                 rows = self._fetch_report(symbol, report_type)
-            except Exception as error:  # a bad ticker/endpoint must not abort the batch
+            except _NoStatementData as error:
+                # TCBS itself says this ticker has no such report — a real
+                # MISSING, not a transport failure. Must not be retried and
+                # must not count toward the ERROR circuit breaker.
+                message = f"{report_type}:no_data"
+                attempted.append(message)
+                no_data.append(message)
+                LOGGER.debug("TCBS %s has no data for %s: %s", report_type, symbol, error)
+                continue
+            except Exception as error:  # real transport/error; a bad ticker must not abort the batch
                 message = f"{report_type}:{type(error).__name__}"
                 attempted.append(message)
                 errors.append(message)
@@ -183,10 +214,14 @@ class TCBSProvider(FundamentalProvider):
                     if value is not None:
                         bucket[field_name] = value
 
-        if len(errors) == len(REPORT_TYPES):
+        if errors and len(errors) + len(no_data) == len(REPORT_TYPES):
+            # At least one real transport error, and nothing usable came back
+            # from any endpoint (the rest were 404/400 "no data"). This is a
+            # genuine ERROR worth retrying — unlike a clean 404 sweep, which
+            # falls through to the "no usable statement rows" MISSING below.
             return ProviderResult.failed(
                 symbol, "FINANCIALS", self.name,
-                "all TCBS statement endpoints failed: " + "; ".join(errors),
+                "TCBS statement endpoints failed: " + "; ".join(errors),
                 attempted=tuple(attempted),
             )
 
