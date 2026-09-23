@@ -376,59 +376,40 @@ def test_soi_renders_compact_sentiment() -> None:
     assert "model confidence 0.95" not in text
 
 
-def test_format_sentiment_includes_articles_with_safe_urls_and_metrics() -> None:
-    from runtime.views import SentimentArticleView, SentimentView
+def test_format_sentiment_shows_aggregate_only_no_article_urls_or_titles() -> None:
+    from runtime.views import SentimentView
     from telegram_bot.formatters import format_sentiment
 
     now = datetime(2026, 9, 21, 10, 50, tzinfo=timezone.utc)
-    articles = (
-        SentimentArticleView(
-            title="[ĐHCĐ] FPT tăng trưởng mạnh",
-            published_at=now,
-            source="CafeF",
-            url="https://cafef.vn/fpt-tang-truong.chn",
-            event_type="EARNINGS",
-            sentiment_label="POSITIVE",
-            sentiment_score=0.85,
-            model_confidence=0.92,
-        ),
-        SentimentArticleView(
-            title="Thị trường rung lắc FPT giảm nhẹ",
-            published_at=now - timedelta(hours=2),
-            source="Vietstock",
-            url="https://cafef.vn/fpt-giam-nhe(1).chn",
-            event_type="MARKET",
-            sentiment_label="NEGATIVE",
-            sentiment_score=-0.43,
-            model_confidence=0.63,
-        ),
-    )
     view = SentimentView(
         available=True,
-        label="Positive",
-        score=0.42,
-        model_confidence=0.80,
+        label="Negative",
+        score=-0.18,
+        model_confidence=0.55,
         article_count=2,
         positive_count=1,
-        neutral_count=0,
+        neutral_count=3,
         negative_count=1,
-        top_events=("EARNINGS", "MARKET"),
+        top_events=("EARNINGS", "DIVIDEND"),
         latest_at=now,
         backends=("phobert",),
-        articles=articles,
     )
     text = format_sentiment("FPT", view)
-    assert "📰 FPT — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)" in text
-    assert "Nhãn tổng hợp: Positive" in text
-    assert "Chi tiết bài viết:" in text
-    # 1. TÍCH CỰC with escaped brackets in title
-    assert "1. TÍCH CỰC [(ĐHCĐ) FPT tăng trưởng mạnh](https://cafef.vn/fpt-tang-truong.chn)" in text
-    assert "Nguồn: CafeF" in text
-    assert "Score: +0.85 | Confidence: 0.92" in text
-    # 2. TIÊU CỰC with escaped parens in URL
-    assert "2. TIÊU CỰC [Thị trường rung lắc FPT giảm nhẹ](https://cafef.vn/fpt-giam-nhe%281%29.chn)" in text
-    assert "Nguồn: Vietstock" in text
-    assert "Score: -0.43 | Confidence: 0.63" in text
+    assert "🧠 FPT — SENTIMENT" in text
+    assert "🟡 TRUNG LẬP, HƠI NGHIÊNG TIÊU CỰC" in text
+    assert "Score: -0.18" in text
+    assert "Độ tin cậy: TRUNG BÌNH" in text
+    assert "Tích cực: 1" in text
+    assert "Trung lập: 3" in text
+    assert "Tiêu cực: 1" in text
+    assert "• KQKD" in text
+    assert "⚠️ Chỉ tìm được 2/5 tin trong 30 ngày" in text
+    assert "độ phủ dữ liệu thấp" in text
+    assert "chưa đủ mạnh để tự tạo tín hiệu giao dịch" in text
+    assert "/tin FPT để xem bài gốc." in text
+    # No per-article titles or URLs -- that content lives only in /tin now.
+    assert "https://" not in text
+    assert "Chi tiết bài viết" not in text
 
 
 def test_sentiment_overview_end_to_end(tmp_path) -> None:
@@ -463,28 +444,20 @@ def test_sentiment_overview_end_to_end(tmp_path) -> None:
 
     runtime = service(news=news_svc)
     text = runtime.sentiment_overview("FPT")
-    assert "📰 FPT — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)" in text
-    assert "Chi tiết bài viết:" in text
-    assert "1. TÍCH CỰC [FPT ký hợp đồng lớn](https://s.cafef.vn/fpt-123.chn)" in text
+    assert "🧠 FPT — SENTIMENT" in text
+    assert "🟢 TÍCH CỰC" in text
+    assert "/tin FPT để xem bài gốc." in text
+    # Only 1 article in a 30-day/5-article target window -- coverage warning expected.
+    assert "⚠️ Chỉ tìm được 1/5 tin trong 30 ngày" in text
+    assert "https://s.cafef.vn" not in text
+    assert "FPT ký hợp đồng lớn" not in text
 
 
-def test_format_sentiment_caps_at_5_articles_and_handles_none_metrics() -> None:
-    from runtime.views import SentimentArticleView, SentimentView
+def test_format_sentiment_no_coverage_warning_when_target_met() -> None:
+    from runtime.views import SentimentView
     from telegram_bot.formatters import format_sentiment
 
     now = datetime(2026, 9, 21, 10, 50, tzinfo=timezone.utc)
-    articles = tuple(
-        SentimentArticleView(
-            title=f"[Tin {i}] Tiêu đề bài viết số {i}",
-            published_at=now - timedelta(days=i),
-            source="CafeF",
-            url=f"https://cafef.vn/tin-{i}.chn",
-            sentiment_label="NEUTRAL" if i % 2 == 0 else "POSITIVE",
-            sentiment_score=None if i == 1 else 0.5,
-            model_confidence=None if i == 1 else 0.8,
-        )
-        for i in range(1, 8)  # 7 articles
-    )
     view = SentimentView(
         available=True,
         label="Positive",
@@ -497,27 +470,24 @@ def test_format_sentiment_caps_at_5_articles_and_handles_none_metrics() -> None:
         top_events=("OTHER",),
         latest_at=now,
         backends=("lexicon",),
-        articles=articles,
     )
     text = format_sentiment("TCB", view)
-    assert "1. TÍCH CỰC [(Tin 1) Tiêu đề bài viết số 1](https://cafef.vn/tin-1.chn)" in text
-    assert "5. TÍCH CỰC [(Tin 5) Tiêu đề bài viết số 5](https://cafef.vn/tin-5.chn)" in text
-    assert "6." not in text
-    assert "7." not in text
-    # Article 1 has None score and confidence; verify it doesn't crash or print None
-    assert "Score: None" not in text
-    assert "Confidence: None" not in text
+    assert "🟢 TÍCH CỰC" in text
+    assert "• KHÁC" in text
+    assert "⚠️" not in text
+    assert "độ phủ dữ liệu thấp" not in text
+    assert "Sentiment là yếu tố tham khảo, không tự tạo tín hiệu giao dịch." in text
 
 
-def test_callback_sent_renders_article_level_sentiment() -> None:
+def test_callback_sent_renders_aggregate_sentiment() -> None:
     from telegram_bot.app import render_callback
 
     runtime = service(news=PositiveNews())
     commands = TelegramCommandService(runtime)
     text = render_callback(commands, "sent", "FPT")
-    assert "📰 FPT — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)" in text
-    assert "Nhãn tổng hợp: Positive" in text
-    assert "Sentiment là context; tự nó không tạo tín hiệu MUA." in text
+    assert "🧠 FPT — SENTIMENT" in text
+    assert "🟢 TÍCH CỰC" in text
+    assert "/tin FPT để xem bài gốc." in text
 
 
 def test_soi_compact_sentiment_various_states() -> None:

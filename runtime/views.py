@@ -185,6 +185,7 @@ class NewsItemView:
     source: str
     event_type: str
     sentiment_label: str | None
+    url: str = ""
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,7 +16,6 @@ from runtime.views import (
     NewsItemView,
     ScanRowView,
     SectorView,
-    SentimentArticleView,
     SentimentView,
     StockAnalysisView,
     TechnicalView,
@@ -28,13 +27,6 @@ DISCLAIMER = "Tín hiệu định lượng, không phải khuyến nghị đầu
 
 DIVIDER = "────────────────────────"
 HEADER_DIVIDER = "━━━━━━━━━━━━━━━━━━━━━━━━"
-
-
-def escape_markdown_link(title: str, url: str) -> tuple[str, str]:
-    """Escape title and URL so [title](url) is valid markdown and cannot break Telegram."""
-    safe_title = title.replace("[", "(").replace("]", ")").replace("\n", " ").strip()
-    safe_url = url.strip().replace(" ", "%20").replace("(", "%28").replace(")", "%29")
-    return safe_title, safe_url
 
 
 FRESHNESS_LABELS = {
@@ -297,68 +289,127 @@ def format_fundamental(view: StockAnalysisView) -> str:
     )
 
 
+SENTIMENT_TARGET_ARTICLE_COUNT = 5
+SENTIMENT_WINDOW_DAYS = 30
+
+
+def _sentiment_bucket(score: float) -> str:
+    if score <= -0.5:
+        return "🔴 TIÊU CỰC"
+    if score <= -0.15:
+        return "🟡 TRUNG LẬP, HƠI NGHIÊNG TIÊU CỰC"
+    if score < 0.15:
+        return "🟡 TRUNG LẬP"
+    if score < 0.5:
+        return "🟡 TRUNG LẬP, HƠI NGHIÊNG TÍCH CỰC"
+    return "🟢 TÍCH CỰC"
+
+
+def _confidence_bucket(confidence: float | None) -> str:
+    if confidence is None:
+        return UNAVAILABLE
+    if confidence >= 0.7:
+        return "CAO"
+    if confidence >= 0.4:
+        return "TRUNG BÌNH"
+    return "THẤP"
+
+
 def format_sentiment(symbol: str, view: SentimentView | None) -> str:
     if view is None or not view.available:
         note = (view.note if view is not None and view.note else "News sentiment unavailable.")
-        return f"📰 {symbol} — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)\n{note}"
+        return f"🧠 {symbol} — SENTIMENT\n{note}"
+
+    article_count = view.article_count or 0
     lines = [
-        f"📰 {symbol} — SENTIMENT (5 TIN MỚI NHẤT / 30 NGÀY)\n{HEADER_DIVIDER}",
-        f"Nhãn tổng hợp: {view.label}",
-        f"Score: {view.score:+.2f} (thang -1..+1, có giảm trọng số theo thời gian)",
-        f"Model confidence: {number(view.model_confidence)} (độ tin cậy của bộ phân loại, "
-        "không phải xác suất giá tăng)",
-        f"Số bài: {view.article_count}",
-        f"Positive/Neutral/Negative: {view.positive_count}/{view.neutral_count}/{view.negative_count}",
-        f"Sự kiện chính: {', '.join(view.top_events) or UNAVAILABLE}",
-        f"Tin mới nhất: {_time(view.latest_at)}",
-        f"Model backend: {', '.join(view.backends) or UNAVAILABLE}",
-    ]
-    if view.articles:
-        lines.append("")
-        lines.append(f"{DIVIDER}\nChi tiết bài viết:")
-        label_map = {
-            "POSITIVE": "TÍCH CỰC",
-            "positive": "TÍCH CỰC",
-            "NEGATIVE": "TIÊU CỰC",
-            "negative": "TIÊU CỰC",
-            "NEUTRAL": "TRUNG LẬP",
-            "neutral": "TRUNG LẬP",
-        }
-        for index, article in enumerate(view.articles[:5], start=1):
-            raw_label = article.sentiment_label or "TRUNG LẬP"
-            label_vn = label_map.get(raw_label, raw_label.upper())
-            safe_title, safe_url = escape_markdown_link(article.title, article.url)
-            lines.append(f"{index}. {label_vn} [{safe_title}]({safe_url})")
-            meta_parts = [
-                f"Thời gian: {_time(article.published_at)}",
-                f"Nguồn: {article.source or UNAVAILABLE}",
-            ]
-            lines.append(f"   {' | '.join(meta_parts)}")
-            metric_parts = []
-            if article.sentiment_score is not None:
-                metric_parts.append(f"Score: {article.sentiment_score:+.2f}")
-            if article.model_confidence is not None:
-                metric_parts.append(f"Confidence: {number(article.model_confidence)}")
-            if metric_parts:
-                lines.append(f"   {' | '.join(metric_parts)}")
-    lines.extend([
+        f"🧠 {symbol} — SENTIMENT\n{HEADER_DIVIDER}",
         "",
-        DIVIDER,
-        "💡 Sentiment là context; tự nó không tạo tín hiệu MUA.",
-    ])
+        _sentiment_bucket(view.score),
+        f"Score: {view.score:+.2f}",
+        f"Độ tin cậy: {_confidence_bucket(view.model_confidence)}",
+    ]
+
+    lines.append("")
+    lines.append("📊 CẤU TRÚC TIN")
+    lines.append(f"Tích cực: {view.positive_count if view.positive_count is not None else 0}")
+    lines.append(f"Trung lập: {view.neutral_count if view.neutral_count is not None else 0}")
+    lines.append(f"Tiêu cực: {view.negative_count if view.negative_count is not None else 0}")
+
+    if view.top_events:
+        lines.append("")
+        lines.append("🧭 CHỦ ĐỀ")
+        for event in view.top_events:
+            lines.append(f"• {_event_label(event)}")
+
+    if article_count < SENTIMENT_TARGET_ARTICLE_COUNT:
+        lines.append("")
+        lines.append(
+            f"⚠️ Chỉ tìm được {article_count}/{SENTIMENT_TARGET_ARTICLE_COUNT} tin "
+            f"trong {SENTIMENT_WINDOW_DAYS} ngày"
+        )
+        lines.append("→ độ phủ dữ liệu thấp.")
+
+    lines.append("")
+    lines.append("💡 ĐÁNH GIÁ")
+    if article_count < SENTIMENT_TARGET_ARTICLE_COUNT or _confidence_bucket(view.model_confidence) == "THẤP":
+        lines.append("Sentiment hiện chưa đủ mạnh để tự tạo tín hiệu giao dịch.")
+    else:
+        lines.append("Sentiment là yếu tố tham khảo, không tự tạo tín hiệu giao dịch.")
+
+    lines.append("")
+    lines.append(f"📰 /tin {symbol} để xem bài gốc.")
     return "\n".join(lines)
+
+
+EVENT_LABEL_MAP = {
+    "LEGAL": "PHÁP LÝ",
+    "EARNINGS": "KQKD",
+    "MA": "M&A",
+    "CAPITAL": "TĂNG VỐN",
+    "MACRO": "VĨ MÔ",
+    "DIVIDEND": "CỔ TỨC",
+    "CONTRACT": "HỢP ĐỒNG",
+    "MANAGEMENT": "NHÂN SỰ",
+    "OTHER": "KHÁC",
+}
+
+SOURCE_LABEL_MAP = {
+    "cafef_rss": "CafeF",
+    "cafef_ticker": "CafeF",
+}
+
+SENTIMENT_LABEL_MAP_SHORT = {
+    "POSITIVE": "Tích cực",
+    "positive": "Tích cực",
+    "NEGATIVE": "Tiêu cực",
+    "negative": "Tiêu cực",
+    "NEUTRAL": "Trung lập",
+    "neutral": "Trung lập",
+}
+
+
+def _event_label(event_type: str) -> str:
+    return EVENT_LABEL_MAP.get(event_type, event_type)
+
+
+def _source_label(source: str) -> str:
+    return SOURCE_LABEL_MAP.get(source, source)
 
 
 def format_news(symbol: str, items: Sequence[NewsItemView]) -> str:
     if not items:
         return f"Không có tin gần đây cho {symbol}."
     lines = [f"📰 TIN MỚI NHẤT — {symbol}\n{HEADER_DIVIDER}"]
-    for item in items:
-        lines.append(
-            f"• {_time(item.published_at)} | {item.event_type} | "
-            f"{item.sentiment_label or 'unavailable'} | {item.source}\n"
-            f"  📌 {item.title}"
-        )
+    for index, item in enumerate(items, start=1):
+        sentiment_vn = SENTIMENT_LABEL_MAP_SHORT.get(item.sentiment_label or "", "Chưa có")
+        entry = [
+            f"{index}. {_time(item.published_at)} | {_event_label(item.event_type)}",
+            f"   {item.title}",
+            f"   Nguồn: {_source_label(item.source)} | Sentiment: {sentiment_vn}",
+        ]
+        if item.url:
+            entry.append(f"   🔗 Đọc bài: {item.url}")
+        lines.append("\n".join(entry))
     return "\n\n".join(lines)
 
 

@@ -281,7 +281,7 @@ def test_latest_news_does_not_enqueue_when_articles_exist() -> None:
     fake_article = SimpleNamespace(
         published_at=datetime(2026, 9, 20, tzinfo=timezone.utc),
         title="FPT tăng trưởng", source="cafef_rss", event_type="EARNINGS",
-        sentiment=None,
+        sentiment=None, url="https://cafef.vn/fpt-tang-truong.chn",
     )
 
     class News(EmptyNews):

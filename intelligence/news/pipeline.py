@@ -35,7 +35,11 @@ COMPANY_PREFIXES = (
 
 EVENTS = (
     ("LEGAL", .95, ("khởi tố", "gian lận", "xử phạt", "đình chỉ", "thao túng")),
-    ("EARNINGS", .85, ("lợi nhuận", "doanh thu", "bctc", "kết quả kinh doanh", "lỗ ròng")),
+    ("EARNINGS", .85, (
+        "lợi nhuận", "doanh thu", "bctc", "kết quả kinh doanh", "lỗ ròng",
+        "lãi ròng", "lnst", "lợi nhuận sau thuế", "lãi sau thuế",
+        "kết quả quý", "kết quả tháng", "doanh thu quý", "lợi nhuận quý",
+    )),
     ("MA", .80, ("m&a", "thâu tóm", "sáp nhập", "thoái vốn")),
     ("CAPITAL", .75, ("phát hành", "esop", "tăng vốn", "trái phiếu")),
     ("MACRO", .75, ("lãi suất", "lạm phát", "gdp", "tỷ giá", "ngân hàng nhà nước")),

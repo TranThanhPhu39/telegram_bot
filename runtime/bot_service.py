@@ -500,6 +500,7 @@ class RuntimeBotDataService:
                 published_at=item.published_at, title=item.title, source=item.source,
                 event_type=item.event_type,
                 sentiment_label=item.sentiment.label.value if item.sentiment else None,
+                url=item.url,
             )
             for item in items
         ))
