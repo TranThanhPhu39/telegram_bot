@@ -445,12 +445,63 @@ def test_sentiment_overview_end_to_end(tmp_path) -> None:
     runtime = service(news=news_svc)
     text = runtime.sentiment_overview("FPT")
     assert "🧠 FPT — SENTIMENT" in text
-    assert "🟢 TÍCH CỰC" in text
+    # Only 1 article in a 30-day/5-article target window -- low coverage, so the
+    # strong 🟢 bucket is softened to 🟡 with a low-confidence qualifier.
+    assert "🟡 TÍCH CỰC (độ tin cậy thấp)" in text
+    assert "🟢 TÍCH CỰC" not in text
     assert "/tin FPT để xem bài gốc." in text
-    # Only 1 article in a 30-day/5-article target window -- coverage warning expected.
     assert "⚠️ Chỉ tìm được 1/5 tin trong 30 ngày" in text
     assert "https://s.cafef.vn" not in text
     assert "FPT ký hợp đồng lớn" not in text
+
+
+def test_format_sentiment_softens_strong_bucket_on_low_coverage() -> None:
+    """A single very negative article should not render as a bold 🔴 verdict."""
+    from runtime.views import SentimentView
+    from telegram_bot.formatters import format_sentiment
+
+    now = datetime(2026, 9, 21, 10, 50, tzinfo=timezone.utc)
+    view = SentimentView(
+        available=True,
+        label="Negative",
+        score=-0.72,
+        model_confidence=0.63,
+        article_count=1,
+        positive_count=0,
+        neutral_count=0,
+        negative_count=1,
+        top_events=("EARNINGS",),
+        latest_at=now,
+        backends=("phobert",),
+    )
+    text = format_sentiment("XYZ", view)
+    assert "🟡 TIÊU CỰC (độ tin cậy thấp)" in text
+    assert "🔴 TIÊU CỰC" not in text
+    assert "chưa đủ mạnh để tự tạo tín hiệu giao dịch" in text
+
+
+def test_format_sentiment_keeps_strong_bucket_when_coverage_and_confidence_high() -> None:
+    """With enough articles and high confidence, the bold bucket stays as-is."""
+    from runtime.views import SentimentView
+    from telegram_bot.formatters import format_sentiment
+
+    now = datetime(2026, 9, 21, 10, 50, tzinfo=timezone.utc)
+    view = SentimentView(
+        available=True,
+        label="Negative",
+        score=-0.6,
+        model_confidence=0.85,
+        article_count=6,
+        positive_count=0,
+        neutral_count=1,
+        negative_count=5,
+        top_events=("EARNINGS",),
+        latest_at=now,
+        backends=("phobert",),
+    )
+    text = format_sentiment("XYZ", view)
+    assert "🔴 TIÊU CỰC" in text
+    assert "độ tin cậy thấp" not in text
 
 
 def test_format_sentiment_no_coverage_warning_when_target_met() -> None:

@@ -21,6 +21,7 @@ import sqlite3
 from asmf_data.store import latest_bank_financial_reports, latest_financial_reports
 from fundamentals.csv_source import load_fundamental_csv
 from fundamentals.models import FundamentalSnapshot
+from fundamentals.valuation import ValuationSnapshot, compute_valuation, load_valuation_csv
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +36,7 @@ class FundamentalFacts:
     eps: float | None = None
     pe: float | None = None
     pb: float | None = None
+    bvps: float | None = None
     roe_percent: float | None = None
     revenue_growth_percent: float | None = None
     profit_growth_percent: float | None = None
@@ -46,7 +48,7 @@ class FundamentalFacts:
     @property
     def missing_fields(self) -> tuple[str, ...]:
         names = {
-            "EPS": self.eps, "P/E": self.pe, "P/B": self.pb,
+            "EPS": self.eps, "P/E": self.pe, "P/B": self.pb, "BVPS": self.bvps,
             "ROE": self.roe_percent,
             "Tăng trưởng doanh thu": self.revenue_growth_percent,
             "Tăng trưởng LNST": self.profit_growth_percent,
@@ -66,10 +68,20 @@ def load_fundamental_facts(
     as_of: date,
     *,
     csv_path: str | Path | None = None,
+    valuation_csv_path: str | Path | None = None,
 ) -> FundamentalFacts | None:
-    """Return merged facts, or ``None`` when no source covers the symbol."""
+    """Return merged facts, or ``None`` when no source covers the symbol.
+
+    ``csv_path`` is the legacy V1 snapshot that already carries precomputed
+    EPS/P/E/P/B with mandatory provenance; when present it takes priority as
+    an explicit, human-provided override. ``valuation_csv_path`` is the raw
+    price + shares-outstanding source described in the Issue 2.5 valuation
+    snapshot architecture; EPS(TTM)/P/E/P/B/BVPS are *derived* from it plus
+    ``financial_reports`` and only fill in gaps the legacy snapshot leaves.
+    """
     symbol = symbol.strip().upper()
-    stored = _from_sqlite(connection, symbol, as_of)
+    valuation = _from_valuation_csv(valuation_csv_path, symbol, as_of)
+    stored = _from_sqlite(connection, symbol, as_of, valuation)
     snapshot = _from_csv(csv_path, symbol, as_of)
     if stored is None and snapshot is None:
         return None
@@ -91,9 +103,10 @@ def load_fundamental_facts(
         period=stored.period,
         as_of=max(filter(None, (stored.as_of, snapshot.as_of_date.isoformat()))),
         source=" + ".join(sources),
-        eps=snapshot.eps,
-        pe=snapshot.pe,
-        pb=snapshot.pb,
+        eps=snapshot.eps if snapshot.eps is not None else stored.eps,
+        pe=snapshot.pe if snapshot.pe is not None else stored.pe,
+        pb=snapshot.pb if snapshot.pb is not None else stored.pb,
+        bvps=stored.bvps,
         roe_percent=stored.roe_percent if stored.roe_percent is not None else snapshot.roe_percent,
         revenue_growth_percent=(
             stored.revenue_growth_percent
@@ -113,18 +126,25 @@ def load_fundamental_facts(
 
 
 def _from_sqlite(
-    connection: sqlite3.Connection, symbol: str, as_of: date
+    connection: sqlite3.Connection,
+    symbol: str,
+    as_of: date,
+    valuation: ValuationSnapshot | None = None,
 ) -> FundamentalFacts | None:
     bank_rows = latest_bank_financial_reports(connection, symbol, as_of)
     if bank_rows:
+        # Bank valuation (P/E, P/B, BVPS) is out of scope here -- see Issue 2.4;
+        # bank statements need their own canonical storage before this is safe.
         return _bank_facts(symbol, bank_rows)
     rows = latest_financial_reports(connection, symbol, as_of)
     if not rows:
         return None
-    return _corporate_facts(symbol, rows)
+    return _corporate_facts(symbol, rows, valuation)
 
 
-def _corporate_facts(symbol: str, rows) -> FundamentalFacts:
+def _corporate_facts(
+    symbol: str, rows, valuation: ValuationSnapshot | None = None
+) -> FundamentalFacts:
     latest = rows[0]
     equity = latest["equity"]
     roe = revenue_growth = profit_growth = None
@@ -140,12 +160,31 @@ def _corporate_facts(symbol: str, rows) -> FundamentalFacts:
             revenue_growth = (revenue_now / revenue_before - 1.0) * 100.0
         if profit_before > 0:
             profit_growth = (profit_now / profit_before - 1.0) * 100.0
+
+    # EPS(TTM) only needs the trailing 4 quarters, not the 8 the YoY growth
+    # figures above need -- so compute it separately rather than gating it on
+    # `len(rows) >= 8`.
+    ttm_net_profit = sum(row["net_profit"] for row in rows[:4]) if len(rows) >= 4 else None
+    metrics = compute_valuation(
+        price=valuation.price if valuation is not None else None,
+        shares_outstanding=valuation.shares_outstanding if valuation is not None else None,
+        ttm_net_profit=ttm_net_profit,
+        equity=equity,
+    )
+    source = latest["source"]
+    if valuation is not None and (metrics.eps_ttm is not None or metrics.bvps is not None):
+        source = f"{source} + {valuation.source}"
+
     return FundamentalFacts(
         symbol=symbol,
         kind="CORPORATE",
         period=latest["report_period"],
         as_of=latest["public_date"],
-        source=latest["source"],
+        source=source,
+        eps=metrics.eps_ttm,
+        pe=metrics.pe,
+        pb=metrics.pb,
+        bvps=metrics.bvps,
         roe_percent=roe,
         revenue_growth_percent=revenue_growth,
         profit_growth_percent=profit_growth,
@@ -214,6 +253,27 @@ def _from_csv(
         return None
     try:
         snapshots = load_fundamental_csv(path)
+    except (OSError, ValueError):
+        return None
+    usable = [
+        item for item in snapshots
+        if item.symbol == symbol and item.as_of_date <= as_of
+    ]
+    if not usable:
+        return None
+    return max(usable, key=lambda item: item.as_of_date)
+
+
+def _from_valuation_csv(
+    valuation_csv_path: str | Path | None, symbol: str, as_of: date
+) -> ValuationSnapshot | None:
+    if not valuation_csv_path:
+        return None
+    path = Path(valuation_csv_path)
+    if not path.exists():
+        return None
+    try:
+        snapshots = load_valuation_csv(path)
     except (OSError, ValueError):
         return None
     usable = [

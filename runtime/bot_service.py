@@ -139,6 +139,7 @@ class RuntimeBotDataService:
         news_service: NewsService | None = None,
         now: Callable[[], float] = time.time,
         fundamentals_csv_path: str | None = None,
+        fundamentals_valuation_csv_path: str | None = None,
         sector_history_requester: Callable[[str], bool] | None = None,
         index_state: object | None = None,
         news_refresh_requester: Callable[[str], bool] | None = None,
@@ -150,6 +151,7 @@ class RuntimeBotDataService:
         self.news_service = news_service
         self.now = now
         self.fundamentals_csv_path = fundamentals_csv_path
+        self.fundamentals_valuation_csv_path = fundamentals_valuation_csv_path
         self.sector_history_requester = sector_history_requester
         self.index_state = index_state
         self.news_refresh_requester = news_refresh_requester
@@ -781,7 +783,11 @@ class RuntimeBotDataService:
         as_of = datetime.fromtimestamp(timestamp, VIETNAM_TIMEZONE).date()
         try:
             return load_fundamental_facts(
-                self.connection, symbol, as_of, csv_path=self.fundamentals_csv_path
+                self.connection,
+                symbol,
+                as_of,
+                csv_path=self.fundamentals_csv_path,
+                valuation_csv_path=self.fundamentals_valuation_csv_path,
             )
         except (sqlite3.Error, OSError, ValueError):
             return None
@@ -820,7 +826,8 @@ class RuntimeBotDataService:
                 MetricView("Tăng trưởng doanh thu (TTM)", facts.revenue_growth_percent, "%"),
                 MetricView("Tăng trưởng LNST (TTM)", facts.profit_growth_percent, "%"),
                 MetricView("Debt/Equity", facts.debt_to_equity, ""),
-                MetricView("EPS", facts.eps, ""),
+                MetricView("EPS (TTM)", facts.eps, ""),
+                MetricView("BVPS", facts.bvps, ""),
             )
         return FundamentalView(
             status=self._fundamental_status(symbol, timestamp),
@@ -830,7 +837,10 @@ class RuntimeBotDataService:
             period=facts.period,
             kind=facts.kind,
             missing=facts.missing_fields,
-            note="P/E, P/B chỉ hiển thị khi có snapshot cung cấp; bot không tự tính fair value.",
+            note=(
+                "EPS/P/E/P/B/BVPS chỉ hiển thị khi có đủ giá + số lượng cổ phiếu lưu hành "
+                "(valuation snapshot); bot không tự tính fair value."
+            ),
         )
 
     def _data_quality(
@@ -992,6 +1002,9 @@ def build_runtime_service_from_env() -> RuntimeBotDataService:
     return RuntimeBotDataService(
         client, connection, instruments, news_service=news_service,
         fundamentals_csv_path=os.getenv("FUNDAMENTALS_CSV_PATH", "").strip() or None,
+        fundamentals_valuation_csv_path=(
+            os.getenv("FUNDAMENTALS_VALUATION_CSV_PATH", "").strip() or None
+        ),
         index_state=LatestIndexState(),
     )
 

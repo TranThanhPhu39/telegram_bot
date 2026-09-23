@@ -105,3 +105,73 @@ def test_missing_csv_path_is_not_an_error() -> None:
     upsert_financial_reports(conn, corporate_rows())
     facts = load_fundamental_facts(conn, "FPT", date(2027, 1, 1), csv_path="/nope.csv")
     assert facts is not None and facts.pe is None
+
+
+def test_valuation_snapshot_derives_eps_pe_pb_bvps_from_reports(tmp_path) -> None:
+    conn = connection()
+    upsert_financial_reports(conn, corporate_rows())
+    valuation_csv = tmp_path / "valuation.csv"
+    # corporate_rows() gives the latest 4 quarters net_profit = 100+500+600+700
+    # (index 4..7 -> 100.0 + index*20) => TTM net profit = 100+180+... see below.
+    valuation_csv.write_text(
+        "symbol,as_of_date,source,price,shares_outstanding\n"
+        "FPT,2026-12-30,vietcap-eod,50000,1000000\n",
+        encoding="utf-8",
+    )
+    facts = load_fundamental_facts(
+        conn, "FPT", date(2027, 1, 1), valuation_csv_path=valuation_csv
+    )
+    assert facts is not None
+    # rows[:4] are the 4 most recent quarters (index 4..7): net_profit values
+    # 100+80*4=180, 200, 220, 240 -> equity is a fixed 5_000.0 in corporate_rows().
+    assert facts.eps is not None
+    assert facts.bvps == 5_000.0 / 1_000_000.0
+    assert facts.pe is not None and facts.pe == 50_000.0 / facts.eps
+    assert facts.pb == 50_000.0 / facts.bvps
+    assert "vietcap-eod" in facts.source
+    assert "P/E" not in facts.missing_fields
+    assert "BVPS" not in facts.missing_fields
+
+
+def test_valuation_snapshot_never_fabricates_when_shares_missing(tmp_path) -> None:
+    conn = connection()
+    upsert_financial_reports(conn, corporate_rows())
+    valuation_csv = tmp_path / "valuation.csv"
+    valuation_csv.write_text(
+        "symbol,as_of_date,source,price,shares_outstanding\n"
+        "FPT,2026-12-30,vietcap-eod,50000,\n",
+        encoding="utf-8",
+    )
+    facts = load_fundamental_facts(
+        conn, "FPT", date(2027, 1, 1), valuation_csv_path=valuation_csv
+    )
+    assert facts is not None
+    assert facts.eps is None and facts.pe is None and facts.pb is None and facts.bvps is None
+
+
+def test_legacy_csv_snapshot_still_overrides_derived_valuation(tmp_path) -> None:
+    """An explicit, human-provided EPS/P/E/P/B (legacy V1 CSV) wins over a
+    value merely derived from price + shares outstanding."""
+    conn = connection()
+    upsert_financial_reports(conn, corporate_rows())
+    valuation_csv = tmp_path / "valuation.csv"
+    valuation_csv.write_text(
+        "symbol,as_of_date,source,price,shares_outstanding\n"
+        "FPT,2026-12-30,vietcap-eod,50000,1000000\n",
+        encoding="utf-8",
+    )
+    legacy_csv = tmp_path / "fundamentals.csv"
+    legacy_csv.write_text(
+        "symbol,as_of_date,source,eps,pe,pb,roe_percent,"
+        "revenue_growth_percent,profit_growth_percent\n"
+        "FPT,2026-12-30,Vietstock snapshot,5000,14.2,3.1,,,\n",
+        encoding="utf-8",
+    )
+    facts = load_fundamental_facts(
+        conn, "FPT", date(2027, 1, 1),
+        csv_path=legacy_csv, valuation_csv_path=valuation_csv,
+    )
+    assert facts is not None
+    assert facts.eps == 5000 and facts.pe == 14.2 and facts.pb == 3.1
+    # BVPS has no legacy-CSV equivalent to override -- it still comes through.
+    assert facts.bvps is not None

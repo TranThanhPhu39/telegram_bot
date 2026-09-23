@@ -293,16 +293,16 @@ SENTIMENT_TARGET_ARTICLE_COUNT = 5
 SENTIMENT_WINDOW_DAYS = 30
 
 
-def _sentiment_bucket(score: float) -> str:
+def _sentiment_bucket(score: float, *, low_confidence: bool = False) -> str:
     if score <= -0.5:
-        return "🔴 TIÊU CỰC"
+        return "🟡 TIÊU CỰC (độ tin cậy thấp)" if low_confidence else "🔴 TIÊU CỰC"
     if score <= -0.15:
         return "🟡 TRUNG LẬP, HƠI NGHIÊNG TIÊU CỰC"
     if score < 0.15:
         return "🟡 TRUNG LẬP"
     if score < 0.5:
         return "🟡 TRUNG LẬP, HƠI NGHIÊNG TÍCH CỰC"
-    return "🟢 TÍCH CỰC"
+    return "🟡 TÍCH CỰC (độ tin cậy thấp)" if low_confidence else "🟢 TÍCH CỰC"
 
 
 def _confidence_bucket(confidence: float | None) -> str:
@@ -321,12 +321,14 @@ def format_sentiment(symbol: str, view: SentimentView | None) -> str:
         return f"🧠 {symbol} — SENTIMENT\n{note}"
 
     article_count = view.article_count or 0
+    confidence_bucket = _confidence_bucket(view.model_confidence)
+    low_coverage = article_count < SENTIMENT_TARGET_ARTICLE_COUNT or confidence_bucket == "THẤP"
     lines = [
         f"🧠 {symbol} — SENTIMENT\n{HEADER_DIVIDER}",
         "",
-        _sentiment_bucket(view.score),
+        _sentiment_bucket(view.score, low_confidence=low_coverage),
         f"Score: {view.score:+.2f}",
-        f"Độ tin cậy: {_confidence_bucket(view.model_confidence)}",
+        f"Độ tin cậy: {confidence_bucket}",
     ]
 
     lines.append("")
@@ -351,7 +353,7 @@ def format_sentiment(symbol: str, view: SentimentView | None) -> str:
 
     lines.append("")
     lines.append("💡 ĐÁNH GIÁ")
-    if article_count < SENTIMENT_TARGET_ARTICLE_COUNT or _confidence_bucket(view.model_confidence) == "THẤP":
+    if low_coverage:
         lines.append("Sentiment hiện chưa đủ mạnh để tự tạo tín hiệu giao dịch.")
     else:
         lines.append("Sentiment là yếu tố tham khảo, không tự tạo tín hiệu giao dịch.")
