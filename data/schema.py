@@ -565,3 +565,12 @@ CREATE INDEX IF NOT EXISTS idx_scan_snapshots_strategy_scanned_at
 ON scan_snapshots(strategy, scanned_at DESC)
 """
 
+# Issue 3.4: total_universe was the full market count and screened_count was
+# already the *capped* watch-list size, so the UI had no honest number for
+# "how many symbols actually passed the prescreen filter" before the cap was
+# applied. This column stores that real intermediate count.
+SCAN_SNAPSHOTS_PRESCREEN_COUNT_COLUMN_SQL = """
+ALTER TABLE scan_snapshots ADD COLUMN prescreen_count INTEGER NOT NULL DEFAULT 0
+    CHECK (prescreen_count >= 0)
+"""
+

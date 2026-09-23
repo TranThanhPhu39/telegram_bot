@@ -83,6 +83,7 @@ def test_snapshot_save_and_load_roundtrip() -> None:
         scanned_at=1_700_000_000,
         total_universe=100,
         screened_count=2,
+        prescreen_count=7,
         rows=rows,
     )
     assert snapshot_id > 0
@@ -92,6 +93,7 @@ def test_snapshot_save_and_load_roundtrip() -> None:
     assert loaded.strategy == "CL1"
     assert loaded.as_of_date == "2026-09-21"
     assert loaded.total_universe == 100
+    assert loaded.prescreen_count == 7
     assert loaded.screened_count == 2
     assert len(loaded.rows) == 2
     assert loaded.rows[0].symbol == "FPT"
@@ -99,6 +101,23 @@ def test_snapshot_save_and_load_roundtrip() -> None:
 
     # Non-existent strategy returns None
     assert load_latest_scan_snapshot(conn, "UNKNOWN") is None
+
+
+def test_snapshot_prescreen_count_defaults_to_screened_count_for_old_callers() -> None:
+    """Callers that predate Issue 3.4 don't pass prescreen_count explicitly."""
+    conn = make_test_db()
+    save_scan_snapshot(
+        conn,
+        strategy="CL1",
+        as_of_date="2026-09-21",
+        scanned_at=1_700_000_000,
+        total_universe=100,
+        screened_count=3,
+        rows=[ScanRowView("FPT", "TĂNG", "+1.0% vs VNINDEX", "PASS", "PASS", "THEO DÕI")],
+    )
+    loaded = load_latest_scan_snapshot(conn, "CL1")
+    assert loaded is not None
+    assert loaded.prescreen_count == 3
 
 
 def test_snapshot_pruning_removes_old_records() -> None:
@@ -145,7 +164,10 @@ def test_run_scan_cycle_filters_liquidity_and_persists() -> None:
     assert "CL1" in results
     cl1_snap = results["CL1"]
     assert cl1_snap.total_universe == 4  # FPT, MWG, VNM, PENNY
-    # PENNY is filtered out by liquidity
+    # PENNY is filtered out by liquidity, so prescreen_count (pre-cap) < universe
+    # while screened_count/rows reflect the (here, uncapped) watch-list size.
+    assert cl1_snap.prescreen_count == 3  # FPT, MWG, VNM pass; PENNY fails liquidity
+    assert cl1_snap.screened_count == len(cl1_snap.rows)
     symbols = [r.symbol for r in cl1_snap.rows]
     assert "PENNY" not in symbols
     assert "FPT" in symbols
@@ -279,7 +301,8 @@ def test_scan_overview_reads_persisted_snapshot() -> None:
 
     text = service.scan_overview("CL1")
     assert "KẾT QUẢ QUÉT" in text
-    assert "Toàn thị trường: 2/1600 mã đạt lọc" in text
+    assert "Vũ trụ: 1,600" in text
+    assert "Hiển thị: Top 2" in text
     assert "1. FPT" in text
     assert "2. MWG" in text
     assert "THEO DÕI" in text

@@ -40,6 +40,7 @@ from data.schema import (
     SYMBOL_DATA_COVERAGE_V8_RENAME_SQL,
     SCAN_SNAPSHOTS_TABLE_SQL,
     SCAN_SNAPSHOTS_INDEX_SQL,
+    SCAN_SNAPSHOTS_PRESCREEN_COUNT_COLUMN_SQL,
 )
 
 SCHEMA_MIGRATIONS_TABLE_SQL = """
@@ -155,6 +156,11 @@ MIGRATIONS = (
             SCAN_SNAPSHOTS_INDEX_SQL,
         ),
     ),
+    Migration(
+        version=10,
+        name="scanner_prescreen_count",
+        statements=(SCAN_SNAPSHOTS_PRESCREEN_COUNT_COLUMN_SQL,),
+    ),
 )
 
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
@@ -194,7 +200,18 @@ def bootstrap_schema(connection: sqlite3.Connection) -> int:
             if not connection.in_transaction:
                 connection.execute("BEGIN")
             for statement in migration.statements:
-                connection.execute(statement)
+                try:
+                    connection.execute(statement)
+                except sqlite3.OperationalError as exc:
+                    # ALTER TABLE ... ADD COLUMN has no "IF NOT EXISTS" form in
+                    # SQLite, unlike CREATE TABLE/INDEX. A test or an operator
+                    # can legitimately replay a migration whose column already
+                    # exists (e.g. rewinding schema_migrations past several
+                    # versions without dropping every table those versions
+                    # touched); treat that specific, unambiguous error as
+                    # already-applied instead of failing the whole migration.
+                    if "duplicate column name" not in str(exc):
+                        raise
             connection.execute(
                 "INSERT INTO schema_migrations (version, name) VALUES (?, ?)",
                 (migration.version, migration.name),

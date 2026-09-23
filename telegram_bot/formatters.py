@@ -7,7 +7,7 @@ value is printed as an explicit unavailable marker.
 
 from __future__ import annotations
 
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Sequence
 
 from runtime.views import (
@@ -436,12 +436,48 @@ def format_sector(view: SectorView | None) -> str:
     return "\n".join(lines)
 
 
+_SCAN_TREND_GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
+    ("🟢", "ƯU TIÊN — xu hướng tăng", frozenset({"TĂNG", "TĂNG NGẮN HẠN"})),
+    ("🟡", "TRUNG TÍNH / CHƯA RÕ", frozenset({"TRUNG TÍNH", "CHƯA ĐỦ DỮ LIỆU", "KHÔNG CÓ DỮ LIỆU"})),
+    ("🔴", "YẾU — xu hướng giảm", frozenset({"GIẢM"})),
+)
+_SCAN_NEUTRAL_GROUP_INDEX = 1  # unrecognized trend labels fall here, never dropped
+
+
+def _scan_trend_group_index(trend: str) -> int:
+    for idx, (_icon, _label, members) in enumerate(_SCAN_TREND_GROUPS):
+        if trend in members:
+            return idx
+    return _SCAN_NEUTRAL_GROUP_INDEX
+
+
+def _scan_vn_case(value: str) -> str:
+    """Render an ALL-CAPS label ('TĂNG', 'N/A') in sentence case for a compact row."""
+    return value if len(value) <= 3 else value.title()
+
+
+def _scan_rs(value: str) -> str:
+    if not value or value == "N/A":
+        return "RS N/A"
+    return "RS " + value.replace(" vs VNINDEX", "")
+
+
+def _scan_timestamp(scanned_at: int | None) -> str | None:
+    if scanned_at is None:
+        return None
+    try:
+        return datetime.fromtimestamp(scanned_at, VIETNAM_TIMEZONE).strftime("%H:%M %d/%m")
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def format_scan(
     rows: Sequence[ScanRowView],
     *,
     as_of: str | None = None,
     scanned_at: int | None = None,
     total_universe: int | None = None,
+    prescreen_count: int | None = None,
     strategy: str = "CL1",
     stale: bool = False,
 ) -> str:
@@ -449,27 +485,52 @@ def format_scan(
         return "Chưa có mã đạt bộ lọc."
     header = f"🔎 KẾT QUẢ QUÉT — CHIẾN LƯỢC {strategy}" if strategy != "CL1" else "🔎 KẾT QUẢ QUÉT"
     lines = [f"{header}\n{HEADER_DIVIDER}"]
-    if total_universe is not None or as_of is not None:
-        info = []
-        if total_universe is not None:
-            info.append(f"Toàn thị trường: {len(rows)}/{total_universe} mã đạt lọc")
-        if as_of is not None:
-            info.append(f"Ngày: {as_of}")
-        lines.append("📊 " + " | ".join(info))
-        lines.append(DIVIDER)
+
+    # Issue 3.4: show the real funnel instead of one ambiguous "X/Y mã đạt lọc"
+    # number, so a capped Top-20 display is never mistaken for "only 20 pass".
+    coverage = []
+    if total_universe is not None:
+        coverage.append(f"Vũ trụ: {total_universe:,}")
+    if prescreen_count is not None:
+        coverage.append(f"Qua prescreen: {prescreen_count:,}")
+    coverage.append(f"Hiển thị: Top {len(rows)}")
+    lines.append("📊 " + " | ".join(coverage))
+
+    # Issue 3.5: a single wall-clock timestamp instead of/alongside the date.
+    stamp = _scan_timestamp(scanned_at)
+    when = " | ".join(part for part in (
+        f"🕒 {stamp}" if stamp else None,
+        f"Ngày: {as_of}" if as_of else None,
+    ) if part)
+    if when:
+        lines.append(when)
+    lines.append(DIVIDER)
+
     if stale:
         lines.append("⚠️ Dữ liệu quét đã cũ (worker chưa cập nhật gần đây) — kết quả có thể không còn mới.")
-    for index, row in enumerate(rows, start=1):
-        lines.append(
-            f"{index}. {row.symbol}\n"
-            f"   • Xu hướng:   {row.trend}\n"
-            f"   • RS:         {row.relative_strength}\n"
-            f"   • Thanh khoản: {row.liquidity}\n"
-            f"   • Cơ bản:     {row.fundamental}\n"
-            f"   • Chiến lược: {row.strategy_state}"
-        )
+
+    grouped: list[list[ScanRowView]] = [[] for _ in _SCAN_TREND_GROUPS]
+    for row in rows:
+        grouped[_scan_trend_group_index(row.trend)].append(row)
+
+    counter = 0
+    for group_index, (icon, label, _members) in enumerate(_SCAN_TREND_GROUPS):
+        bucket = grouped[group_index]
+        if not bucket:
+            continue
+        lines.append(f"{icon} {label} ({len(bucket)})")
+        for row in bucket:
+            counter += 1
+            lines.append(
+                f"{counter}. {row.symbol} | {_scan_vn_case(row.trend)} | "
+                f"{_scan_rs(row.relative_strength)} | CB {row.fundamental} | "
+                f"{_scan_vn_case(row.strategy_state)}"
+            )
+
     lines.append(DIVIDER)
-    lines.append("⚠️ Lọc theo thanh khoản + kỹ thuật; không phải danh sách khuyến nghị mua.")
+    lines.append(
+        "⚠️ Đã lọc theo thanh khoản + kỹ thuật; không phải danh sách khuyến nghị mua/bán."
+    )
     return "\n".join(lines)
 
 

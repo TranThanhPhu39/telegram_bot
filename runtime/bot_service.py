@@ -543,10 +543,29 @@ class RuntimeBotDataService:
                 as_of=snapshot.as_of_date,
                 scanned_at=snapshot.scanned_at,
                 total_universe=snapshot.total_universe,
+                prescreen_count=snapshot.prescreen_count,
                 strategy=strategy_upper,
                 stale=is_stale,
             )
-        symbols = self.scan_results()
+        # No snapshot yet (worker hasn't run) — compute the prescreen ourselves
+        # so the honest Universe / Qua prescreen / Hiển thị counts (Issue 3.4)
+        # are available here too, not just after the background worker runs.
+        instruments = self.instruments
+        if not instruments:
+            from runtime.market_universe import load_market_universe
+            market_syms = load_market_universe(self.connection)
+            instruments = tuple(
+                ScannerInstrument(s.symbol, s.exchange or "HOSE", "STOCK")
+                for s in market_syms
+            )
+        histories = {item.symbol: self._history(item.symbol)[0] for item in instruments}
+        prescreen_config = ScannerConfig(20, 0.0, 0.0, min(20, len(instruments)) or 1)
+        screened = daily_prescreen(
+            instruments, histories, prescreen_config, as_of_timestamp=int(self.now()) + 1
+        )
+        symbols = realtime_watch_universe(screened, prescreen_config)
+        total_universe = len(instruments)
+        prescreen_count = len(screened)
         if not symbols:
             return "Chưa có mã đạt bộ lọc."
         benchmark = self._load("VNINDEX")
@@ -570,22 +589,29 @@ class RuntimeBotDataService:
                         strategy_view = None
                 status = self._fundamental_status(symbol, bars[-1].timestamp)
             rows.append(build_scan_row(symbol, technical, strategy_view, True, status))
+        from datetime import datetime, timezone
+        cur_ts = int(self.now())
         try:
-            from datetime import datetime, timezone
-            cur_ts = int(self.now())
             as_of_d = datetime.fromtimestamp(cur_ts, timezone.utc).strftime("%Y-%m-%d")
             save_scan_snapshot(
                 self.connection,
                 strategy=strategy_upper,
                 as_of_date=as_of_d,
                 scanned_at=cur_ts,
-                total_universe=len(symbols),
+                total_universe=total_universe,
+                prescreen_count=prescreen_count,
                 screened_count=len(rows),
                 rows=rows,
             )
         except Exception:
             pass
-        return format_scan(tuple(rows), strategy=strategy_upper)
+        return format_scan(
+            tuple(rows),
+            scanned_at=cur_ts,
+            total_universe=total_universe,
+            prescreen_count=prescreen_count,
+            strategy=strategy_upper,
+        )
 
     def sector_overview(self, name: str) -> str:
         return format_sector(self.sector_view(name))

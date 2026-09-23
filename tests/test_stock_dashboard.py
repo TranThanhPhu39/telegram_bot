@@ -262,9 +262,10 @@ def test_scan_explains_why_each_symbol_is_listed() -> None:
     text = runtime.scan_overview()
     assert "KẾT QUẢ QUÉT" in text
     assert "1. FPT" in text
-    assert "Xu hướng:" in text and "RS:" in text
-    assert "Thanh khoản: PASS" in text
-    assert "Chiến lược:" in text
+    assert "RS" in text
+    assert "CB " in text
+    assert "Vũ trụ:" in text and "Hiển thị: Top" in text
+    assert "🕒" in text
 
 
 def test_scan_results_tuple_contract_is_preserved() -> None:

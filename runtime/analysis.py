@@ -40,7 +40,10 @@ VIETNAM_TIMEZONE = timezone(timedelta(hours=7))
 
 STATE_LABELS = {
     StrategyAction.BUY: "MUA",
-    StrategyAction.SELL: "BÁN/THOÁT",
+    # Issue 3.6: "BÁN" read as an instruction to sell even for users who
+    # never held the symbol. This state only means the setup no longer
+    # qualifies, so it's phrased as an exit/avoid condition, not an order.
+    StrategyAction.SELL: "THOÁT NẾU ĐANG GIỮ / TRÁNH MUA MỚI",
     StrategyAction.WATCH: "THEO DÕI",
     StrategyAction.BLOCKED: "CHƯA ĐỦ ĐIỀU KIỆN",
 }

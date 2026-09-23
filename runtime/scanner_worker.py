@@ -42,6 +42,7 @@ class ScanSnapshot:
     as_of_date: str
     scanned_at: int
     total_universe: int
+    prescreen_count: int
     screened_count: int
     rows: tuple[ScanRowView, ...]
 
@@ -64,8 +65,17 @@ def save_scan_snapshot(
     total_universe: int,
     screened_count: int,
     rows: Sequence[ScanRowView],
+    prescreen_count: int | None = None,
 ) -> int:
-    """Serialize and store a scan snapshot in SQLite, pruning snapshots older than 7 days."""
+    """Serialize and store a scan snapshot in SQLite, pruning snapshots older than 7 days.
+
+    ``prescreen_count`` is how many symbols passed the liquidity/technical
+    prescreen *before* the watch-list cap was applied (Issue 3.4); it is
+    optional so existing callers that only know the capped count keep working
+    (it then falls back to ``screened_count``).
+    """
+    if prescreen_count is None:
+        prescreen_count = screened_count
     payload = [
         {
             "symbol": r.symbol,
@@ -82,8 +92,9 @@ def save_scan_snapshot(
         cursor = connection.execute(
             """
             INSERT INTO scan_snapshots (
-                strategy, as_of_date, scanned_at, total_universe, screened_count, payload_json
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                strategy, as_of_date, scanned_at, total_universe, screened_count,
+                prescreen_count, payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 strategy.upper(),
@@ -91,6 +102,7 @@ def save_scan_snapshot(
                 int(scanned_at),
                 int(total_universe),
                 int(screened_count),
+                int(prescreen_count),
                 payload_json,
             ),
         )
@@ -108,7 +120,8 @@ def load_latest_scan_snapshot(
     """Retrieve the most recent scan snapshot for a given strategy."""
     row = connection.execute(
         """
-        SELECT id, strategy, as_of_date, scanned_at, total_universe, screened_count, payload_json
+        SELECT id, strategy, as_of_date, scanned_at, total_universe, screened_count,
+               prescreen_count, payload_json
         FROM scan_snapshots
         WHERE strategy = ?
         ORDER BY scanned_at DESC
@@ -139,6 +152,7 @@ def load_latest_scan_snapshot(
         as_of_date=row["as_of_date"],
         scanned_at=row["scanned_at"],
         total_universe=row["total_universe"],
+        prescreen_count=row["prescreen_count"],
         screened_count=row["screened_count"],
         rows=rows,
     )
@@ -264,6 +278,7 @@ def run_scan_cycle(
             as_of_date=as_of_date,
             scanned_at=current_timestamp,
             total_universe=len(market_symbols),
+            prescreen_count=len(screened),
             screened_count=len(ranked_symbols),
             rows=rows,
         )
@@ -273,6 +288,7 @@ def run_scan_cycle(
             as_of_date=as_of_date,
             scanned_at=current_timestamp,
             total_universe=len(market_symbols),
+            prescreen_count=len(screened),
             screened_count=len(ranked_symbols),
             rows=tuple(rows),
         )
