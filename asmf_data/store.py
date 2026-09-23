@@ -75,6 +75,7 @@ def upsert_bank_financial_reports(connection: sqlite3.Connection, rows: Iterable
 def latest_financial_reports(connection: sqlite3.Connection, symbol: str, as_of: date) -> tuple[sqlite3.Row, ...]:
     return tuple(connection.execute(
         "SELECT * FROM financial_reports WHERE symbol=? AND consolidated=1 AND public_date<=? "
+        "AND (source NOT LIKE 'yfinance/%' OR source LIKE 'yfinance/%/quarterly') "
         "ORDER BY report_period DESC LIMIT 8", (symbol, as_of.isoformat())
     ).fetchall())
 

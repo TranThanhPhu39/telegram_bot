@@ -315,7 +315,7 @@ def test_yahoo_and_vnstock_errors_are_isolated_by_the_worker(tmp_path) -> None:
     seed_symbols(conn, [(s, "HOSE", "STOCK", 1) for s in ("AAA", "BBB", "CCC")])
     engine = MarketCoverageEngine(conn, chain_of(prov), fast_config(max_retries=0), clock=Clock(), sleep=Sleeper())
     engine.run_cycle()
-    assert [load_coverage(conn, s, "FINANCIALS").status for s in ("AAA", "BBB", "CCC")] == ["ERROR", "ERROR", "READY"]
+    assert [load_coverage(conn, s, "FINANCIALS").status for s in ("AAA", "BBB", "CCC")] == ["ERROR", "ERROR", "PARTIAL"]
 
 
 # ----------------------------------------------------------- database

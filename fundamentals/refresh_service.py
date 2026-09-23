@@ -19,6 +19,7 @@ from enum import Enum
 import sqlite3
 
 from asmf_data.store import upsert_financial_reports, upsert_institutional_flows
+from asmf_data.quarters import QuarterContinuity, analyze_quarter_continuity
 from fundamentals.adapters import (
     corporate_promotion_gap,
     flow_row_to_institutional_flow,
@@ -50,21 +51,22 @@ class RefreshResult(str, Enum):
     SKIPPED_FRESH = "SKIPPED_FRESH"
 
 
-def _count_canonical_financial_reports(
+def _canonical_financial_readiness(
     connection: sqlite3.Connection, symbol: str, as_of: date
-) -> int:
+) -> QuarterContinuity:
     as_of_str = as_of.isoformat()
-    c1 = connection.execute(
-        "SELECT COUNT(DISTINCT report_period) FROM financial_reports "
-        "WHERE symbol=? AND consolidated=1 AND public_date<=?",
+    corporate = tuple(row[0] for row in connection.execute(
+        "SELECT DISTINCT report_period FROM financial_reports "
+        "WHERE symbol=? AND consolidated=1 AND public_date<=? "
+        "AND (source NOT LIKE 'yfinance/%' OR source LIKE 'yfinance/%/quarterly')",
         (symbol, as_of_str),
-    ).fetchone()[0]
-    c2 = connection.execute(
-        "SELECT COUNT(DISTINCT report_period) FROM bank_financial_reports "
+    ).fetchall())
+    bank = tuple(row[0] for row in connection.execute(
+        "SELECT DISTINCT report_period FROM bank_financial_reports "
         "WHERE symbol=? AND public_date<=?",
         (symbol, as_of_str),
-    ).fetchone()[0]
-    return max(int(c1), int(c2))
+    ).fetchall())
+    return analyze_quarter_continuity(bank if bank else corporate, required=8)
 
 
 def _count_canonical_institutional_flows(
@@ -80,36 +82,91 @@ def _count_canonical_institutional_flows(
 
 
 def _point_in_time_gap_reason(
-    statements: tuple[StatementRow, ...], promoted_count: int, canonical_count: int = 0,
+    statements: tuple[StatementRow, ...], promoted_count: int,
+    readiness: QuarterContinuity,
 ) -> str | None:
     """Explain, for coverage visibility, why usable raw statement rows did not
     all reach the point-in-time canonical ``financial_reports`` table.
 
-    When canonical point-in-time reports already reach >= 8 quarters, ASMF is
-    not blocked, so the diagnostic reflects ASMF readiness instead of falsely
-    stating 'BLOCKED BY DATA SOURCE'.
+    Readiness requires the latest eight quarters to be contiguous. A raw count
+    cannot distinguish a valid TTM comparison window from a history with gaps.
     """
-    if not statements or promoted_count >= len(statements):
-        return None
     gap_counts: dict[str, int] = {}
     for row in statements:
         gap = corporate_promotion_gap(row)
         if gap is not None:
             gap_counts[gap] = gap_counts.get(gap, 0) + 1
-    if not gap_counts:
-        return None
     detail = "; ".join(
         f"{reason} ({count} period(s))" for reason, count in sorted(gap_counts.items())
     )
-    if canonical_count >= 8:
+    if not readiness.ready:
+        if readiness.expected:
+            continuity = "missing contiguous quarters: " + ", ".join(readiness.missing)
+        else:
+            continuity = "no valid quarterly reports available"
+        if detail:
+            continuity += f"; {promoted_count}/{len(statements)} raw period(s) promoted - {detail}"
+        return continuity
+    if detail:
         return (
-            f"READY FOR ASMF ({canonical_count} quarters available); "
+            "READY FOR ASMF (8 quarters available; contiguous "
+            f"{readiness.expected[0]} through {readiness.expected[-1]}); "
             f"{promoted_count}/{len(statements)} raw period(s) promoted - {detail}"
         )
-    return (
-        f"BLOCKED BY DATA SOURCE: only {promoted_count}/{len(statements)} period(s) "
-        f"reached point-in-time financial_reports - {detail}"
-    )
+    return None
+
+
+def _reconcile_yfinance_canonical_snapshot(
+    connection: sqlite3.Connection,
+    symbol: str,
+    staging_source: str,
+    canonical_source: str,
+    promoted_periods: tuple[str, ...],
+) -> None:
+    """Remove legacy Yahoo canonical rows absent from the quarterly snapshot.
+
+    Older code stored annual Yahoo frames as Q4 rows. Their frequency cannot be
+    reconstructed after persistence, so retaining source-owned rows that the
+    corrected quarterly-only fetch no longer supplies would keep contaminated
+    ASMF inputs alive. Removing uncertain rows is the fail-closed repair.
+    """
+    conditions = "symbol=? AND source=?"
+    parameters: list[object] = [symbol, canonical_source]
+    if promoted_periods:
+        placeholders = ",".join("?" for _ in promoted_periods)
+        conditions += f" AND report_period NOT IN ({placeholders})"
+        parameters.extend(promoted_periods)
+    with connection:
+        connection.execute(
+            "DELETE FROM financial_reports WHERE symbol=? "
+            "AND source LIKE 'yfinance/%' AND source<>?",
+            (symbol, canonical_source),
+        )
+        connection.execute(f"DELETE FROM financial_reports WHERE {conditions}", parameters)
+        staging_conditions = "symbol=? AND source=?"
+        staging_parameters: list[object] = [symbol, staging_source]
+        if promoted_periods:
+            placeholders = ",".join("?" for _ in promoted_periods)
+            staging_conditions += f" AND period NOT IN ({placeholders})"
+            staging_parameters.extend(promoted_periods)
+        connection.execute(
+            "UPDATE automated_financial_statements SET promoted_to_canonical=0 "
+            f"WHERE {staging_conditions}",
+            staging_parameters,
+        )
+
+
+def _has_preferred_canonical_source(
+    connection: sqlite3.Connection, symbol: str, period: str
+) -> bool:
+    row = connection.execute(
+        "SELECT source FROM financial_reports "
+        "WHERE symbol=? AND report_period=? AND consolidated=1",
+        (symbol, period),
+    ).fetchone()
+    if row is None:
+        return False
+    return not str(row["source"]).lower().startswith("yfinance/")
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,8 +225,19 @@ def refresh_financials(
         )
 
     promoted_reports = []
+    canonical_source = (
+        f"{result.provenance}/quarterly"
+        if result.provider.lower() == "yfinance"
+        else result.provenance
+    )
     for row in result.statements:
-        promotable = promote_corporate_statement(row, source=result.provenance)
+        promotable = promote_corporate_statement(row, source=canonical_source)
+        if (
+            promotable is not None
+            and result.provider.lower() == "yfinance"
+            and _has_preferred_canonical_source(connection, row.symbol, row.period)
+        ):
+            promotable = None
         upsert_automated_statement(
             connection, row, provider=result.provider,
             provider_source=result.provider_source,
@@ -179,18 +247,21 @@ def refresh_financials(
             promoted_reports.append(promotable)
     if promoted_reports:
         upsert_financial_reports(connection, promoted_reports)
+    if result.provider.lower() == "yfinance":
+        _reconcile_yfinance_canonical_snapshot(
+            connection,
+            symbol,
+            result.provenance,
+            canonical_source,
+            tuple(report.report_period for report in promoted_reports),
+        )
 
-    canonical_count = _count_canonical_financial_reports(connection, symbol, stamp.date())
+    readiness = _canonical_financial_readiness(connection, symbol, stamp.date())
     gap_reason = _point_in_time_gap_reason(
-        result.statements, len(promoted_reports), canonical_count=canonical_count
+        result.statements, len(promoted_reports), readiness
     )
 
-    # Coverage status is synchronized with ASMF readiness:
-    # If the database has >= 8 point-in-time quarters, ASMF Tầng 2 is satisfied (READY).
-    if canonical_count >= 8:
-        coverage_status = "READY"
-    else:
-        coverage_status = _COVERAGE_STATUS_FROM_PROVIDER_STATUS[result.status]
+    coverage_status = "READY" if readiness.ready else "PARTIAL"
 
     error_reason = gap_reason or result.error_reason
     coverage = record_attempt(

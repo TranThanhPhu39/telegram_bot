@@ -855,6 +855,12 @@ class RuntimeBotDataService:
                 MetricView("EPS (TTM)", facts.eps, ""),
                 MetricView("BVPS", facts.bvps, ""),
             )
+        notes = [
+            "EPS/P/E/P/B/BVPS chỉ hiển thị khi có đủ giá + số lượng cổ phiếu lưu hành "
+            "(valuation snapshot); bot không tự tính fair value."
+        ]
+        if facts.quality_issue:
+            notes.insert(0, facts.quality_issue)
         return FundamentalView(
             status=self._fundamental_status(symbol, timestamp),
             metrics=metrics,
@@ -863,10 +869,7 @@ class RuntimeBotDataService:
             period=facts.period,
             kind=facts.kind,
             missing=facts.missing_fields,
-            note=(
-                "EPS/P/E/P/B/BVPS chỉ hiển thị khi có đủ giá + số lượng cổ phiếu lưu hành "
-                "(valuation snapshot); bot không tự tính fair value."
-            ),
+            note=" ".join(notes),
         )
 
     def _data_quality(

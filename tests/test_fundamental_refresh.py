@@ -185,9 +185,9 @@ def test_usable_result_with_promotion_gap_is_visible_in_coverage_reason(
     assert outcome.result is RefreshResult.SUCCESS  # the raw fetch genuinely succeeded
     assert outcome.rows_stored == 2 and outcome.rows_promoted == 0
     assert latest_financial_reports(connection, "FPT", date(2026, 12, 31)) == ()
-    assert outcome.coverage.status == "READY"  # coverage vocabulary is unchanged
+    assert outcome.coverage.status == "PARTIAL"
     assert outcome.coverage.error_reason is not None
-    assert "BLOCKED BY DATA SOURCE" in outcome.coverage.error_reason
+    assert "no valid quarterly reports available" in outcome.coverage.error_reason
     assert "missing short_term_debt or long_term_debt" in outcome.coverage.error_reason
     assert outcome.error_reason == outcome.coverage.error_reason
 
@@ -202,14 +202,14 @@ def test_estimated_public_date_promotes_statement_with_45d_lag(connection) -> No
     outcome = refresh_financials(connection, chain, "FPT")
 
     assert outcome.rows_stored == 1 and outcome.rows_promoted == 1
-    assert outcome.error_reason is None
+    assert "missing contiguous quarters" in outcome.error_reason
     reports = latest_financial_reports(connection, "FPT", date(2026, 12, 31))
     assert len(reports) == 1
     assert reports[0]["report_period"] == "2026Q2"
     assert reports[0]["public_date"] == "2026-08-14"  # 2026-06-30 + 45 days
 
 
-def test_fully_promoted_result_keeps_coverage_reason_clean(connection) -> None:
+def test_fully_promoted_short_history_reports_continuity_gap(connection) -> None:
     row = statement("FPT", "2026Q2", date(2026, 8, 15), revenue=1.0, net_income=1.0,
                      total_equity=1.0, short_term_debt=0.0, long_term_debt=0.0)
     chain = ProviderChain([StubProvider(statements=(row,))])
@@ -217,8 +217,8 @@ def test_fully_promoted_result_keeps_coverage_reason_clean(connection) -> None:
     outcome = refresh_financials(connection, chain, "FPT")
 
     assert outcome.rows_promoted == 1
-    assert outcome.error_reason is None
-    assert outcome.coverage.error_reason is None
+    assert outcome.coverage.status == "PARTIAL"
+    assert "missing contiguous quarters" in outcome.error_reason
 
 
 def test_partially_promoted_result_reports_the_exact_promoted_ratio(connection) -> None:
@@ -555,14 +555,14 @@ def test_issue10_eight_quarters_yields_ready_even_if_provider_result_partial(con
     assert outcome.rows_stored == 9
     assert outcome.rows_promoted == 8
     assert outcome.coverage.status == "READY"
-    assert "READY FOR ASMF (8 quarters available)" in outcome.coverage.error_reason
+    assert "READY FOR ASMF (8 quarters available" in outcome.coverage.error_reason
     assert "BLOCKED BY DATA SOURCE" not in outcome.coverage.error_reason
     assert fundamental_score(connection, "FPT", date(2026, 9, 22)) is not None
 
 
 def test_issue10_fewer_than_eight_quarters_yields_partial_when_provider_partial(connection) -> None:
     """When a symbol has < 8 canonical quarters promoted and provider status is PARTIAL,
-    coverage must report PARTIAL with BLOCKED BY DATA SOURCE."""
+    coverage must report PARTIAL with the exact continuity gap."""
     good = statement("FPT", "2026Q2", date(2026, 8, 15), revenue=1000.0, net_income=100.0,
                      total_equity=2000.0, short_term_debt=100.0, long_term_debt=100.0)
     bad = statement("FPT", "2026Q1", date(2026, 5, 1), revenue=None, net_income=100.0)
@@ -571,8 +571,123 @@ def test_issue10_fewer_than_eight_quarters_yields_partial_when_provider_partial(
 
     assert outcome.rows_promoted == 1
     assert outcome.coverage.status == "PARTIAL"
-    assert "BLOCKED BY DATA SOURCE" in outcome.coverage.error_reason
+    assert "missing contiguous quarters" in outcome.coverage.error_reason
+
+
+def test_financial_readiness_rejects_eight_noncontiguous_quarters(connection) -> None:
+    periods = (
+        "2026Q2", "2026Q1", "2025Q4", "2025Q2",
+        "2025Q1", "2024Q4", "2024Q3", "2024Q2",
+    )
+    rows = tuple(
+        statement(
+            "FPT", period, date(2026, 9, 1), revenue=1000.0,
+            net_income=100.0, total_equity=2000.0,
+            short_term_debt=100.0, long_term_debt=100.0,
+        )
+        for period in periods
+    )
+    outcome = refresh_financials(
+        connection, ProviderChain([StubProvider(statements=rows)]), "FPT", force=True
+    )
+
+    assert outcome.rows_promoted == 8
+    assert outcome.coverage.status == "PARTIAL"
+    assert "missing contiguous quarters: 2025Q3" in outcome.coverage.error_reason
     assert fundamental_score(connection, "FPT", date(2026, 9, 22)) is None
+
+
+def test_yfinance_refresh_removes_legacy_rows_not_in_quarterly_snapshot(connection) -> None:
+    legacy = FinancialReport(
+        "FPT", "2024Q4", date(2025, 2, 14), True,
+        60_000.0, 8_000.0, 30_000.0, 5_000.0, "yfinance/FPT.VN",
+    )
+    upsert_financial_reports(connection, [legacy])
+    current = statement(
+        "FPT", "2026Q2", None, revenue=18_000.0, net_income=2_500.0,
+        total_equity=35_000.0, short_term_debt=1_000.0, long_term_debt=4_000.0,
+    )
+
+    class YahooProvider(StubProvider):
+        name = "yfinance"
+
+        def fetch_financials(self, symbol, *, exchange=None):
+            return ProviderResult(
+                symbol=symbol, dataset="FINANCIALS", provider=self.name,
+                provider_source="FPT.VN", status=ProviderStatus.AVAILABLE,
+                statements=(current,),
+            )
+
+    refresh_financials(connection, ProviderChain([YahooProvider()]), "FPT", force=True)
+
+    periods = tuple(
+        row["report_period"]
+        for row in latest_financial_reports(connection, "FPT", date(2026, 12, 31))
+    )
+    assert periods == ("2026Q2",)
+    assert "2024Q4" not in periods
+    source = connection.execute(
+        "SELECT source FROM financial_reports WHERE symbol='FPT' AND report_period='2026Q2'"
+    ).fetchone()[0]
+    assert source == "yfinance/FPT.VN/quarterly"
+    assert fundamental_score(connection, "FPT", date(2026, 9, 22)) is None
+
+
+def test_yfinance_fallback_never_overwrites_a_preferred_canonical_source(connection) -> None:
+    trusted = FinancialReport(
+        "FPT", "2026Q1", date(2026, 4, 30), True,
+        777.0, 77.0, 2000.0, 500.0, "VNStock/KBS",
+    )
+    upsert_financial_reports(connection, [trusted])
+    yahoo_rows = (
+        statement(
+            "FPT", "2026Q1", None, revenue=999.0, net_income=99.0,
+            total_equity=2000.0, short_term_debt=100.0, long_term_debt=400.0,
+        ),
+        statement(
+            "FPT", "2026Q2", None, revenue=1000.0, net_income=100.0,
+            total_equity=2100.0, short_term_debt=100.0, long_term_debt=400.0,
+        ),
+    )
+
+    class YahooProvider(StubProvider):
+        name = "yfinance"
+
+        def fetch_financials(self, symbol, *, exchange=None):
+            return ProviderResult(
+                symbol=symbol, dataset="FINANCIALS", provider=self.name,
+                provider_source="FPT.VN", status=ProviderStatus.AVAILABLE,
+                statements=yahoo_rows,
+            )
+
+    outcome = refresh_financials(
+        connection, ProviderChain([YahooProvider()]), "FPT", force=True
+    )
+
+    rows = connection.execute(
+        "SELECT report_period,revenue,source FROM financial_reports "
+        "WHERE symbol='FPT' ORDER BY report_period"
+    ).fetchall()
+    assert [tuple(row) for row in rows] == [
+        ("2026Q1", 777.0, "VNStock/KBS"),
+        ("2026Q2", 1000.0, "yfinance/FPT.VN/quarterly"),
+    ]
+    assert outcome.rows_promoted == 1
+
+
+def test_legacy_yfinance_rows_are_invisible_before_the_first_corrected_refresh(connection) -> None:
+    rows = [
+        FinancialReport(
+            "FPT", f"{year}Q{quarter}", date(year, quarter * 3, 28), True,
+            1000.0, 100.0, 2000.0, 500.0, "yfinance/FPT.VN",
+        )
+        for year in (2024, 2025)
+        for quarter in range(1, 5)
+    ]
+    upsert_financial_reports(connection, rows)
+
+    assert latest_financial_reports(connection, "FPT", date(2026, 1, 1)) == ()
+    assert fundamental_score(connection, "FPT", date(2026, 1, 1)) is None
 
 
 def test_issue10_five_flow_sessions_yields_ready_for_institutional(connection) -> None:

@@ -154,6 +154,16 @@ def test_period_end_date_helper_is_never_used_as_a_publication_date_substitute()
     assert report.public_date_source == "estimated_45d"
 
 
+def test_annual_statement_never_promotes_into_quarterly_canonical_storage() -> None:
+    row = StatementRow("FPT", "2025", None, values={
+        "revenue": 4_000.0, "net_income": 400.0, "total_equity": 2_000.0,
+        "short_term_debt": 100.0, "long_term_debt": 400.0,
+    })
+
+    assert corporate_promotion_gap(row) == "report_period is not quarterly"
+    assert promote_corporate_statement(row, source="VNStock/VCI") is None
+
+
 def test_asmf_fundamental_score_stays_none_until_eight_public_quarters_exist(
     connection,
 ) -> None:

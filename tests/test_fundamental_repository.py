@@ -43,6 +43,25 @@ def test_corporate_facts_are_derived_from_stored_reports() -> None:
     assert "P/E" in facts.missing_fields
 
 
+def test_corporate_facts_hide_ttm_metrics_when_quarters_are_not_contiguous() -> None:
+    conn = connection()
+    rows = [row for row in corporate_rows() if row.report_period != "2025Q3"]
+    rows.append(FinancialReport(
+        "FPT", "2024Q4", date(2025, 2, 14), True,
+        800.0, 80.0, 5_000.0, 2_500.0, "Vietstock",
+    ))
+    upsert_financial_reports(conn, rows)
+
+    facts = load_fundamental_facts(conn, "FPT", date(2027, 1, 1))
+
+    assert facts is not None
+    assert facts.roe_percent is None
+    assert facts.revenue_growth_percent is None
+    assert facts.profit_growth_percent is None
+    assert facts.debt_to_equity == 0.5
+    assert facts.quality_issue == "Chưa đủ 8 quý liên tục để tính TTM. Thiếu: 2025Q3."
+
+
 def test_reports_published_after_the_as_of_date_are_ignored() -> None:
     conn = connection()
     upsert_financial_reports(conn, corporate_rows())

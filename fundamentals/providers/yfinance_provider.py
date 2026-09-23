@@ -7,8 +7,9 @@ exists. When no candidate resolves it returns MISSING: no crash, no retry loop,
 no fabricated values, and no silent mapping onto the wrong exchange.
 
 Yahoo never supplies Vietnamese announcement dates, so every row produced here
-has ``public_date=None``. Point-in-time readers must treat that as "publication
-date unavailable" and fail closed rather than assume the period end.
+has ``public_date=None``. The shared point-in-time adapter applies only the
+documented ``period_end + 45 days`` estimate; it never exposes the period end
+itself as a publication date.
 """
 
 from __future__ import annotations
@@ -151,11 +152,16 @@ class YFinanceProvider(FundamentalProvider):
         )
 
     def _collect(self, handle: object) -> dict[str, dict[str, float | None]]:
-        """Merge Yahoo's period-as-column frames into period-keyed buckets."""
+        """Merge only Yahoo quarterly frames into period-keyed buckets.
+
+        Annual frames use year-end dates that are indistinguishable from Q4
+        after date-to-quarter normalization. Reading ``financials`` or
+        ``balance_sheet`` here would therefore contaminate quarterly ASMF data.
+        """
         merged: dict[str, dict[str, float | None]] = {}
         for attribute in (
             "quarterly_financials", "quarterly_balance_sheet", "quarterly_cashflow",
-            "financials", "balance_sheet", "cashflow",
+            "quarterly_income_stmt",
         ):
             frame = getattr(handle, attribute, None)
             if frame is None:

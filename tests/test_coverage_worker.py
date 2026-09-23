@@ -87,7 +87,7 @@ def test_statuses_success_partial_missing(tmp_path) -> None:
     engine, conn, *_ = build(tmp_path, prov, symbols=["AAA", "BBB", "CCC"])
     r = engine.run_cycle()
     assert [load_coverage(conn, s, "FINANCIALS").status for s in ("AAA", "BBB", "CCC")] == \
-        ["READY", "PARTIAL", "MISSING"]
+        ["PARTIAL", "PARTIAL", "MISSING"]
     assert r.counts()["FINANCIALS"] == {"SUCCESS": 1, "PARTIAL": 1, "MISSING": 1}
 
 
@@ -104,8 +104,8 @@ def test_one_symbol_exception_does_not_stop_the_next(tmp_path, monkeypatch) -> N
 
     monkeypatch.setattr(cw, "refresh_financials", flaky)
     r = engine.run_cycle()
-    assert load_coverage(conn, "AAA", "FINANCIALS").status == "READY"
-    assert load_coverage(conn, "CCC", "FINANCIALS").status == "READY"
+    assert load_coverage(conn, "AAA", "FINANCIALS").status == "PARTIAL"
+    assert load_coverage(conn, "CCC", "FINANCIALS").status == "PARTIAL"
     bad = load_coverage(conn, "BBB", "FINANCIALS")
     assert bad.status == "ERROR" and "abcdefgh12345678" not in bad.error_reason
     assert load_coverage(conn, "BBB", "INSTITUTIONAL").status == "READY"   # other dataset unaffected
@@ -118,7 +118,7 @@ def test_provider_exception_becomes_error_and_batch_continues(tmp_path) -> None:
     engine.run_cycle()
     assert load_coverage(conn, "AAA", "FINANCIALS").status == "ERROR"
     assert load_coverage(conn, "AAA", "INSTITUTIONAL").status == "READY"
-    assert load_coverage(conn, "BBB", "FINANCIALS").status == "READY"
+    assert load_coverage(conn, "BBB", "FINANCIALS").status == "PARTIAL"
 
 
 def test_successful_writes_survive_later_failures(tmp_path) -> None:
@@ -148,7 +148,7 @@ def test_retry_recovers(tmp_path) -> None:
                                        config=fast_config(datasets=("FINANCIALS",)))
     r = engine.run_cycle()
     assert r.outcomes[0].result == "SUCCESS" and r.outcomes[0].attempts == 2
-    assert load_coverage(conn, "AAA", "FINANCIALS").status == "READY"
+    assert load_coverage(conn, "AAA", "FINANCIALS").status == "PARTIAL"
 
 
 def test_request_delay_between_provider_calls(tmp_path) -> None:
@@ -233,7 +233,7 @@ def test_abandoned_in_progress_is_reclaimed_but_live_one_is_not(tmp_path) -> Non
     mark_in_progress(conn, "BBB", "FINANCIALS", now=T0 - timedelta(minutes=1)) # running now
     r = engine.run_cycle()
     assert r.selected == ("AAA",)
-    assert load_coverage(conn, "AAA", "FINANCIALS").status == "READY"
+    assert load_coverage(conn, "AAA", "FINANCIALS").status == "PARTIAL"
     assert load_coverage(conn, "BBB", "FINANCIALS").status == "IN_PROGRESS"
 
 
@@ -254,7 +254,7 @@ def test_graceful_stop_leaves_unprocessed_symbols_untouched(tmp_path) -> None:
                              should_stop=lambda: flag["stop"])
     r = engine.run_cycle()
     assert r.stopped_early and load_coverage(conn, "CCC", "FINANCIALS") is None
-    assert load_coverage(conn, "BBB", "FINANCIALS").status == "READY"
+    assert load_coverage(conn, "BBB", "FINANCIALS").status == "PARTIAL"
 
 
 def test_worker_thread_runs_and_stops_promptly(tmp_path) -> None:
@@ -409,7 +409,7 @@ def test_news_failure_is_isolated_and_marks_existing_rows(tmp_path) -> None:
     assert r.news.startswith("FAILED")
     row = load_coverage(conn, "AAA", "NEWS")
     assert row.status == "ERROR" and row.last_success_at is not None
-    assert load_coverage(conn, "AAA", "FINANCIALS").status == "READY"        # untouched
+    assert load_coverage(conn, "AAA", "FINANCIALS").status == "PARTIAL"      # untouched
 
 
 def test_news_runner_absent_and_close(tmp_path) -> None:

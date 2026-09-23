@@ -19,6 +19,7 @@ from pathlib import Path
 import sqlite3
 
 from asmf_data.store import latest_bank_financial_reports, latest_financial_reports
+from asmf_data.quarters import analyze_quarter_continuity
 from fundamentals.csv_source import load_fundamental_csv
 from fundamentals.models import FundamentalSnapshot
 from fundamentals.valuation import ValuationSnapshot, compute_valuation, load_valuation_csv
@@ -44,6 +45,7 @@ class FundamentalFacts:
     npl_percent: float | None = None
     coverage_percent: float | None = None
     car_percent: float | None = None
+    quality_issue: str | None = None
 
     @property
     def missing_fields(self) -> tuple[str, ...]:
@@ -107,21 +109,26 @@ def load_fundamental_facts(
         pe=snapshot.pe if snapshot.pe is not None else stored.pe,
         pb=snapshot.pb if snapshot.pb is not None else stored.pb,
         bvps=stored.bvps,
-        roe_percent=stored.roe_percent if stored.roe_percent is not None else snapshot.roe_percent,
+        roe_percent=(
+            stored.roe_percent if stored.quality_issue is not None
+            else stored.roe_percent if stored.roe_percent is not None
+            else snapshot.roe_percent
+        ),
         revenue_growth_percent=(
             stored.revenue_growth_percent
-            if stored.revenue_growth_percent is not None
+            if stored.quality_issue is not None or stored.revenue_growth_percent is not None
             else snapshot.revenue_growth_percent
         ),
         profit_growth_percent=(
             stored.profit_growth_percent
-            if stored.profit_growth_percent is not None
+            if stored.quality_issue is not None or stored.profit_growth_percent is not None
             else snapshot.profit_growth_percent
         ),
         debt_to_equity=stored.debt_to_equity,
         npl_percent=stored.npl_percent,
         coverage_percent=stored.coverage_percent,
         car_percent=stored.car_percent,
+        quality_issue=stored.quality_issue,
     )
 
 
@@ -148,8 +155,14 @@ def _corporate_facts(
     latest = rows[0]
     equity = latest["equity"]
     roe = revenue_growth = profit_growth = None
-    if len(rows) >= 8:
-        current, previous = rows[:4], rows[4:8]
+    continuity = analyze_quarter_continuity(
+        (row["report_period"] for row in rows), required=8
+    )
+    quality_issue = None
+    if continuity.ready:
+        by_period = {row["report_period"]: row for row in rows}
+        ordered = tuple(by_period[period] for period in continuity.expected)
+        current, previous = ordered[:4], ordered[4:8]
         revenue_now = sum(row["revenue"] for row in current)
         revenue_before = sum(row["revenue"] for row in previous)
         profit_now = sum(row["net_profit"] for row in current)
@@ -160,11 +173,18 @@ def _corporate_facts(
             revenue_growth = (revenue_now / revenue_before - 1.0) * 100.0
         if profit_before > 0:
             profit_growth = (profit_now / profit_before - 1.0) * 100.0
+    else:
+        missing = ", ".join(continuity.missing) if continuity.missing else "không có quý hợp lệ"
+        quality_issue = f"Chưa đủ 8 quý liên tục để tính TTM. Thiếu: {missing}."
 
-    # EPS(TTM) only needs the trailing 4 quarters, not the 8 the YoY growth
-    # figures above need -- so compute it separately rather than gating it on
-    # `len(rows) >= 8`.
-    ttm_net_profit = sum(row["net_profit"] for row in rows[:4]) if len(rows) >= 4 else None
+    trailing = analyze_quarter_continuity(
+        (row["report_period"] for row in rows), required=4
+    )
+    by_period = {row["report_period"]: row for row in rows}
+    ttm_net_profit = (
+        sum(by_period[period]["net_profit"] for period in trailing.expected)
+        if trailing.ready else None
+    )
     metrics = compute_valuation(
         price=valuation.price if valuation is not None else None,
         shares_outstanding=valuation.shares_outstanding if valuation is not None else None,
@@ -189,6 +209,7 @@ def _corporate_facts(
         revenue_growth_percent=revenue_growth,
         profit_growth_percent=profit_growth,
         debt_to_equity=latest["total_debt"] / equity if equity > 0 else None,
+        quality_issue=quality_issue,
     )
 
 

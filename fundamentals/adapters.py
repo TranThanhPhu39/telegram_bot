@@ -4,11 +4,10 @@ Two independent decisions are made here, both conservative on purpose:
 
 1. A corporate :class:`~fundamentals.providers.base.StatementRow` is promoted
    into the existing ``financial_reports`` table (via
-   :class:`asmf_data.models.FinancialReport`) only when it carries a real
-   ``public_date`` and every field that table requires as NOT NULL. A field
-   the provider did not establish is never guessed at — the row simply stays
-   in the staging table (``automated_financial_statements``) instead of
-   entering the canonical, point-in-time-read table.
+   :class:`asmf_data.models.FinancialReport`) only when it has either an actual
+   ``public_date`` or the documented ``period_end + 45 days`` estimate, plus
+   every field that table requires as NOT NULL. A missing accounting value is
+   never guessed — the row stays in staging instead of entering canonical data.
 
 2. A **bank** statement is never promoted into ``bank_financial_reports``,
    ever, regardless of how complete it looks. That table's downstream reader
@@ -28,6 +27,7 @@ from __future__ import annotations
 
 from datetime import date
 from asmf_data.models import FinancialReport, InstitutionalFlow
+from asmf_data.quarters import is_quarter_period
 from fundamentals.providers.base import (
     DEFAULT_FS_PUBLISH_LAG_DAYS,
     FlowRow,
@@ -72,6 +72,8 @@ def corporate_promotion_gap(
     pub_date, _ = resolve_public_date(row, lag_days=lag_days)
     if pub_date is None:
         return "no public_date or parsable report_period"
+    if not is_quarter_period(row.period):
+        return "report_period is not quarterly"
     revenue = row.get("revenue")
     if revenue is None or revenue < 0:
         return "no usable revenue value"

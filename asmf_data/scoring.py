@@ -10,6 +10,7 @@ from asmf_data.store import (
     active_sector, latest_bank_financial_reports, latest_financial_reports,
     recent_flows, sector_members,
 )
+from asmf_data.quarters import analyze_quarter_continuity
 from data.models import OHLCVBar
 
 
@@ -20,9 +21,14 @@ def fundamental_score(connection: sqlite3.Connection, symbol: str, as_of: date) 
     if latest_bank_financial_reports(connection, symbol, as_of):
         return bank_fundamental_score(connection, symbol, as_of)
     reports = latest_financial_reports(connection, symbol, as_of)
-    if len(reports) < 8:
+    continuity = analyze_quarter_continuity(
+        (row["report_period"] for row in reports), required=8
+    )
+    if not continuity.ready:
         return None
-    current, previous = reports[:4], reports[4:8]
+    by_period = {row["report_period"]: row for row in reports}
+    ordered = tuple(by_period[period] for period in continuity.expected)
+    current, previous = ordered[:4], ordered[4:8]
     revenue_now = sum(row["revenue"] for row in current)
     revenue_before = sum(row["revenue"] for row in previous)
     profit_now = sum(row["net_profit"] for row in current)
@@ -50,9 +56,10 @@ def bank_fundamental_score(connection: sqlite3.Connection, symbol: str, as_of: d
     """Score banks without applying industrial-company leverage rules."""
     rows = latest_bank_financial_reports(connection, symbol, as_of)
     by_period = {row["report_period"]: row for row in rows}
-    if len(by_period) < 8:
+    continuity = analyze_quarter_continuity(by_period, required=8)
+    if not continuity.ready:
         return None
-    periods = sorted(by_period, reverse=True)[:8]
+    periods = list(continuity.expected)
     standalone: dict[str, tuple[float, float]] = {}
     for period in periods:
         row = by_period[period]

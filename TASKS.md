@@ -1071,3 +1071,23 @@ iteration, each stopped for explicit live confirmation before the next.
       - Verified VIC has canonical quarters and coverage `READY`.
       - CLI report (`scripts/coverage_report.py --symbol FPT`) confirms `FINANCIALS READY`.
 
+### Integrity remediation Issue 1 — Financial Data Integrity & ASMF Readiness
+- [x] Audit YFinance acquisition, canonical readiness, ASMF scoring and `/soi` fundamental rendering.
+- [x] Restrict YFinance ingestion to quarterly frames; annual statements are never normalized into Q4.
+- [x] Reject every non-quarter `report_period` at the canonical promotion boundary, regardless of provider.
+- [x] Mark corrected Yahoo canonical provenance as `/quarterly`, hide all unverified legacy Yahoo rows immediately, and reconcile them on refresh.
+- [x] Prevent Yahoo fallback rows from overwriting an existing canonical quarter from VNStock/Vietstock or another preferred source.
+- [x] Require the latest eight point-in-time quarters to be contiguous before `FINANCIALS READY`.
+- [x] Report exact missing quarters in coverage diagnostics.
+- [x] Revalidate the same contiguous window inside corporate and bank ASMF scoring.
+- [x] Suppress ROE/revenue-growth/profit-growth TTM metrics when the window is discontinuous.
+- [x] Render `/soi` Fundamental as `INSUFFICIENT` with the missing-quarter explanation.
+- [x] Preserve actual publication dates, the estimated `period_end + 45 days` fallback, and `public_date <= as_of` queries.
+- [x] Rebased onto remote `origin/main` at `2b0b3ae`; preserved valuation snapshot and scanner UX changes.
+- [x] Focused verification on integrated remote: 201 fundamentals/PIT/runtime/dashboard/valuation tests passed.
+- [x] Full regression on integrated remote: 960 tests passed on Python 3.13 with protobuf's temporary version-check override because installed runtime is 6.33.6 while checked-in gencode is 7.35.0.
+- [x] Updated schema-migration test to compare against `LATEST_SCHEMA_VERSION` after remote migration v10.
+- [x] Live public-provider verification with `yfinance==1.0` for VNM/HAG against temporary SQLite: annual columns excluded, coverage `PARTIAL`, exact gaps reported, `asmf_score=None`, runtime `INSUFFICIENT`, and no TTM growth rendered.
+- [ ] Production database refresh and real Telegram delivery after deployment/restart — NOT TESTED because this clone has no `.env`, Vietcap credentials, bot token, or production database.
+- [x] STOP before Issue 2.
+

@@ -118,6 +118,28 @@ def test_soi_without_fundamentals_does_not_fabricate_metrics() -> None:
     assert "P/E" not in text
 
 
+def test_fundamental_view_marks_noncontiguous_quarters_insufficient() -> None:
+    runtime = service()
+    periods = (
+        "2026Q2", "2026Q1", "2025Q4", "2025Q2",
+        "2025Q1", "2024Q4", "2024Q3", "2024Q2",
+    )
+    upsert_financial_reports(runtime.connection, [
+        FinancialReport(
+            "FPT", period, date(2026, 9, 1), True,
+            1_000.0, 100.0, 5_000.0, 2_000.0, "TEST",
+        )
+        for period in periods
+    ])
+
+    text = runtime.fundamental_overview("FPT")
+
+    assert "🧾 CƠ BẢN: INSUFFICIENT" in text
+    assert "Chưa đủ 8 quý liên tục để tính TTM. Thiếu: 2025Q3." in text
+    assert "• Tăng trưởng doanh thu (TTM):" not in text
+    assert "• Tăng trưởng LNST (TTM):" not in text
+
+
 def test_soi_without_sentiment_module_states_unavailable() -> None:
     assert "News sentiment unavailable." in service().symbol_overview("FPT")
 

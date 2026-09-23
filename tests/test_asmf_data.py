@@ -48,6 +48,23 @@ def test_point_in_time_financial_and_flow_scores_ignore_future_rows() -> None:
     assert institutional_flow_score(db, "FPT", date(2025, 1, 10)) > 50
 
 
+def test_fundamental_score_rejects_eight_rows_with_a_missing_quarter() -> None:
+    db = connection()
+    periods = (
+        "2026Q2", "2026Q1", "2025Q4", "2025Q2",
+        "2025Q1", "2024Q4", "2024Q3", "2024Q2",
+    )
+    upsert_financial_reports(db, [
+        FinancialReport(
+            "FPT", period, date(2026, 9, 1), True,
+            100.0, 20.0, 100.0, 50.0, "TEST",
+        )
+        for period in periods
+    ])
+
+    assert fundamental_score(db, "FPT", date(2026, 12, 31)) is None
+
+
 def test_sector_score_requires_five_members_and_uses_breadth() -> None:
     db = connection()
     members = tuple(f"S{i}" for i in range(5))

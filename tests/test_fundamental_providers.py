@@ -344,6 +344,31 @@ def test_yfinance_normalizes_a_quarterly_frame() -> None:
     assert row.get("revenue") == 500.0
 
 
+def test_yfinance_never_reads_annual_frames_as_q4_quarters() -> None:
+    frames = {
+        "quarterly_financials": {
+            date(2024, 12, 31): {"Total Revenue": 16_000.0, "Net Income": 2_000.0},
+        },
+        "quarterly_balance_sheet": {
+            date(2024, 12, 31): {"Stockholders Equity": 30_000.0},
+        },
+        "financials": {
+            date(2024, 12, 31): {"Total Revenue": 61_000.0, "Net Income": 9_000.0},
+            date(2023, 12, 31): {"Total Revenue": 60_000.0, "Net Income": 8_000.0},
+        },
+        "balance_sheet": {
+            date(2023, 12, 31): {"Stockholders Equity": 29_000.0},
+        },
+    }
+    module = types.SimpleNamespace(Ticker=lambda ticker: _FakeYahooTicker(frames))
+
+    result = YFinanceProvider(module=module).fetch_financials("VNM", exchange="HOSE")
+
+    assert [row.period for row in result.statements] == ["2024Q4"]
+    assert result.statements[0].get("revenue") == 16_000.0
+    assert all(row.period != "2023Q4" for row in result.statements)
+
+
 def test_yfinance_disabled_is_missing_without_importing_anything() -> None:
     provider = YFinanceProvider(module=None, enabled=False)
     assert provider.fetch_financials("FPT", exchange="HOSE").status is ProviderStatus.MISSING

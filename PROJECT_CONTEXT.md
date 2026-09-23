@@ -3767,7 +3767,95 @@ Coverage tracking (`symbol_data_coverage`) was reporting `PARTIAL` with diagnost
   - Ran `scripts/test_issue10_live.py` against live database with FPT and VIC. FPT has 8 canonical quarters, coverage `READY`, reason `READY FOR ASMF (8 quarters available); 8/9 raw period(s) promoted - no usable revenue value (1 period(s))`, ASMF score `60.0`.
   - Verified `scripts/coverage_report.py --symbol FPT` outputs `FINANCIALS READY`.
 
+### 2026-09-23 — Financial Data Integrity & ASMF Readiness (Issue 1)
+
+**Root causes confirmed:**
+
+1. `YFinanceProvider._collect()` merged annual `financials`, `balance_sheet`, and
+   `cashflow` frames with quarterly frames. A 31 December annual column was
+   normalized to `YYYYQ4`, so annual revenue could overwrite or masquerade as a
+   quarterly result.
+2. `refresh_financials()` treated `COUNT(DISTINCT report_period) >= 8` as ASMF
+   readiness. Eight rows with a missing quarter were incorrectly `READY`.
+3. `fundamental_score()` and `fundamentals.repository._corporate_facts()` split
+   `reports[:8]` into current/previous groups without checking quarter arithmetic.
+4. `/soi` could therefore display TTM growth from a discontinuous window even
+   when the values did not represent two comparable four-quarter periods.
+
+**Implementation:**
+
+- Added `asmf_data/quarters.py` as the shared quarter-arithmetic boundary.
+  Coverage, scoring and presentation now use the same expected latest-eight
+  sequence and exact missing-period list.
+- YFinance now reads only `quarterly_financials`,
+  `quarterly_income_stmt`, `quarterly_balance_sheet`, and
+  `quarterly_cashflow`. Annual frames are never visited.
+- The canonical promotion boundary now rejects every non-`YYYYQn` period from
+  every provider. An annual `YYYY` row may remain in staging for diagnostics,
+  but it cannot enter `financial_reports` or ASMF.
+- Corrected YFinance canonical rows carry explicit `/quarterly` provenance.
+  Point-in-time readers immediately exclude every unverified legacy Yahoo row,
+  even before the first post-deployment refresh. A successful refresh then
+  reconciles that source against the newly promoted quarterly snapshot, removes
+  legacy/absent periods from `financial_reports`, and marks absent periods
+  unpromoted in staging. This intentionally fails closed because their original
+  annual/quarterly frequency cannot be recovered after persistence.
+- Yahoo remains a fallback in storage as well as acquisition: a corrected Yahoo
+  quarter cannot overwrite an existing canonical quarter from VNStock,
+  Vietstock, or another non-Yahoo source. It may only fill an absent period or
+  replace an older Yahoo-owned period.
+- `FINANCIALS READY` now requires eight contiguous point-in-time quarters. A
+  gap produces `PARTIAL` and a diagnostic such as
+  `missing contiguous quarters: 2025Q3`.
+- Corporate and bank scoring independently repeat the continuity check before
+  any TTM/YoY calculation. Existing score thresholds were not changed.
+- Fundamental facts with a broken window retain safe point-in-time fields such
+  as Debt/Equity but suppress ROE and TTM growth. `/soi` renders
+  `INSUFFICIENT` plus `Chưa đủ 8 quý liên tục để tính TTM`.
+- The existing anti-look-ahead contract is unchanged: actual `public_date` is
+  preferred, missing dates use only `period_end + 45 days`, and readers still
+  enforce `public_date <= as_of`.
+
+**Verification:**
+
+- Integrated on top of `origin/main` at `2b0b3ae`; the valuation snapshot and
+  scanner UX changes from the two newer remote commits are preserved.
+- Focused fundamentals/PIT/runtime/dashboard/valuation: **201 passed**.
+- Full `tests/` regression on the integrated remote: **960 passed**. One old
+  schema test was updated to follow `LATEST_SCHEMA_VERSION` after migration v10.
+  The Python 3.13 host has protobuf
+  runtime 6.33.6 while the checked-in generated code requires 7.35.0, so this
+  run used protobuf's documented temporary version-check override. No protobuf
+  source was changed.
+- All changed Python files compile successfully with the project's target
+  CPython 3.12.13. A separate Python 3.12 focused pytest environment could not
+  be provisioned because PyPI reset the `curl-cffi` download after three
+  retries; no unrun 3.12 test was reported as PASS.
+- `python -m pip check` completed with 10 pre-existing conflicts in unrelated
+  global packages; none concerns the Issue 1 code path.
+- Live public-provider deep audit with `yfinance==1.0` passed for VNM and HAG:
+  - VNM annual revenue included 2024 `61,782,609,528,445`, while quarterly
+    revenue observations were approximately 12.96–18.85 trillion. The adapter
+    excluded annual-only 2021Q4–2024Q4 and never stored those annual values.
+  - VNM and HAG each produced six quarterly rows; 2025Q3 lacked revenue, so only
+    five rows promoted. Both coverage records were `PARTIAL` with exact missing
+    periods `2025Q3, 2024Q4, 2024Q3`; both ASMF scores were `None`.
+  - Runtime views built from the live Yahoo result rendered `CƠ BẢN:
+    INSUFFICIENT`, retained safe Debt/Equity context, named the missing periods,
+    and emitted no ROE/revenue-growth/profit-growth TTM metrics.
+  - Anti-look-ahead remained exact: 2026Q2 was invisible on 2026-08-13 and
+    became visible on the estimated publication date 2026-08-14.
+  - An adversarial temporary database containing eight contiguous legacy
+    `yfinance/VNM.VN` rows retained eight raw records for audit but exposed zero
+    rows to point-in-time readers and produced no ASMF score.
+- Production database refresh and real Telegram delivery remain **NOT TESTED**:
+  this clone has no `.env`, Vietcap credentials, Telegram token, or production
+  database. All live probes used temporary SQLite files and made no production
+  writes.
+
 ### Remaining
 
-All known issues (Issue 1 through Issue 10) + Visual Polish + Audit M1/M2/M3 have been resolved, thoroughly tested, and live-verified.
+The newly supplied remediation plan supersedes the earlier blanket completion
+statement. Issue 1 is implemented and verified offline. Issues 2, 3 and 5 remain
+untouched. Issue 4 is the only other issue already repaired under that plan.
 
