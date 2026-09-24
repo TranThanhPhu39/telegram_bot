@@ -675,6 +675,12 @@ class MarketCoverageWorker:
         self._thread: threading.Thread | None = None
         self.last_report: CycleReport | None = None
         self.cycles_completed = 0
+        self._priority_lock = threading.Lock()
+        self._priority_financials: list[str] = []
+        self._priority_financials_set: set[str] = set()
+        self._priority_wake = threading.Event()
+        self._priority_limit = max(20, min(200, config.batch_size * 4))
+        self._financial_refresh_listeners: list[Callable[[tuple[str, ...]], None]] = []
 
     @property
     def running(self) -> bool:
@@ -693,9 +699,62 @@ class MarketCoverageWorker:
             self._thread.start()
             return self._thread
 
+    def request_financials(self, symbol: str) -> bool:
+        """Queue a deduplicated, non-blocking priority FINANCIALS attempt."""
+        normalized = str(symbol).strip().upper()
+        if (
+            "FINANCIALS" not in self.config.datasets
+            or not normalized
+            or len(normalized) > 20
+            or any(not (char.isalnum() or char in ".-") for char in normalized)
+        ):
+            return False
+        with self._priority_lock:
+            if normalized in self._priority_financials_set:
+                return False
+            if len(self._priority_financials_set) >= self._priority_limit:
+                return False
+            self._priority_financials.append(normalized)
+            self._priority_financials_set.add(normalized)
+            self._priority_wake.set()
+        return True
+
+    def add_financial_refresh_listener(
+        self, listener: Callable[[tuple[str, ...]], None]
+    ) -> None:
+        with self._priority_lock:
+            if listener not in self._financial_refresh_listeners:
+                self._financial_refresh_listeners.append(listener)
+
+    def _take_priority_financials(self) -> tuple[str, ...]:
+        with self._priority_lock:
+            count = min(len(self._priority_financials), self.config.batch_size)
+            symbols = tuple(self._priority_financials[:count])
+            del self._priority_financials[:count]
+            if self._priority_financials:
+                self._priority_wake.set()
+            else:
+                self._priority_wake.clear()
+            return symbols
+
+    def _finish_priority_financials(
+        self, symbols: tuple[str, ...], *, notify: bool
+    ) -> None:
+        with self._priority_lock:
+            self._priority_financials_set.difference_update(symbols)
+            listeners = tuple(self._financial_refresh_listeners)
+        if not notify:
+            return
+        for listener in listeners:
+            try:
+                listener(symbols)
+            except Exception:
+                logger.exception("priority financial refresh listener failed")
+
     def stop(self, timeout: float | None = None) -> None:
         with self._lock:
             self._stop.set()
+            self._priority_wake.set()
             thread = self._thread
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout)
@@ -723,17 +782,40 @@ class MarketCoverageWorker:
     def _run(self) -> None:
         engine: MarketCoverageEngine | None = None
         try:
-            if self._stop.wait(self.config.startup_delay_seconds):
+            self._priority_wake.wait(self.config.startup_delay_seconds)
+            if self._stop.is_set():
                 return
             engine = self._engine_factory(self._stop.is_set, self._stop.wait)
             while not self._stop.is_set():
+                priority_symbols = self._take_priority_financials()
+                if priority_symbols:
+                    refresh_attempted = False
+                    try:
+                        self.last_report = engine.run_cycle(
+                            symbols=priority_symbols,
+                            limit=min(len(priority_symbols), self.config.batch_size),
+                            datasets=("FINANCIALS",),
+                        )
+                        self.cycles_completed += 1
+                        refresh_attempted = any(
+                            outcome.dataset == "FINANCIALS"
+                            and outcome.result != RefreshResult.SKIPPED_FRESH.value
+                            for outcome in self.last_report.outcomes
+                        )
+                    except Exception:
+                        logger.exception("priority FINANCIALS coverage cycle failed")
+                    finally:
+                        self._finish_priority_financials(
+                            priority_symbols, notify=refresh_attempted
+                        )
+                if self._stop.is_set():
+                    break
                 try:
                     self.last_report = engine.run_cycle()
                     self.cycles_completed += 1
                 except Exception:
                     logger.exception("coverage cycle crashed; will retry next interval")
-                if self._stop.wait(self.config.worker_interval_seconds):
-                    break
+                self._priority_wake.wait(self.config.worker_interval_seconds)
         except Exception:
             logger.exception("coverage worker could not start")
         finally:

@@ -66,7 +66,19 @@ if __name__ == "__main__":
     # thread. Without this, /scan had no snapshot to read and silently fell
     # back to the small legacy BOT_WATCH_SYMBOLS watch list (e.g. FPT/ACB)
     # instead of the full HOSE/HNX/UPCoM universe.
-    scanner_worker = start_scanner_worker_from_env()
+    scanner_worker = start_scanner_worker_from_env(
+        financials_requester=(
+            coverage_worker.request_financials if coverage_worker is not None else None
+        ),
+        before_start=(
+            lambda scanner: coverage_worker.add_financial_refresh_listener(
+                lambda _symbols: scanner.request_scan()
+            )
+            if coverage_worker is not None else None
+        ),
+    )
+    if coverage_worker is not None:
+        service.set_financials_refresh_requester(coverage_worker.request_financials)
     # Issue 2 fix: without this, ``service.index_state`` was always empty in
     # production (nothing ever populated it), so /market and /soi always
     # reported "BREADTH: unavailable" and a regime reason that could never

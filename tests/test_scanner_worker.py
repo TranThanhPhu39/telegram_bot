@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from datetime import date, datetime, timezone
 
 import pytest
 
 from data.database import connect_database
 from data.migrations import bootstrap_schema
 from data.models import OHLCVBar
+from asmf_data.models import FinancialReport
+from asmf_data.store import upsert_financial_reports
 from runtime.bot_service import RuntimeBotDataService
 from runtime.scanner_worker import (
     MarketScannerWorker,
     ScannerWorkerConfig,
+    _fundamental_status_for_scan,
     load_latest_scan_snapshot,
     run_scan_cycle,
     save_scan_snapshot,
@@ -68,6 +72,17 @@ def seed_test_universe(conn: sqlite3.Connection) -> None:
                 "INSERT INTO candles (symbol, timeframe, timestamp, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 bars,
             )
+
+
+def test_scan_fundamental_status_does_not_pass_one_profitable_quarter() -> None:
+    conn = make_test_db()
+    upsert_financial_reports(conn, [FinancialReport(
+        "FPT", "2026Q2", date(2026, 8, 15), True,
+        1000.0, 100.0, 2000.0, 100.0, "VNStock/VCI",
+    )])
+    as_of = int(datetime(2026, 9, 24, tzinfo=timezone.utc).timestamp())
+
+    assert _fundamental_status_for_scan(conn, "FPT", as_of) == "INSUFFICIENT"
 
 
 def test_snapshot_save_and_load_roundtrip() -> None:
@@ -159,7 +174,12 @@ def test_run_scan_cycle_filters_liquidity_and_persists() -> None:
         minimum_average_daily_value=1_000_000_000.0,  # 1B VND
         maximum_watch_symbols=10,
     )
-    results = run_scan_cycle(conn, cfg, now=1_700_000_000)
+    requested_financials: list[str] = []
+    results = run_scan_cycle(
+        conn, cfg,
+        financials_requester=lambda symbol: requested_financials.append(symbol) or True,
+        now=1_700_000_000,
+    )
 
     assert "CL1" in results
     cl1_snap = results["CL1"]
@@ -171,6 +191,19 @@ def test_run_scan_cycle_filters_liquidity_and_persists() -> None:
     symbols = [r.symbol for r in cl1_snap.rows]
     assert "PENNY" not in symbols
     assert "FPT" in symbols
+    assert set(requested_financials) == {
+        row.symbol for row in results["ASMF"].rows
+        if row.fundamental == "INSUFFICIENT"
+    }
+    assert all(row.fundamental == "INSUFFICIENT" for row in cl1_snap.rows)
+    assert all(row.strategy_state == "CHƯA ĐỦ ĐIỀU KIỆN" for row in cl1_snap.rows)
+    asmf_layers = dict(
+        (name, status) for name, status, _detail in results["ASMF"].rows[0].strategy_layers
+    )
+    assert set(asmf_layers) == {"Market", "Sector", "Fundamental", "Institutional", "Technical"}
+    assert asmf_layers["Sector"] == "MISSING"
+    assert asmf_layers["Fundamental"] == "MISSING"
+    assert results["ASMF"].rows[0].strategy_state == "CHƯA ĐỦ ĐIỀU KIỆN"
 
     # Check persistence
     loaded = load_latest_scan_snapshot(conn, "CL1")
@@ -197,6 +230,36 @@ def test_scanner_worker_daemon_lifecycle(tmp_path) -> None:
     worker.stop(timeout=2.0)
     assert not worker.running
     assert worker.cycles_completed >= 1
+
+
+def test_request_scan_rebuilds_snapshot_without_waiting_for_interval(tmp_path) -> None:
+    db_path = f"sqlite:///{(tmp_path / 'wake_scan.sqlite3').as_posix()}"
+    init_conn = connect_database(db_path)
+    bootstrap_schema(init_conn)
+    seed_test_universe(init_conn)
+    init_conn.close()
+
+    worker = MarketScannerWorker(
+        connection_factory=lambda: connect_database(db_path),
+        config=ScannerWorkerConfig(scan_interval_seconds=3600),
+        now=lambda: 1_700_000_000,
+    )
+    worker.start()
+    try:
+        for _ in range(100):
+            if worker.cycles_completed >= 1:
+                break
+            time.sleep(0.05)
+        assert worker.cycles_completed >= 1
+        before = worker.cycles_completed
+        worker.request_scan()
+        for _ in range(100):
+            if worker.cycles_completed > before:
+                break
+            time.sleep(0.05)
+        assert worker.cycles_completed > before
+    finally:
+        worker.stop(timeout=2.0)
 
 def test_start_scanner_worker_from_env_persists_market_wide_snapshot(tmp_path) -> None:
     """Regression for Issue 1: production never started MarketScannerWorker, so
@@ -305,7 +368,7 @@ def test_scan_overview_reads_persisted_snapshot() -> None:
     assert "Hiển thị: Top 2" in text
     assert "1. FPT" in text
     assert "2. MWG" in text
-    assert "THEO DÕI" in text
+    assert "CB " not in text
 
 
 def test_telegram_commands_scan_routing() -> None:

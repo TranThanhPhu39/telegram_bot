@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import sqlite3
 
-from intelligence.news.benchmark import run_benchmark
+from intelligence.news.benchmark import benchmark_decay_profiles, run_benchmark
 from intelligence.news.models import NewsItem, SentimentLabel, SentimentResult
 from intelligence.news.pipeline import (
     CafeFCompanyCatalogProvider,
@@ -13,7 +13,9 @@ from intelligence.news.pipeline import (
 )
 from intelligence.news.repository import SQLiteNewsRepository
 from intelligence.news import sentiment as sentiment_module
-from intelligence.news.sentiment import LexiconSentimentModel
+from intelligence.news.sentiment import (
+    FinancialHeadlineCalibrationModel, LexiconSentimentModel,
+)
 from intelligence.news.service import SentimentQueryService
 
 
@@ -48,6 +50,20 @@ def test_linker_event_dedup_aggregate_and_benchmark(tmp_path):
                            "tests/fixtures/sentiment_benchmark.csv")
     assert result.total == 10
     assert result.accuracy >= .8
+    financial_result = run_benchmark(
+        FinancialHeadlineCalibrationModel(LexiconSentimentModel(now=lambda: NOW)),
+        "tests/fixtures/financial_sentiment_benchmark.csv",
+    )
+    assert financial_result.total == 18
+    assert financial_result.accuracy >= .95
+
+    decay = benchmark_decay_profiles()
+    equal = next(profile for profile in decay if profile.name == "equal")
+    current = next(profile for profile in decay if profile.name == "half-life-24h")
+    assert equal.normalized_weights == (.2, .2, .2, .2, .2)
+    assert current.newest_share > .60
+    assert current.normalized_weights[3] < .01  # seven-day article
+    assert current.oldest_share < 1e-6  # thirty-day article
 
 
 def test_severe_negative_is_fail_closed_by_primary_confidence_and_age(tmp_path):
@@ -190,7 +206,13 @@ def test_get_shared_sentiment_model_is_a_process_wide_singleton(monkeypatch):
     second = sentiment_module.get_shared_sentiment_model()
 
     assert first is second
-    assert isinstance(first, LexiconSentimentModel)
+    assert isinstance(first, FinancialHeadlineCalibrationModel)
+    assert isinstance(first.model, LexiconSentimentModel)
+    headline = NewsItem(
+        "calibration", "test", "https://example.test/calibration", NOW,
+        "FPT lãi ròng gần 30 tỷ đồng mỗi ngày trong tháng 8",
+    )
+    assert first.analyze(headline).label.value == "positive"
 
 
 def test_latest_five_sentiment_and_canonical_selection(tmp_path):

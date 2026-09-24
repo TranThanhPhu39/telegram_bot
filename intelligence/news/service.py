@@ -11,6 +11,14 @@ MAX_NEWS_AGE_DAYS: int = 30
 MAX_ARTICLES: int = 5
 
 
+def time_decay_weight(age_hours: float, half_life_hours: float) -> float:
+    if age_hours < 0:
+        raise ValueError("age_hours cannot be negative")
+    if half_life_hours <= 0:
+        raise ValueError("half_life_hours must be positive")
+    return math.pow(2, -age_hours / half_life_hours)
+
+
 @dataclass(frozen=True, slots=True)
 class SentimentAggregate:
     ticker: str; hours: int; score: float; article_count: int
@@ -77,7 +85,10 @@ class SentimentQueryService:
             return None
         weights = [
             x.event_importance * x.sentiment.model_confidence *
-            math.pow(2, -(end - x.published_at).total_seconds() / 3600 / self.half_life_hours)
+            time_decay_weight(
+                (end - x.published_at).total_seconds() / 3600,
+                self.half_life_hours,
+            )
             for x in items
         ]
         total = sum(weights)

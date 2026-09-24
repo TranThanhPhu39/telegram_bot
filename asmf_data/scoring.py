@@ -52,6 +52,22 @@ def fundamental_score(connection: sqlite3.Connection, symbol: str, as_of: date) 
     return 100 * sum(checks) / len(checks)
 
 
+def fundamental_status(connection: sqlite3.Connection, symbol: str, as_of: date) -> str:
+    """Canonical PASS/FAIL/INSUFFICIENT mapping for every Fundamental consumer."""
+    try:
+        score = fundamental_score(connection, symbol, as_of)
+    except (sqlite3.Error, ValueError, ZeroDivisionError):
+        return "INSUFFICIENT"
+    return fundamental_status_from_score(score)
+
+
+def fundamental_status_from_score(score: float | None) -> str:
+    """Map the canonical ASMF Fundamental score to its shared readiness state."""
+    if score is None:
+        return "INSUFFICIENT"
+    return "PASS" if score >= 60 else "FAIL"
+
+
 def bank_fundamental_score(connection: sqlite3.Connection, symbol: str, as_of: date) -> float | None:
     """Score banks without applying industrial-company leverage rules."""
     rows = latest_bank_financial_reports(connection, symbol, as_of)

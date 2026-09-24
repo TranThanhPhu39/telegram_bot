@@ -211,6 +211,7 @@ class ScanRowView:
     liquidity: str
     strategy_state: str
     fundamental: str
+    strategy_layers: tuple[tuple[str, str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

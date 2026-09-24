@@ -285,9 +285,28 @@ def test_scan_explains_why_each_symbol_is_listed() -> None:
     assert "KẾT QUẢ QUÉT" in text
     assert "1. FPT" in text
     assert "RS" in text
-    assert "CB " in text
+    assert "CB " not in text  # CL1 is technical-only; Fundamental is ASMF-only.
     assert "Vũ trụ:" in text and "Hiển thị: Top" in text
     assert "🕒" in text
+    asmf_text = runtime.scan_overview("ASMF")
+    assert "CB " in asmf_text
+    assert "Regime " in asmf_text
+    assert "Sector " in asmf_text
+    assert "Smart Money " in asmf_text
+    assert "SMF " in asmf_text and "Trigger " in asmf_text
+
+
+def test_scan_fallback_queues_fundamentals_only_for_asmf() -> None:
+    runtime = service()
+    requested: list[str] = []
+    runtime.set_financials_refresh_requester(
+        lambda symbol: requested.append(symbol) or True
+    )
+
+    runtime.scan_overview("CL1")
+    assert requested == []
+    runtime.scan_overview("ASMF")
+    assert requested == ["FPT"]
 
 
 def test_scan_results_tuple_contract_is_preserved() -> None:

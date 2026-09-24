@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+import sqlite3
 import threading
 
 import pytest
@@ -49,6 +50,51 @@ def test_limit_override_and_validation(tmp_path) -> None:
     assert engine.run_cycle(limit=2).selected == ("AAA", "BBB")
     with pytest.raises(ValueError):
         engine.run_cycle(limit=0)
+
+
+def test_priority_financials_worker_wakes_and_notifies_after_attempt(tmp_path) -> None:
+    calls = []
+    completed = threading.Event()
+    notified = []
+
+    class Engine:
+        def __init__(self):
+            self.connection = sqlite3.connect(":memory:", check_same_thread=False)
+
+        def run_cycle(self, **kwargs):
+            calls.append(kwargs)
+            if kwargs.get("symbols"):
+                completed.set()
+                return type("Report", (), {
+                    "outcomes": [type("Outcome", (), {
+                        "dataset": "FINANCIALS", "result": "SUCCESS",
+                    })()]
+                })()
+            return type("Report", (), {"outcomes": []})()
+
+        def close(self):
+            return None
+
+    engine = Engine()
+    worker = MarketCoverageWorker(
+        lambda _should_stop, _sleep: engine,
+        fast_config(worker_interval_seconds=60),
+        connection_factory=lambda: sqlite3.connect(":memory:"),
+    )
+    worker.add_financial_refresh_listener(notified.append)
+    worker.start()
+    try:
+        assert worker.request_financials("fpt") is True
+        assert worker.request_financials("FPT") is False
+        assert completed.wait(2.0)
+    finally:
+        worker.stop(timeout=2.0)
+
+    priority_call = next(call for call in calls if call.get("symbols"))
+    assert priority_call == {
+        "symbols": ("FPT",), "limit": 1, "datasets": ("FINANCIALS",),
+    }
+    assert notified == [("FPT",)]
 
 
 def test_least_recently_attempted_goes_first(tmp_path) -> None:

@@ -370,6 +370,17 @@ def build_strategy_view(
     )
 
 
+def build_insufficient_strategy_view(name: str, reason: str) -> StrategyView:
+    """Render unavailable strategy evaluation as insufficient, never as N/A."""
+    return StrategyView(
+        name=name.strip().upper(),
+        state="CHƯA ĐỦ ĐIỀU KIỆN",
+        score=None,
+        missing=(reason,),
+        note=reason,
+    )
+
+
 def build_sentiment_view(aggregate) -> SentimentView:
     """Convert a SentimentAggregate; a missing aggregate is stated, not filled."""
     if aggregate is None:
@@ -466,6 +477,16 @@ def build_scan_row(
             "N/A" if technical.relative_strength is None
             else f"{technical.relative_strength:+.2f}% vs VNINDEX"
         )
+    strategy_layers = ()
+    if strategy is not None and strategy.name.strip().upper() == "ASMF":
+        strategy_layers = tuple(
+            (
+                layer.name,
+                layer.status.value if hasattr(layer.status, "value") else str(layer.status),
+                layer.detail,
+            )
+            for layer in strategy.layers
+        )
     return ScanRowView(
         symbol=symbol,
         trend=trend,
@@ -473,6 +494,7 @@ def build_scan_row(
         liquidity="PASS" if liquidity_pass else "FAIL",
         strategy_state="N/A" if strategy is None else strategy.state,
         fundamental=fundamental_status or "INSUFFICIENT",
+        strategy_layers=strategy_layers,
     )
 
 

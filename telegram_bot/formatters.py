@@ -462,6 +462,44 @@ def _scan_rs(value: str) -> str:
     return "RS " + value.replace(" vs VNINDEX", "")
 
 
+def _scan_asmf_context(row: ScanRowView) -> tuple[str, ...]:
+    layers = {name: (status, detail) for name, status, detail in row.strategy_layers}
+    labels = {
+        "Market": "Regime",
+        "Sector": "Sector",
+        "Institutional": "Smart Money",
+    }
+    parts = []
+    for name, label in labels.items():
+        if name in layers:
+            status, detail = layers[name]
+            compact_detail = ""
+            if status != "MISSING" and detail:
+                if name == "Market":
+                    compact_detail = (
+                        detail.replace("regime score ", "score ")
+                        .replace("; Hurst ", ", Hurst ")
+                    )
+                elif detail.startswith("score "):
+                    compact_detail = detail.removeprefix("score ")
+            parts.append(
+                f"{label} {status}" + (f" {compact_detail}" if compact_detail else "")
+            )
+    technical = layers.get("Technical")
+    if technical is not None:
+        _status, detail = technical
+        if "SMF " in detail:
+            score, *trigger = detail.split(";")
+            parts.append(score.strip())
+            parts.append(
+                trigger[0].strip().replace("trigger ", "Trigger ")
+                if trigger else "Trigger N/A"
+            )
+        else:
+            parts.extend(("SMF N/A", "Trigger N/A"))
+    return tuple(parts)
+
+
 def _scan_timestamp(scanned_at: int | None) -> str | None:
     if scanned_at is None:
         return None
@@ -521,11 +559,16 @@ def format_scan(
         lines.append(f"{icon} {label} ({len(bucket)})")
         for row in bucket:
             counter += 1
-            lines.append(
-                f"{counter}. {row.symbol} | {_scan_vn_case(row.trend)} | "
-                f"{_scan_rs(row.relative_strength)} | CB {row.fundamental} | "
-                f"{_scan_vn_case(row.strategy_state)}"
-            )
+            parts = [
+                f"{counter}. {row.symbol}",
+                _scan_vn_case(row.trend),
+                _scan_rs(row.relative_strength),
+            ]
+            if strategy.strip().upper() == "ASMF":
+                parts.append(f"CB {row.fundamental}")
+                parts.extend(_scan_asmf_context(row))
+            parts.append(_scan_vn_case(row.strategy_state))
+            lines.append(" | ".join(parts))
 
     lines.append(DIVIDER)
     lines.append(

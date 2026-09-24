@@ -19,7 +19,10 @@ from typing import Protocol, Sequence
 
 from dotenv import load_dotenv
 
-from asmf_data.scoring import fundamental_score, institutional_flow_score, sector_strength_score
+from asmf_data.scoring import (
+    fundamental_score, fundamental_status, institutional_flow_score,
+    sector_strength_score,
+)
 from asmf_data.store import active_sector, sector_members
 from data.database import connect_database
 from data.indicators import ema20, ema50, rsi14
@@ -29,6 +32,7 @@ from data.vietcap.historical import normalize_gap_chart
 from data.vietcap.rest import VietcapRestClient, VietcapRestError, VietcapTimeFrame
 from fundamentals.repository import FundamentalFacts, load_fundamental_facts
 from runtime.analysis import (
+    build_insufficient_strategy_view,
     build_market_view,
     build_price_view,
     build_risk_items,
@@ -143,6 +147,7 @@ class RuntimeBotDataService:
         sector_history_requester: Callable[[str], bool] | None = None,
         index_state: object | None = None,
         news_refresh_requester: Callable[[str], bool] | None = None,
+        financials_refresh_requester: Callable[[str], bool] | None = None,
     ) -> None:
         self.client = client
         self.connection = connection
@@ -155,6 +160,7 @@ class RuntimeBotDataService:
         self.sector_history_requester = sector_history_requester
         self.index_state = index_state
         self.news_refresh_requester = news_refresh_requester
+        self.financials_refresh_requester = financials_refresh_requester
         bootstrap_schema(connection)
         self.portfolio = PortfolioRuntime(
            connection, self._history, lambda: self.now(), PortfolioConfig.from_env() 
@@ -171,6 +177,21 @@ class RuntimeBotDataService:
     ) -> None:
         """Attach the on-demand targeted news refresh queue (Issue 5)."""
         self.news_refresh_requester = requester
+
+    def set_financials_refresh_requester(
+        self, requester: Callable[[str], bool]
+    ) -> None:
+        """Attach the non-blocking prioritized FINANCIALS queue."""
+        self.financials_refresh_requester = requester
+
+    def _request_financials_refresh(self, symbol: str) -> None:
+        requester = self.financials_refresh_requester
+        if requester is None:
+            return
+        try:
+            requester(symbol)
+        except Exception:
+            LOGGER.exception("could not enqueue priority FINANCIALS refresh for %s", symbol)
 
     def _request_news_refresh(self, symbol: str) -> str:
         """Enqueue a background per-ticker news refresh; never blocks Telegram.
@@ -585,9 +606,12 @@ class RuntimeBotDataService:
                 else:
                     try:
                         strategy_view = build_strategy_view(evaluate_cl1(bars))
-                    except ValueError:
-                        strategy_view = None
-                status = self._fundamental_status(symbol, bars[-1].timestamp)
+                    except ValueError as error:
+                        strategy_view = build_insufficient_strategy_view("CL1", str(error))
+                if strategy_upper == "ASMF":
+                    status = self._fundamental_status(symbol, bars[-1].timestamp)
+                    if status == "INSUFFICIENT":
+                        self._request_financials_refresh(symbol)
             rows.append(build_scan_row(symbol, technical, strategy_view, True, status))
         from datetime import datetime, timezone
         cur_ts = int(self.now())

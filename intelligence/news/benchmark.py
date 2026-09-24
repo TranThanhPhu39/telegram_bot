@@ -5,10 +5,13 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import math
 from pathlib import Path
+from collections.abc import Sequence
 
 from intelligence.news.models import NewsItem, SentimentLabel
 from intelligence.news.sentiment import SentimentModel
+from intelligence.news.service import time_decay_weight
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,3 +43,36 @@ def run_benchmark(model: SentimentModel, fixture: str | Path) -> BenchmarkResult
     total = len(rows)
     return BenchmarkResult(total, correct, correct / total if total else 0.0,
                            sum(f1_values) / len(f1_values), confusion)
+
+
+@dataclass(frozen=True, slots=True)
+class DecayProfile:
+    name: str
+    normalized_weights: tuple[float, ...]
+    newest_share: float
+    oldest_share: float
+
+
+def benchmark_decay_profiles(
+    age_hours: Sequence[float] = (0, 24, 72, 168, 720),
+    half_lives_hours: Sequence[float] = (24, 72, 168),
+) -> tuple[DecayProfile, ...]:
+    """Compare equal weighting with exponential half-life choices, no news I/O."""
+    ages = tuple(float(age) for age in age_hours)
+    if not ages or any(not math.isfinite(age) or age < 0 for age in ages):
+        raise ValueError("age_hours must contain finite non-negative values")
+    profiles: list[DecayProfile] = []
+    raw_equal = tuple(1.0 for _ in ages)
+    equal_total = sum(raw_equal)
+    equal = tuple(weight / equal_total for weight in raw_equal)
+    profiles.append(DecayProfile("equal", equal, equal[0], equal[-1]))
+    for half_life in half_lives_hours:
+        if not math.isfinite(half_life) or half_life <= 0:
+            raise ValueError("half_lives_hours must contain finite positive values")
+        raw = tuple(time_decay_weight(age, half_life) for age in ages)
+        total = sum(raw)
+        normalized = tuple(weight / total for weight in raw)
+        profiles.append(DecayProfile(
+            f"half-life-{half_life:g}h", normalized, normalized[0], normalized[-1]
+        ))
+    return tuple(profiles)

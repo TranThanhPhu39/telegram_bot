@@ -18,21 +18,55 @@ import threading
 import time
 from typing import Callable, Mapping, Sequence
 
-from asmf_data.store import latest_financial_reports
 from data.models import OHLCVBar
-from runtime.analysis import build_scan_row, build_strategy_view, build_technical_view
+from runtime.analysis import (
+    build_insufficient_strategy_view, build_scan_row, build_strategy_view,
+    build_technical_view,
+)
 from runtime.market_universe import load_market_universe
-from runtime.views import ScanRowView
+from runtime.views import LayerStatus, ScanRowView, StrategyLayerView, StrategyView
 from scanner.universe import (
     ScannerConfig,
     ScannerInstrument,
     daily_prescreen,
     realtime_watch_universe,
 )
-from asmf_data.scoring import fundamental_score, institutional_flow_score
+from asmf_data.scoring import (
+    fundamental_score, fundamental_status, fundamental_status_from_score,
+    institutional_flow_score, sector_strength_score,
+)
 from strategy.technical_strategies import evaluate_asmf, evaluate_cl1
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _score_layer(name: str, score: float | None) -> StrategyLayerView:
+    if score is None:
+        return StrategyLayerView(name, LayerStatus.MISSING, "chưa có điểm point-in-time")
+    status = LayerStatus.PASS if score >= 60 else LayerStatus.FAIL
+    return StrategyLayerView(name, status, f"score {score:.1f}/100")
+
+
+def _insufficient_asmf_view(
+    reason: str,
+    *,
+    fundamental: float | None,
+    sector: float | None,
+    institutional: float | None,
+) -> StrategyView:
+    return StrategyView(
+        name="ASMF",
+        state="CHƯA ĐỦ ĐIỀU KIỆN",
+        score=None,
+        missing=(reason,),
+        layers=(
+            StrategyLayerView("Market", LayerStatus.MISSING, reason),
+            _score_layer("Sector", sector),
+            _score_layer("Fundamental", fundamental),
+            _score_layer("Institutional", institutional),
+            StrategyLayerView("Technical", LayerStatus.MISSING, reason),
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +118,7 @@ def save_scan_snapshot(
             "liquidity": r.liquidity,
             "fundamental": r.fundamental,
             "strategy_state": r.strategy_state,
+            "strategy_layers": r.strategy_layers,
         }
         for r in rows
     ]
@@ -141,6 +176,11 @@ def load_latest_scan_snapshot(
                 liquidity=item["liquidity"],
                 fundamental=item["fundamental"],
                 strategy_state=item["strategy_state"],
+                strategy_layers=tuple(
+                    (str(layer[0]), str(layer[1]), str(layer[2]))
+                    for layer in item.get("strategy_layers", ())
+                    if isinstance(layer, (list, tuple)) and len(layer) == 3
+                ),
             )
             for item in raw_rows
         )
@@ -185,16 +225,7 @@ def _fundamental_status_for_scan(
     connection: sqlite3.Connection, symbol: str, as_of_timestamp: int
 ) -> str:
     as_of_date = datetime.fromtimestamp(as_of_timestamp, timezone.utc).date()
-    try:
-        reports = latest_financial_reports(connection, symbol, as_of_date)
-        if not reports:
-            return "MISSING"
-        report = reports[0]
-        if report["net_profit"] is not None and report["net_profit"] > 0:
-            return "PASS"
-        return "NEUTRAL"
-    except Exception:
-        return "MISSING"
+    return fundamental_status(connection, symbol, as_of_date)
 
 
 def run_scan_cycle(
@@ -203,6 +234,7 @@ def run_scan_cycle(
     *,
     strategies: Sequence[str] = ("CL1", "ASMF"),
     bar_loader: Callable[[str], Sequence[OHLCVBar]] | None = None,
+    financials_requester: Callable[[str], bool] | None = None,
     now: int | None = None,
 ) -> dict[str, ScanSnapshot]:
     """Execute a full-market prescreen and strategy evaluation, persisting snapshots to SQLite."""
@@ -253,23 +285,59 @@ def run_scan_cycle(
             if bars:
                 as_of_sym = datetime.fromtimestamp(bars[-1].timestamp, timezone.utc).date()
                 if strat_upper == "ASMF":
+                    f_score = None
+                    flow_score = None
+                    sector_score = None
                     try:
                         f_score = fundamental_score(connection, sym, as_of_sym)
+                        f_status = fundamental_status_from_score(f_score)
                         flow_score = institutional_flow_score(connection, sym, as_of_sym)
+                        sector_score = sector_strength_score(
+                            connection, sym, as_of_sym, histories, benchmark_bars
+                        )
                         asmf_res = evaluate_asmf(
                             bars, benchmark_bars,
+                            sector_score=sector_score,
                             fundamental_score=f_score,
                             institutional_flow_score=flow_score,
                         )
                         strategy_view = build_strategy_view(asmf_res)
-                    except (ValueError, Exception):
-                        strategy_view = None
+                    except ValueError as error:
+                        if len(bars) < 200:
+                            reason = f"stock history short: {len(bars)}/200 daily bars"
+                        elif len(benchmark_bars) < 200:
+                            reason = (
+                                "VNINDEX history short: "
+                                f"{len(benchmark_bars)}/200 daily bars"
+                            )
+                        else:
+                            reason = str(error) or "ASMF evaluation has insufficient history"
+                        strategy_view = _insufficient_asmf_view(
+                            reason,
+                            fundamental=f_score,
+                            sector=sector_score,
+                            institutional=flow_score,
+                        )
+                        f_status = "INSUFFICIENT"
+                    except Exception:
+                        LOGGER.exception("ASMF scan evaluation failed for %s", sym)
+                        strategy_view = _insufficient_asmf_view(
+                            "ASMF evaluation unavailable",
+                            fundamental=f_score,
+                            sector=sector_score,
+                            institutional=flow_score,
+                        )
+                        f_status = "INSUFFICIENT"
+                    if f_status == "INSUFFICIENT" and financials_requester is not None:
+                        try:
+                            financials_requester(sym)
+                        except Exception:
+                            LOGGER.exception("could not enqueue priority FINANCIALS refresh for %s", sym)
                 else:  # CL1
                     try:
                         strategy_view = build_strategy_view(evaluate_cl1(bars))
-                    except ValueError:
-                        strategy_view = None
-                f_status = _fundamental_status_for_scan(connection, sym, bars[-1].timestamp)
+                    except ValueError as error:
+                        strategy_view = build_insufficient_strategy_view("CL1", str(error))
             rows.append(build_scan_row(sym, tech, strategy_view, True, f_status))
 
         snapshot_id = save_scan_snapshot(
@@ -306,13 +374,16 @@ class MarketScannerWorker:
         config: ScannerWorkerConfig | None = None,
         *,
         bar_loader: Callable[[str], Sequence[OHLCVBar]] | None = None,
+        financials_requester: Callable[[str], bool] | None = None,
         now: Callable[[], float] | None = None,
     ) -> None:
         self._connection_factory = connection_factory
         self.config = config or ScannerWorkerConfig()
         self._bar_loader = bar_loader
+        self._financials_requester = financials_requester
         self._now = now
         self._stop = threading.Event()
+        self._scan_requested = threading.Event()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self.cycles_completed = 0
@@ -335,9 +406,17 @@ class MarketScannerWorker:
             self._thread.start()
             return self._thread
 
+    def request_scan(self) -> None:
+        """Wake the worker after prioritized Fundamental coverage completes."""
+        self._scan_requested.set()
+
+    def set_financials_requester(self, requester: Callable[[str], bool]) -> None:
+        self._financials_requester = requester
+
     def stop(self, timeout: float | None = None) -> None:
         with self._lock:
             self._stop.set()
+            self._scan_requested.set()
             thread = self._thread
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout)
@@ -346,18 +425,20 @@ class MarketScannerWorker:
         connection = self._connection_factory()
         try:
             while not self._stop.is_set():
+                self._scan_requested.clear()
                 now_val = int(self._now() if self._now else time.time())
                 try:
                     self.last_results = run_scan_cycle(
                         connection,
                         self.config,
                         bar_loader=self._bar_loader,
+                        financials_requester=self._financials_requester,
                         now=now_val,
                     )
                     self.cycles_completed += 1
                 except Exception:
                     LOGGER.exception("Error during market scan cycle")
-                self._stop.wait(self.config.scan_interval_seconds)
+                self._scan_requested.wait(self.config.scan_interval_seconds)
         finally:
             connection.close()
 
@@ -370,6 +451,8 @@ def _flag(raw: str | None, default: bool) -> bool:
 
 def start_scanner_worker_from_env(
     *, environ: Mapping[str, str] | None = None,
+    financials_requester: Callable[[str], bool] | None = None,
+    before_start: Callable[["MarketScannerWorker"], None] | None = None,
 ) -> "MarketScannerWorker | None":
     """Start the background market scanner worker; returns ``None`` when disabled.
 
@@ -393,7 +476,11 @@ def start_scanner_worker_from_env(
             source.get("SCANNER_INTERVAL_SECONDS", "") or ScannerWorkerConfig().scan_interval_seconds
         ),
     )
-    worker = MarketScannerWorker(connection_factory, config)
+    worker = MarketScannerWorker(
+        connection_factory, config, financials_requester=financials_requester
+    )
+    if before_start is not None:
+        before_start(worker)
     worker.start()
     LOGGER.info(
         "Market scanner worker started interval=%.0fs", config.scan_interval_seconds
