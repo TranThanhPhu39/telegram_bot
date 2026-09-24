@@ -76,6 +76,7 @@ def latest_financial_reports(connection: sqlite3.Connection, symbol: str, as_of:
     return tuple(connection.execute(
         "SELECT * FROM financial_reports WHERE symbol=? AND consolidated=1 AND public_date<=? "
         "AND (source NOT LIKE 'yfinance/%' OR source LIKE 'yfinance/%/quarterly') "
+        "AND (source NOT LIKE 'VietcapIQ/%' OR source LIKE 'VietcapIQ/%/borrowings-v2') "
         "ORDER BY report_period DESC LIMIT 8", (symbol, as_of.isoformat())
     ).fetchall())
 

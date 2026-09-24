@@ -557,7 +557,8 @@ def _iq_balance(**overrides: object) -> dict[str, object]:
         "organCode": "FPT", "yearReport": 2026, "lengthReport": 2,
         "publicDate": "2026-08-22T00:00:00",
         "bsa53": 1000.0, "bsa54": 600.0, "bsa55": 400.0,
-        "bsa67": 200.0, "bsa78": 400.0,
+        "bsa56": 125.0, "bsa67": 200.0, "bsa71": 75.0,
+        "bsa78": 400.0,
     }
     row.update(overrides)
     return row
@@ -597,13 +598,13 @@ def test_vietcap_iq_normalizes_verified_quarter_and_actual_public_date() -> None
     assert row.get("net_income_parent") == 58.0
     assert row.get("total_assets") == 1000.0
     assert row.get("total_liabilities") == 600.0
-    assert row.get("short_term_debt") == 400.0
-    assert row.get("long_term_debt") == 200.0
+    assert row.get("short_term_debt") == 125.0
+    assert row.get("long_term_debt") == 75.0
     assert row.get("total_equity") == 400.0
     canonical = promote_corporate_statement(row, source=result.provenance)
     assert canonical is not None
     assert canonical.net_profit == 58.0
-    assert canonical.total_debt == 600.0
+    assert canonical.total_debt == 200.0
     assert canonical.public_date == date(2026, 8, 22)
 
 
@@ -615,9 +616,21 @@ def test_vietcap_iq_fails_closed_when_accounting_identity_changes() -> None:
 
     result = VietcapIQFinancialProvider(session=session).fetch_financials("FPT")
 
-    assert result.status is ProviderStatus.PARTIAL
-    assert result.statements[0].get("revenue") == 500.0
-    assert result.statements[0].get("total_equity") is None
+    assert result.status is ProviderStatus.ERROR
+    assert "no canonical-complete" in result.error_reason
+
+
+def test_vietcap_iq_unusable_partial_allows_provider_chain_fallback() -> None:
+    iq = VietcapIQFinancialProvider(session=_FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(_iq_balance(bsa78=999.0)),
+        "INCOME_STATEMENT": _iq_payload(_iq_income()),
+    }))
+    fallback = _StubProvider("VNStock", ProviderStatus.AVAILABLE)
+
+    result = ProviderChain([iq, fallback]).fetch_financials("FPT")
+
+    assert result.provider == "VNStock"
+    assert result.attempted == ("VietcapIQ:ERROR", "VNStock:AVAILABLE")
 
 
 def test_vietcap_iq_rejects_conflicting_section_public_dates() -> None:

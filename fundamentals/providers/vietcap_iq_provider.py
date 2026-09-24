@@ -11,8 +11,10 @@ Verified non-bank mappings from the BALANCE_SHEET and INCOME_STATEMENT payloads:
 * ``isa22`` - profit after tax attributable to parent shareholders
 * ``bsa53`` - total assets
 * ``bsa54`` - total liabilities
-* ``bsa55`` - current liabilities
-* ``bsa67`` - non-current liabilities
+* ``bsa55`` - current liabilities (identity check only)
+* ``bsa56`` - short-term loans
+* ``bsa67`` - non-current liabilities (identity check only)
+* ``bsa71`` - long-term loans
 * ``bsa78`` - total equity
 
 The identities ``bsa55 + bsa67 == bsa54`` and
@@ -140,12 +142,19 @@ class VietcapIQFinancialProvider(FundamentalProvider):
     def _balance_values(row: Mapping[str, object]) -> dict[str, float | None]:
         assets = clean_number(row.get("bsa53"))
         liabilities = clean_number(row.get("bsa54"))
-        current = clean_number(row.get("bsa55"))
-        non_current = clean_number(row.get("bsa67"))
+        current_liabilities = clean_number(row.get("bsa55"))
+        short_term_loans = clean_number(row.get("bsa56"))
+        non_current_liabilities = clean_number(row.get("bsa67"))
+        long_term_loans = clean_number(row.get("bsa71"))
         equity = clean_number(row.get("bsa78"))
         identities_valid = (
-            None not in (assets, liabilities, current, non_current, equity)
-            and _close(current + non_current, liabilities)  # type: ignore[operator]
+            None not in (
+                assets, liabilities, current_liabilities,
+                non_current_liabilities, equity,
+            )
+            and _close(  # type: ignore[operator]
+                current_liabilities + non_current_liabilities, liabilities
+            )
             and _close(liabilities + equity, assets)  # type: ignore[operator]
         )
         if not identities_valid:
@@ -154,8 +163,11 @@ class VietcapIQFinancialProvider(FundamentalProvider):
         return {
             "total_assets": assets,
             "total_liabilities": liabilities,
-            "short_term_debt": current,
-            "long_term_debt": non_current,
+            # The canonical debt ratio means interest-bearing borrowings, not
+            # all liabilities.  BSA55/BSA67 remain useful only for validating
+            # the balance-sheet identity.
+            "short_term_debt": short_term_loans,
+            "long_term_debt": long_term_loans,
             "total_equity": equity,
         }
 
@@ -258,8 +270,24 @@ class VietcapIQFinancialProvider(FundamentalProvider):
                 reason="Vietcap IQ returned no verified quarterly rows",
                 attempted=tuple(attempted),
             )
+        complete_rows = tuple(
+            row for row in statements
+            if row.public_date is not None
+            and row.get("revenue") is not None
+            and row.get("net_income_parent") is not None
+            and row.get("total_equity") is not None
+            and row.get("short_term_debt") is not None
+            and row.get("long_term_debt") is not None
+        )
+        if not complete_rows:
+            return ProviderResult.failed(
+                symbol, "FINANCIALS", self.name,
+                "Vietcap IQ returned no canonical-complete quarterly rows",
+                attempted=tuple(attempted),
+            )
         complete = all(
-            row.get("revenue") is not None
+            row.public_date is not None
+            and row.get("revenue") is not None
             and row.get("net_income_parent") is not None
             and row.get("total_equity") is not None
             and row.get("short_term_debt") is not None

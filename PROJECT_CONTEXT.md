@@ -4547,3 +4547,63 @@ until the user supplies a current Authorization locally and reruns the harness.
 The Vietcap IQ authenticated live-acceptance phase is COMPLETE. Stop before any
 new phase; production bot-process coverage validation remains separately pending.
 
+### 2026-09-24 — Vietcap IQ canonical integrity follow-up
+
+**Root cause:** the initial IQ adapter correctly identified `bsa55` as current
+liabilities and `bsa67` as non-current liabilities, but then normalized those
+aggregate liability totals into canonical `short_term_debt`/`long_term_debt`.
+The BSA schema and the supplied payload establish `bsa56` as short-term loans
+and `bsa71` as long-term loans. This made Vietcap Debt/Equity semantically
+different from VNStock/KBS, which already uses borrowings and finance leases.
+
+Two related provider-integrity gaps were also confirmed. Canonical upsert was
+unconditional except for a Yahoo-only guard, so a later VNStock/TCBS fallback
+could overwrite an IQ quarter. In addition, an IQ `PARTIAL` result with zero
+promotable rows stopped `ProviderChain`, preventing a healthy fallback.
+
+**Implementation:**
+
+- IQ now maps `bsa56` + `bsa71` as interest-bearing debt while retaining
+  `bsa55+bsa67=bsa54` and `bsa54+bsa78=bsa53` as validation identities.
+- Corrected canonical source names end in `/borrowings-v2`. Readers and
+  readiness queries hide older IQ rows fail-closed, and the freshness shortcut
+  is bypassed while a symbol still contains legacy IQ rows.
+- Automated source precedence is now VietcapIQ v2 > VNStock > TCBS > Yahoo.
+  Unknown/manual sources are never overwritten by the automated refresh path;
+  legacy IQ rows have priority zero so a validated fallback can recover them.
+- IQ returns `ERROR` when no returned quarter is canonical-complete. The chain
+  can then continue to VNStock, TCBS and Yahoo instead of stopping on unusable
+  partial evidence.
+
+**Verification:** focused financial/provider/PIT/runtime/valuation regression
+passed with 184 tests; the final source-upgrade/downgrade subset passed with
+114 tests. Full regression passed with 1001 tests in 32.16s. Direct FPT live
+revalidation is **NOT TESTED**: both IQ sections were
+rejected/unusable with the current local `.env` session. The harness emitted no
+secret. A valid local Authorization is required before forced sync can replace
+the legacy FPT rows and before this phase can be marked complete.
+
+This concrete external blocker splits the phase at a safe boundary. Stop before
+bank fundamentals, scanner consistency or sentiment work.
+
+### 2026-09-24 — Vietcap IQ canonical integrity live revalidation PASS
+
+- The user renewed `VIETCAP_AUTHORIZATION` locally and ran the direct no-fallback
+  FPT harness. It passed with 34 canonical-complete quarters, 34 actual
+  publication dates and latest period 2026Q2.
+- The forced financial refresh completed through VietcapIQ in one selected
+  attempt and coverage reported `FINANCIALS READY`.
+- A read-only SQLite verification found 34 FPT canonical rows spanning 2018Q1
+  through 2026Q2. Every row carries corrected provenance
+  `VietcapIQ/IQ/financial-statement/borrowings-v2`; the point-in-time Fundamental
+  score remains 60.0.
+- `coverage_report` intentionally renders the acquisition provider and
+  `provider_source` (`VietcapIQ/IQ/financial-statement`), not the canonical row
+  `source`. Its shorter display therefore does not indicate a legacy row.
+- `INSTITUTIONAL MISSING` is experimental lookup state and does not participate
+  in ASMF V2 scoring or gating. The CafeF `NEWS ERROR` was a separate DNS
+  resolution failure and does not invalidate financial-statement acceptance.
+
+The Vietcap IQ canonical integrity follow-up is COMPLETE. Stop before starting
+another phase.
+

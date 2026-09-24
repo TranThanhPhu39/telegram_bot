@@ -690,6 +690,83 @@ def test_legacy_yfinance_rows_are_invisible_before_the_first_corrected_refresh(c
     assert fundamental_score(connection, "FPT", date(2026, 1, 1)) is None
 
 
+def test_legacy_vietcap_liability_mapped_rows_are_invisible(connection) -> None:
+    row = FinancialReport(
+        "FPT", "2026Q2", date(2026, 8, 22), True,
+        1000.0, 100.0, 2000.0, 900.0,
+        "VietcapIQ/IQ/financial-statement",
+    )
+    upsert_financial_reports(connection, [row])
+
+    assert latest_financial_reports(connection, "FPT", date(2026, 12, 31)) == ()
+
+
+def test_vietcap_canonical_source_cannot_be_downgraded_by_vnstock(connection) -> None:
+    trusted = FinancialReport(
+        "FPT", "2026Q2", date(2026, 8, 22), True,
+        777.0, 77.0, 2000.0, 200.0,
+        "VietcapIQ/IQ/financial-statement/borrowings-v2",
+    )
+    upsert_financial_reports(connection, [trusted])
+    fallback_row = statement(
+        "FPT", "2026Q2", date(2026, 8, 23), revenue=999.0,
+        net_income=99.0, total_equity=2000.0,
+        short_term_debt=100.0, long_term_debt=400.0,
+    )
+
+    outcome = refresh_financials(
+        connection, ProviderChain([StubProvider(statements=(fallback_row,))]),
+        "FPT", force=True,
+    )
+
+    stored = connection.execute(
+        "SELECT revenue,source FROM financial_reports "
+        "WHERE symbol='FPT' AND report_period='2026Q2'"
+    ).fetchone()
+    assert tuple(stored) == (
+        777.0, "VietcapIQ/IQ/financial-statement/borrowings-v2"
+    )
+    assert outcome.rows_promoted == 0
+
+
+def test_vietcap_canonical_source_upgrades_lower_priority_automated_data(connection) -> None:
+    lower_priority = FinancialReport(
+        "FPT", "2026Q2", date(2026, 8, 14), True,
+        500.0, 50.0, 1900.0, 450.0, "VNStock/KBS",
+    )
+    upsert_financial_reports(connection, [lower_priority])
+    iq_row = statement(
+        "FPT", "2026Q2", date(2026, 8, 22), revenue=777.0,
+        net_income=77.0, total_equity=2000.0,
+        short_term_debt=125.0, long_term_debt=75.0,
+    )
+
+    class VietcapProvider(StubProvider):
+        name = "VietcapIQ"
+
+        def fetch_financials(self, symbol, *, exchange=None):
+            return ProviderResult(
+                symbol=symbol, dataset="FINANCIALS", provider=self.name,
+                provider_source="IQ/financial-statement",
+                status=ProviderStatus.AVAILABLE, statements=(iq_row,),
+            )
+
+    outcome = refresh_financials(
+        connection, ProviderChain([VietcapProvider(statements=(iq_row,))]),
+        "FPT", force=True,
+    )
+
+    stored = connection.execute(
+        "SELECT revenue,total_debt,source FROM financial_reports "
+        "WHERE symbol='FPT' AND report_period='2026Q2'"
+    ).fetchone()
+    assert tuple(stored) == (
+        777.0, 200.0,
+        "VietcapIQ/IQ/financial-statement/borrowings-v2",
+    )
+    assert outcome.rows_promoted == 1
+
+
 def test_issue10_five_flow_sessions_yields_ready_for_institutional(connection) -> None:
     """When >= 5 flow sessions are persisted, institutional flow coverage is READY
     even if provider returned PARTIAL status."""

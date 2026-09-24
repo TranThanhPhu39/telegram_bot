@@ -153,6 +153,12 @@ Vietcap IQ BCTC là opt-in. Provider đọc hai section `BALANCE_SHEET` và
 đã được đối chiếu bằng phương trình kế toán. Không sao chép header đăng nhập,
 cookie hoặc token vào mã nguồn hay tài liệu.
 
+Debt/Equity dùng khoản vay chịu lãi: `bsa56` (vay ngắn hạn) và `bsa71` (vay
+dài hạn). `bsa55`/`bsa67` là tổng nợ ngắn/dài hạn và chỉ được dùng kiểm tra
+phương trình tổng nợ phải trả; chúng không được ghi vào canonical debt. Dòng
+Vietcap đúng contract mang provenance `/borrowings-v2`; dòng Vietcap cũ thiếu
+suffix này bị ẩn fail-closed và cần force-sync lại.
+
 Request IQ đã quan sát chỉ dùng `Authorization`; nó không dùng `Cookie` hay
 `device-id`. `Origin` là `https://trading.vietcap.com.vn` và `Referer` nằm dưới
 `/iq/`. Harness đọc `VIETCAP_AUTHORIZATION` từ môi trường cục bộ và không in

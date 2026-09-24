@@ -447,6 +447,11 @@ reads the observed IQ `BALANCE_SHEET` and `INCOME_STATEMENT` quarterly payloads.
 It uses actual `publicDate`, verifies both balance and profit identities, and
 fails closed if the undocumented frontend schema changes. No IQ secret is
 embedded or logged. Live authentication remains an external runtime condition.
+Canonical debt uses `bsa56` short-term loans plus `bsa71` long-term loans;
+`bsa55` and `bsa67` are aggregate liabilities used only by identity checks.
+Corrected rows carry `/borrowings-v2`; older Vietcap rows are hidden until a
+successful refresh replaces them. Automated source precedence prevents a later
+VNStock, TCBS or Yahoo fallback from downgrading a corrected Vietcap quarter.
 
 The next adapter uses VNStock 4.0.8 with KBS before VCI; it converts KBS's
 semantic wide format (one metric per row and one reporting period per column)

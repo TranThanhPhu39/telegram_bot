@@ -22,6 +22,31 @@ unchecked; they are NOT TESTED, not PASS:
 - Phase 25: coverage worker running inside the real bot process against live providers
 
 ## ACTIVE IMPLEMENTATION PHASE
+**Vietcap IQ canonical integrity follow-up — COMPLETE (PASS)**
+
+- [x] Correct Vietcap debt semantics: `bsa56` short-term loans and `bsa71`
+  long-term loans; keep `bsa55`/`bsa67` for liability identity checks only
+- [x] Version corrected canonical provenance as `/borrowings-v2`
+- [x] Hide legacy Vietcap canonical rows that stored total liabilities as debt
+- [x] Force legacy Vietcap symbols past the fresh-coverage skip on their next cycle
+- [x] Add deterministic automated-source precedence so VNStock/TCBS/Yahoo cannot
+  downgrade a corrected Vietcap quarter, while Vietcap can upgrade lower sources
+- [x] Make Vietcap return `ERROR` when it has zero canonical-complete quarters so
+  the provider chain continues to VNStock/TCBS/Yahoo
+- [x] Focused regression — 184 passed, then 114 passed after final precedence test
+- [x] Full regression — 1001 passed in 32.16s
+- [x] Direct FPT live revalidation — PASS: 34 complete quarters, 34 actual
+  publication dates, latest 2026Q2
+- [x] Forced canonical refresh — PASS: FINANCIALS READY through VietcapIQ in one
+  selected attempt
+- [x] Persisted verification — PASS: all 34 FPT canonical rows from 2018Q1
+  through 2026Q2 carry `/borrowings-v2`; Fundamental score remains 60.0
+
+Stop condition reached: corrected debt semantics, source precedence, fallback,
+authenticated live acquisition and canonical persistence are all verified.
+
+### Previous completed phase
+
 **Vietcap IQ authenticated live acceptance — COMPLETE (PASS)**
 
 - [x] User confirmed the successful browser request has Authorization only
@@ -38,8 +63,6 @@ unchecked; they are NOT TESTED, not PASS:
 Stop condition reached: the browser-observed header contract, authenticated live
 fetch, canonical promotion and readiness report all pass. The local Authorization
 was removed from the PowerShell environment after the bounded run.
-
-### Previous completed phase
 
 **Vietcap IQ authenticated live acceptance — COMPLETE (superseded NOT TESTED verdict)**
 

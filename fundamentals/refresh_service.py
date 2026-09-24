@@ -58,7 +58,8 @@ def _canonical_financial_readiness(
     corporate = tuple(row[0] for row in connection.execute(
         "SELECT DISTINCT report_period FROM financial_reports "
         "WHERE symbol=? AND consolidated=1 AND public_date<=? "
-        "AND (source NOT LIKE 'yfinance/%' OR source LIKE 'yfinance/%/quarterly')",
+        "AND (source NOT LIKE 'yfinance/%' OR source LIKE 'yfinance/%/quarterly') "
+        "AND (source NOT LIKE 'VietcapIQ/%' OR source LIKE 'VietcapIQ/%/borrowings-v2')",
         (symbol, as_of_str),
     ).fetchall())
     bank = tuple(row[0] for row in connection.execute(
@@ -156,8 +157,23 @@ def _reconcile_yfinance_canonical_snapshot(
         )
 
 
-def _has_preferred_canonical_source(
-    connection: sqlite3.Connection, symbol: str, period: str
+def _canonical_source_priority(source: str) -> int | None:
+    """Rank automated sources; unknown/manual sources are never overwritten."""
+    normalized = source.lower()
+    if normalized.startswith("vietcapiq/"):
+        # Pre-v2 Vietcap rows used total liabilities as debt and are invalid.
+        return 400 if normalized.endswith("/borrowings-v2") else 0
+    if normalized.startswith("vnstock/"):
+        return 300
+    if normalized.startswith("tcbs/"):
+        return 200
+    if normalized.startswith("yfinance/"):
+        return 100
+    return None
+
+
+def _can_replace_canonical_source(
+    connection: sqlite3.Connection, symbol: str, period: str, incoming_source: str
 ) -> bool:
     row = connection.execute(
         "SELECT source FROM financial_reports "
@@ -165,8 +181,26 @@ def _has_preferred_canonical_source(
         (symbol, period),
     ).fetchone()
     if row is None:
+        return True
+    existing = str(row["source"])
+    if existing == incoming_source:
+        return True
+    existing_priority = _canonical_source_priority(existing)
+    incoming_priority = _canonical_source_priority(incoming_source)
+    if existing_priority is None or incoming_priority is None:
         return False
-    return not str(row["source"]).lower().startswith("yfinance/")
+    return incoming_priority >= existing_priority
+
+
+def _has_legacy_vietcap_canonical_rows(
+    connection: sqlite3.Connection, symbol: str
+) -> bool:
+    return connection.execute(
+        "SELECT 1 FROM financial_reports WHERE symbol=? "
+        "AND source LIKE 'VietcapIQ/%' "
+        "AND source NOT LIKE 'VietcapIQ/%/borrowings-v2' LIMIT 1",
+        (symbol,),
+    ).fetchone() is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,8 +232,10 @@ def refresh_financials(
 
     if not force:
         existing = load_coverage(connection, symbol, "FINANCIALS")
-        if existing is not None and not coverage_is_stale(
-            existing, refresh_interval_seconds, now=stamp
+        if (
+            existing is not None
+            and not _has_legacy_vietcap_canonical_rows(connection, symbol)
+            and not coverage_is_stale(existing, refresh_interval_seconds, now=stamp)
         ):
             return RefreshOutcome(
                 symbol=symbol, dataset="FINANCIALS", result=RefreshResult.SKIPPED_FRESH,
@@ -228,14 +264,17 @@ def refresh_financials(
     canonical_source = (
         f"{result.provenance}/quarterly"
         if result.provider.lower() == "yfinance"
+        else f"{result.provenance}/borrowings-v2"
+        if result.provider.lower() == "vietcapiq"
         else result.provenance
     )
     for row in result.statements:
         promotable = promote_corporate_statement(row, source=canonical_source)
         if (
             promotable is not None
-            and result.provider.lower() == "yfinance"
-            and _has_preferred_canonical_source(connection, row.symbol, row.period)
+            and not _can_replace_canonical_source(
+                connection, row.symbol, row.period, canonical_source
+            )
         ):
             promotable = None
         upsert_automated_statement(
