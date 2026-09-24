@@ -399,6 +399,8 @@ def build_sentiment_view(aggregate) -> SentimentView:
                 sentiment_label=(item.sentiment.label.value.upper() if item.sentiment else None),
                 sentiment_score=(item.sentiment.score if item.sentiment else None),
                 model_confidence=(item.sentiment.model_confidence if item.sentiment else None),
+                retrieved_at=item.retrieved_at,
+                backend=item.sentiment.backend if item.sentiment else None,
             )
             for item in aggregate.articles
         )

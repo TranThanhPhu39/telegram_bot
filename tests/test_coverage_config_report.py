@@ -24,6 +24,7 @@ def test_defaults_are_conservative_and_valid() -> None:
     assert c.financials_interval_seconds == 7 * 86400 and c.institutional_interval_seconds == 86400
     assert c.batch_datasets == ("FINANCIALS", "INSTITUTIONAL", "MARKET_HISTORY")
     assert c.news_window_days == 30
+    assert c.news_ticker_refresh_interval_seconds == 15 * 60
 
 
 def test_from_env_reads_every_documented_variable() -> None:
@@ -32,14 +33,19 @@ def test_from_env_reads_every_documented_variable() -> None:
            "COVERAGE_STARTUP_DELAY": "1", "FUNDAMENTAL_REFRESH_INTERVAL": "100",
            "INSTITUTIONAL_REFRESH_INTERVAL": "50", "MARKET_HISTORY_REFRESH_INTERVAL": "40",
            "NEWS_REFRESH_INTERVAL": "30", "NEWS_INGEST_LIMIT": "5", "NEWS_WINDOW_DAYS": "45",
+           "NEWS_TICKER_REQUESTS_PER_CYCLE": "12",
+           "NEWS_TICKER_REFRESH_INTERVAL_SECONDS": "3600",
            "COVERAGE_SECTOR_REQUESTS_PER_CYCLE": "4",
            "COVERAGE_WORKER_ENABLED": "false", "COVERAGE_DATASETS": "news, financials"}
     c = CoverageConfig.from_env(env)
     assert (c.batch_size, c.worker_interval_seconds, c.max_retries, c.retry_backoff_seconds) == (7, 60, 1, 3)
     assert c.missing_cooldown_seconds == 77
     assert c.enabled is False and c.datasets == ("NEWS", "FINANCIALS")
-    assert c.interval_for("FINANCIALS") == 100 and c.interval_for("NEWS") == 30
+    assert c.interval_for("FINANCIALS") == 100
+    assert c.interval_for("NEWS") == 3600
     assert c.news_window_days == 45
+    assert c.news_ticker_requests_per_cycle == 12
+    assert c.news_ticker_refresh_interval_seconds == 3600
     assert c.retry_wait(1) == 3 and c.retry_wait(3) == 12
 
 
@@ -47,6 +53,9 @@ def test_from_env_reads_every_documented_variable() -> None:
     {"COVERAGE_BATCH_SIZE": "0"}, {"COVERAGE_BATCH_SIZE": "abc"}, {"COVERAGE_MAX_RETRIES": "-1"},
     {"COVERAGE_DATASETS": "BOGUS"}, {"COVERAGE_WORKER_ENABLED": "maybe"},
     {"COVERAGE_WORKER_INTERVAL": "0"}, {"NEWS_INGEST_LIMIT": "500"},
+    {"NEWS_TICKER_REQUESTS_PER_CYCLE": "0"},
+    {"NEWS_TICKER_REQUESTS_PER_CYCLE": "101"},
+    {"NEWS_TICKER_REFRESH_INTERVAL_SECONDS": "0"},
     {"NEWS_WINDOW_DAYS": "0"}, {"NEWS_WINDOW_DAYS": "-5"},
 ])
 def test_invalid_env_is_rejected_clearly(env) -> None:
@@ -58,13 +67,29 @@ def test_every_env_example_coverage_setting_is_consumed() -> None:
     text = (ROOT / ".env.example").read_text()
     names = [l.split("=")[0] for l in text.splitlines() if "=" in l and not l.startswith("#")]
     source = "".join((ROOT / f).read_text() for f in (
-        "runtime/coverage_config.py", "runtime/coverage_factory.py", "scripts/test_phase26_telegram_live.py"
+        "runtime/coverage_config.py", "runtime/coverage_factory.py",
+        "runtime/news_refresh.py", "scripts/run_telegram_bot.py",
+        "scripts/test_phase26_telegram_live.py",
     ) if (ROOT / f).exists())
     for name in names:
-        if name.startswith(("COVERAGE_", "NEWS_REFRESH", "NEWS_INGEST", "NEWS_WINDOW", "FUNDAMENTAL_REFRESH",
+        if name.startswith(("COVERAGE_", "NEWS_REFRESH", "NEWS_INGEST", "NEWS_WINDOW", "NEWS_TICKER", "FUNDAMENTAL_REFRESH",
                             "INSTITUTIONAL_REFRESH", "MARKET_HISTORY_REFRESH", "VNSTOCK_SOURCE", "YFINANCE",
                             "TEST_TELEGRAM")):
             assert name in source, f"{name} documented but never read"
+
+
+def test_production_news_refresh_uses_ticker_page_worker_and_sweeper() -> None:
+    source = (ROOT / "scripts/run_telegram_bot.py").read_text(encoding="utf-8")
+    assert "start_targeted_news_worker_from_env" in source
+    assert "news_ticker_requester=news_refresh_worker.request" in source
+    assert "build_targeted_news_refresh_worker_from_env" not in source
+
+
+def test_production_bot_wires_ticker_page_worker_into_news_coverage() -> None:
+    source = (ROOT / "scripts/run_telegram_bot.py").read_text(encoding="utf-8")
+    assert "start_targeted_news_worker_from_env" in source
+    assert "news_ticker_requester=news_refresh_worker.request" in source
+    assert "build_targeted_news_refresh_worker_from_env" not in source
 
 
 # ---------------------------------------------------------------- report

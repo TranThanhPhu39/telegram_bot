@@ -524,6 +524,8 @@ class RuntimeBotDataService:
                 event_type=item.event_type,
                 sentiment_label=item.sentiment.label.value if item.sentiment else None,
                 url=item.url,
+                retrieved_at=getattr(item, "retrieved_at", None),
+                sentiment_backend=item.sentiment.backend if item.sentiment else None,
             )
             for item in items
         ))
@@ -531,8 +533,11 @@ class RuntimeBotDataService:
         # on-demand targeted refresh instead of only waiting on the next
         # periodic sweep. Never blocks this response; the gap is still
         # reported honestly, just with a note that a refresh was queued.
-        if not items:
-            rendered += self._request_news_refresh(symbol)
+        latest_at = items[0].published_at if items else None
+        if self._news_refresh_is_due(symbol, latest_at):
+            refresh_note = self._request_news_refresh(symbol).strip()
+            if refresh_note:
+                rendered += f"\n⏳ {refresh_note}"
         return rendered
 
     def scan_results(self) -> tuple[str, ...]:
@@ -820,14 +825,47 @@ class RuntimeBotDataService:
         except Exception:
             return SentimentView(available=False, note=NEWS_UNAVAILABLE)
         view = build_sentiment_view(aggregate)
-        # Issue 5: same on-demand targeted refresh as latest_news(), for the
-        # /soi and /sentiment paths. VNINDEX is the market-wide benchmark
-        # symbol used internally by market_overview(), not a listed ticker
-        # CafeF/the ticker linker covers, so it is excluded here.
-        if not view.available and symbol != "VNINDEX":
-            note = (view.note or "") + self._request_news_refresh(symbol)
-            view = replace(view, note=note.strip())
+        if symbol != "VNINDEX" and self._news_refresh_is_due(symbol, view.latest_at):
+            message = self._request_news_refresh(symbol).strip()
+            if message:
+                note = (
+                    "Tin mới nhất đã cũ hoặc chưa có dữ liệu; " + message
+                    if view.available else (view.note or "") + message
+                )
+                view = replace(view, note=note.strip())
         return view
+
+    def _news_refresh_is_due(self, symbol: str, latest_at: datetime | None) -> bool:
+        """Refresh from source-page age, not article publication age."""
+        now_ts = float(self.now())
+        try:
+            max_age_seconds = float(os.getenv("NEWS_TICKER_REFRESH_INTERVAL_SECONDS", "900"))
+        except ValueError:
+            max_age_seconds = 900.0
+        max_age_seconds = max(60.0, max_age_seconds)
+        try:
+            from fundamentals.coverage_store import load_coverage
+
+            coverage = load_coverage(self.connection, symbol, "NEWS")
+        except sqlite3.Error:
+            return True
+        if coverage is None:
+            return True
+        if coverage.status == "IN_PROGRESS":
+            return False
+        attempted = coverage.last_attempt_at
+        if attempted is None:
+            return True
+        age = now_ts - attempted
+        if coverage.status == "ERROR":
+            return age >= min(max_age_seconds, 3600.0)
+        if coverage.provider_source == "ticker_page":
+            return age >= max_age_seconds
+        if latest_at is not None:
+            article_age = now_ts - latest_at.timestamp()
+            if 0 <= article_age < max_age_seconds:
+                return False
+        return True
 
     def _fundamental_facts(self, symbol: str, timestamp: int) -> FundamentalFacts | None:
         as_of = datetime.fromtimestamp(timestamp, VIETNAM_TIMEZONE).date()

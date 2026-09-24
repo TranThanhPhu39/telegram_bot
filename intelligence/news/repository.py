@@ -13,7 +13,8 @@ NEWS_ITEMS_SQL = """
 CREATE TABLE IF NOT EXISTS news_items (
  id TEXT PRIMARY KEY, source TEXT NOT NULL, url TEXT NOT NULL UNIQUE,
  published_at TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
- content TEXT NOT NULL DEFAULT '', event_type TEXT NOT NULL DEFAULT 'OTHER',
+ content TEXT NOT NULL DEFAULT '', retrieved_at TEXT,
+ event_type TEXT NOT NULL DEFAULT 'OTHER',
  event_importance REAL NOT NULL DEFAULT 0.3,
  sentiment_label TEXT, sentiment_score REAL,
  probability_positive REAL, probability_neutral REAL, probability_negative REAL,
@@ -41,6 +42,7 @@ _ADDITIVE_COLUMNS = {
     "model_name": "TEXT",
     "analyzed_at": "TEXT",
     "calibration_version": "TEXT",
+    "retrieved_at": "TEXT",
 }
 
 
@@ -72,39 +74,75 @@ class SQLiteNewsRepository:
 
     def save(self, item: NewsItem) -> bool:
         sentiment = item.sentiment
-        values = (
-            item.id, item.source, item.url, _utc(item.published_at), item.title,
-            item.summary, item.content, item.event_type, item.event_importance,
-            sentiment.label.value if sentiment else None,
-            sentiment.score if sentiment else None,
-            sentiment.probability_positive if sentiment else None,
-            sentiment.probability_neutral if sentiment else None,
-            sentiment.probability_negative if sentiment else None,
-            sentiment.model_confidence if sentiment else None,
-            sentiment.backend if sentiment else None,
-            sentiment.model_name if sentiment else None,
-            sentiment.model_version if sentiment else None,
-            _utc(sentiment.analyzed_at) if sentiment else None,
-            sentiment.calibration_version if sentiment else None,
+        sentiment_values = (
+            None if sentiment is None else sentiment.label.value,
+            None if sentiment is None else sentiment.score,
+            None if sentiment is None else sentiment.probability_positive,
+            None if sentiment is None else sentiment.probability_neutral,
+            None if sentiment is None else sentiment.probability_negative,
+            None if sentiment is None else sentiment.model_confidence,
+            None if sentiment is None else sentiment.backend,
+            None if sentiment is None else sentiment.model_name,
+            None if sentiment is None else sentiment.model_version,
+            None if sentiment is None else _utc(sentiment.analyzed_at),
+            None if sentiment is None else sentiment.calibration_version,
         )
         with self.connection:
-            cursor = self.connection.execute(
-                "INSERT OR IGNORE INTO news_items (id,source,url,published_at,title,summary,content," 
-                "event_type,event_importance,sentiment_label,sentiment_score,probability_positive," 
-                "probability_neutral,probability_negative,model_confidence,model_backend,model_name," 
-                "model_version,analyzed_at,calibration_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                values,
-            )
-            if cursor.rowcount == 0:
-                existing = self.connection.execute(
-                    "SELECT id FROM news_items WHERE id=? OR url=? LIMIT 1",
-                    (item.id, item.url),
-                ).fetchone()
-                if existing is not None:
-                    self._replace_ticker_links(existing["id"], item)
-                return False
-            self._replace_ticker_links(item.id, item)
-        return True
+            self.connection.execute("BEGIN IMMEDIATE")
+            existing = self.connection.execute(
+                "SELECT * FROM news_items WHERE id=? OR url=? LIMIT 1",
+                (item.id, item.url),
+            ).fetchone()
+            if existing is None:
+                retrieved_at = item.retrieved_at or datetime.now(timezone.utc)
+                self.connection.execute(
+                    "INSERT INTO news_items (id,source,url,published_at,title,summary,content,"
+                    "retrieved_at,event_type,event_importance,sentiment_label,sentiment_score,"
+                    "probability_positive,probability_neutral,probability_negative,model_confidence,"
+                    "model_backend,model_name,model_version,analyzed_at,calibration_version) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        item.id, item.source, item.url, _utc(item.published_at), item.title,
+                        item.summary, item.content, _utc(retrieved_at), item.event_type,
+                        item.event_importance, *sentiment_values,
+                    ),
+                )
+                stored_id = item.id
+            else:
+                stored_id = existing["id"]
+                merged_sentiment = (
+                    sentiment_values
+                    if sentiment is not None
+                    else tuple(existing[key] for key in (
+                        "sentiment_label", "sentiment_score", "probability_positive",
+                        "probability_neutral", "probability_negative", "model_confidence",
+                        "model_backend", "model_name", "model_version", "analyzed_at",
+                        "calibration_version",
+                    ))
+                )
+                retrieved_at = (
+                    _utc(item.retrieved_at)
+                    if item.retrieved_at is not None
+                    else existing["retrieved_at"]
+                )
+                self.connection.execute(
+                    "UPDATE news_items SET source=?,url=?,published_at=?,title=?,"
+                    "summary=CASE WHEN ?<>'' THEN ? ELSE summary END,"
+                    "content=CASE WHEN ?<>'' THEN ? ELSE content END,retrieved_at=?,"
+                    "event_type=?,event_importance=?,sentiment_label=?,sentiment_score=?,"
+                    "probability_positive=?,probability_neutral=?,probability_negative=?,"
+                    "model_confidence=?,model_backend=?,model_name=?,model_version=?,"
+                    "analyzed_at=?,calibration_version=? WHERE id=?",
+                    (
+                        item.source, item.url, _utc(item.published_at), item.title,
+                        item.summary, item.summary, item.content, item.content,
+                        retrieved_at, item.event_type, item.event_importance,
+                        *merged_sentiment, stored_id,
+                    ),
+                )
+            if item.tickers:
+                self._replace_ticker_links(stored_id, item)
+        return existing is None
 
     def _replace_ticker_links(self, news_id: str, item: NewsItem) -> None:
         self.connection.execute("DELETE FROM news_tickers WHERE news_id=?", (news_id,))
@@ -137,6 +175,7 @@ class SQLiteNewsRepository:
             next((item["ticker"] for item in ticker_rows if item["is_primary"]), None),
             {item["ticker"]: item["relevance"] for item in ticker_rows},
             row["event_type"], row["event_importance"], sentiment,
+            None if row["retrieved_at"] is None else datetime.fromisoformat(row["retrieved_at"]),
         )
 
     def ticker_article_counts(self, since: datetime) -> dict[str, int]:

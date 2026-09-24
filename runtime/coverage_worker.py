@@ -10,7 +10,7 @@ FINANCIALS          ``fundamentals.refresh_service.refresh_financials``
 INSTITUTIONAL       ``fundamentals.refresh_service.refresh_institutional_flow``
 MARKET_HISTORY      ``SectorHistorySynchronizer.refresh_symbol_history``
 SECTOR_HISTORY      the existing ``SectorHistorySyncWorker`` (requested, not run)
-NEWS                ``runtime.news_refresh.NewsRefreshRunner`` (CafeF/PhoBERT)
+NEWS                per-ticker CafeF pages plus supplemental RSS ingestion
 ==================  =========================================================
 
 Two layers:
@@ -165,6 +165,7 @@ class MarketCoverageEngine:
         *,
         history: HistoryClient | None = None,
         sector_requester: Callable[[str], bool] | None = None,
+        news_ticker_requester: Callable[[str], bool] | None = None,
         news_runner: object | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         sleep: Callable[[float], object] = time.sleep,
@@ -177,6 +178,7 @@ class MarketCoverageEngine:
         self.config = config
         self.history = history
         self.sector_requester = sector_requester
+        self.news_ticker_requester = news_ticker_requester
         self.news_runner = news_runner
         self._clock = clock
         self._sleep = sleep
@@ -537,7 +539,8 @@ class MarketCoverageEngine:
         if force:
             return True
         row = self.connection.execute(
-            "SELECT MAX(last_attempt_at) AS last FROM symbol_data_coverage WHERE dataset='NEWS'"
+            "SELECT MAX(last_attempt_at) AS last FROM symbol_data_coverage "
+            "WHERE dataset='NEWS' AND provider_source='rss'"
         ).fetchone()
         candidates = [t for t in (row["last"], self._news_last_attempt) if t is not None]
         if not candidates:
@@ -547,15 +550,76 @@ class MarketCoverageEngine:
             wait = min(wait, self.config.error_cooldown_seconds)
         return now.timestamp() - max(candidates) >= wait
 
+    def _ticker_news_due(
+        self, status: CoverageStatus | None, *, now: datetime, force: bool
+    ) -> bool:
+        if force or status is None:
+            return True
+        if status.status == "IN_PROGRESS":
+            return effective_status(
+                status,
+                self.config.news_ticker_refresh_interval_seconds,
+                now=now,
+                in_progress_lease_seconds=self._lease,
+            ) != "IN_PROGRESS"
+        if status.provider_source != "ticker_page":
+            return True
+        attempted = status.last_attempt_at or 0
+        elapsed = now.timestamp() - attempted
+        interval = self.config.news_ticker_refresh_interval_seconds
+        if status.status == "ERROR":
+            return elapsed >= min(interval, self.config.error_cooldown_seconds)
+        if status.status == "MISSING":
+            return elapsed >= min(interval, self.config.missing_cooldown_seconds)
+        return elapsed >= interval
+
+    def _queue_ticker_news_refreshes(
+        self, universe: Sequence[MarketSymbol], now: datetime, force: bool
+    ) -> tuple[int, int]:
+        if self.news_ticker_requester is None or "NEWS" not in self.config.datasets:
+            return 0, 0
+        coverage = {
+            row.symbol: row for row in load_all_coverage(self.connection, "NEWS")
+        }
+        due = [
+            item for item in universe
+            if self._ticker_news_due(coverage.get(item.symbol), now=now, force=force)
+        ]
+        due.sort(key=lambda item: (
+            coverage[item.symbol].last_attempt_at
+            if item.symbol in coverage and coverage[item.symbol].last_attempt_at is not None
+            else 0,
+            item.symbol,
+        ))
+        queued = 0
+        for item in due[:self.config.news_ticker_requests_per_cycle]:
+            if self._stopping(CycleReport(started_at=now)):
+                break
+            try:
+                if self.news_ticker_requester(item.symbol):
+                    queued += 1
+            except Exception:
+                logger.exception("could not enqueue ticker-page NEWS refresh for %s", item.symbol)
+        return queued, len(due)
+
     def _run_news_step(
         self, universe: Sequence[MarketSymbol], now: datetime, force: bool,
         report: CycleReport,
     ) -> None:
+        ticker_queued, ticker_due = self._queue_ticker_news_refreshes(
+            universe, now, force
+        )
         if self.news_runner is None:
-            report.news = "UNAVAILABLE"
+            report.news = (
+                f"ticker_pages queued={ticker_queued}/{ticker_due}; RSS unavailable"
+                if self.news_ticker_requester is not None else "UNAVAILABLE"
+            )
             return
         if not self._news_due(now, force):
-            report.news = "NOT_DUE"
+            report.news = (
+                f"ticker_pages queued={ticker_queued}/{ticker_due}; RSS NOT_DUE"
+                if self.news_ticker_requester is not None else "NOT_DUE"
+            )
             return
         self._news_last_attempt = now.timestamp()
         try:
@@ -564,16 +628,20 @@ class MarketCoverageEngine:
             reason = safe_reason(f"{type(error).__name__}: {error}")
             self._news_last_failed = True
             logger.warning("coverage news ingestion failed reason=%s", reason)
-            report.news = f"FAILED {reason}"
-            try:
-                existing = self._news_symbols()
-                known = [
-                    (item.symbol, "ERROR", "CafeF", "rss", reason)
-                    for item in universe if item.symbol in existing
-                ]
-                record_attempts_bulk(self.connection, "NEWS", known, now=now)
-            except sqlite3.Error:
-                logger.exception("coverage could not persist news failure")
+            report.news = (
+                f"ticker_pages queued={ticker_queued}/{ticker_due}; RSS FAILED {reason}"
+                if self.news_ticker_requester is not None else f"FAILED {reason}"
+            )
+            if self.news_ticker_requester is None:
+                try:
+                    existing = self._news_symbols()
+                    known = [
+                        (item.symbol, "ERROR", "CafeF", "rss", reason)
+                        for item in universe if item.symbol in existing
+                    ]
+                    record_attempts_bulk(self.connection, "NEWS", known, now=now)
+                except sqlite3.Error:
+                    logger.exception("coverage could not persist news failure")
             return
         self._news_last_failed = False
         window = self.config.news_window_days
@@ -594,14 +662,43 @@ class MarketCoverageEngine:
                 # Absence of articles is MISSING, never Neutral sentiment.
                 rows.append((item.symbol, "MISSING", "CafeF", "rss",
                              f"no relevant news in last {window}d"))
+        if self.news_ticker_requester is None:
+            coverage_rows = rows
+        else:
+            existing = {
+                row.symbol: row for row in load_all_coverage(self.connection, "NEWS")
+            }
+            coverage_rows = []
+            for row in rows:
+                symbol, status, _provider, _source, _reason = row
+                current = existing.get(symbol)
+                if status not in SUCCESS_STATES:
+                    continue
+                if current is not None and current.status == "IN_PROGRESS":
+                    continue
+                if (
+                    current is not None
+                    and current.provider_source == "ticker_page"
+                    and current.last_attempt_at is not None
+                    and now.timestamp() - current.last_attempt_at
+                    < self.config.news_ticker_refresh_interval_seconds
+                ):
+                    # Preserve a recent successful page check, but allow a
+                    # positive RSS match to recover a page MISSING/ERROR row.
+                    if current.status in SUCCESS_STATES:
+                        continue
+                coverage_rows.append(row)
         try:
-            record_attempts_bulk(self.connection, "NEWS", rows, now=now)
+            if coverage_rows:
+                record_attempts_bulk(self.connection, "NEWS", coverage_rows, now=now)
         except sqlite3.Error:
             logger.exception("coverage could not persist news coverage")
         report.news = (
-            f"OK inserted={result.inserted} duplicates={result.duplicates} "
+            f"RSS inserted={result.inserted} duplicates={result.duplicates} "
             f"linked={sum(1 for r in rows if r[1] in SUCCESS_STATES)}"
         )
+        if self.news_ticker_requester is not None:
+            report.news += f"; ticker_pages queued={ticker_queued}/{ticker_due}"
 
     def _news_symbols(self) -> set[str]:
         return {

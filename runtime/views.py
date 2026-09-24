@@ -176,6 +176,8 @@ class SentimentArticleView:
     sentiment_label: str | None = None
     sentiment_score: float | None = None
     model_confidence: float | None = None
+    retrieved_at: datetime | None = None
+    backend: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,6 +188,8 @@ class NewsItemView:
     event_type: str
     sentiment_label: str | None
     url: str = ""
+    retrieved_at: datetime | None = None
+    sentiment_backend: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -89,6 +89,7 @@ def build_engine_from_env(
     config: CoverageConfig, *,
     connection_factory: Callable[[], sqlite3.Connection],
     sector_requester: Callable[[str], bool] | None = None,
+    news_ticker_requester: Callable[[str], bool] | None = None,
     should_stop: Callable[[], bool] = lambda: False,
     sleep: Callable[[float], object] | None = None,
     environ: Mapping[str, str] | None = None,
@@ -106,6 +107,7 @@ def build_engine_from_env(
         connection, build_chain_from_env(environ), config,
         history=build_history_client_from_env(connection, environ) if needs_history else None,
         sector_requester=sector_requester,
+        news_ticker_requester=news_ticker_requester,
         news_runner=news_runner,
         should_stop=should_stop,
         **kwargs,
@@ -115,6 +117,7 @@ def build_engine_from_env(
 def start_coverage_worker_from_env(
     sector_worker: SectorHistorySyncWorker | None = None,
     *, environ: Mapping[str, str] | None = None,
+    news_ticker_requester: Callable[[str], bool] | None = None,
 ) -> MarketCoverageWorker | None:
     """Start the background coverage worker; returns ``None`` when disabled.
 
@@ -133,7 +136,9 @@ def start_coverage_worker_from_env(
     def engine_factory(should_stop, sleep):
         return build_engine_from_env(
             config, connection_factory=connection_factory,
-            sector_requester=requester, should_stop=should_stop, sleep=sleep,
+            sector_requester=requester,
+            news_ticker_requester=news_ticker_requester,
+            should_stop=should_stop, sleep=sleep,
             environ=environ,
         )
 

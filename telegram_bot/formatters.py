@@ -330,6 +330,8 @@ def format_sentiment(symbol: str, view: SentimentView | None) -> str:
         f"Score: {view.score:+.2f}",
         f"Độ tin cậy: {confidence_bucket}",
     ]
+    if "lexicon_fallback" in view.backends:
+        lines.extend(("", "⚠️ Có tin được chấm bằng fallback từ khóa, không phải PhoBERT."))
 
     lines.append("")
     lines.append("📊 CẤU TRÚC TIN")
@@ -360,6 +362,9 @@ def format_sentiment(symbol: str, view: SentimentView | None) -> str:
 
     lines.append("")
     lines.append(f"📰 /tin {symbol} để xem bài gốc.")
+    if view.note:
+        lines.append("")
+        lines.append(f"🔄 {view.note}")
     return "\n".join(lines)
 
 
@@ -404,10 +409,13 @@ def format_news(symbol: str, items: Sequence[NewsItemView]) -> str:
     lines = [f"📰 TIN MỚI NHẤT — {symbol}\n{HEADER_DIVIDER}"]
     for index, item in enumerate(items, start=1):
         sentiment_vn = SENTIMENT_LABEL_MAP_SHORT.get(item.sentiment_label or "", "Chưa có")
+        if item.sentiment_backend == "lexicon_fallback":
+            sentiment_vn += " (fallback từ khóa)"
         entry = [
             f"{index}. {_time(item.published_at)} | {_event_label(item.event_type)}",
             f"   {item.title}",
             f"   Nguồn: {_source_label(item.source)} | Sentiment: {sentiment_vn}",
+            f"   Tải lúc: {_time(item.retrieved_at) if item.retrieved_at else 'chưa ghi nhận'}",
         ]
         if item.url:
             entry.append(f"   🔗 Đọc bài: {item.url}")

@@ -133,7 +133,7 @@ def test_statuses_success_partial_missing(tmp_path) -> None:
     engine, conn, *_ = build(tmp_path, prov, symbols=["AAA", "BBB", "CCC"])
     r = engine.run_cycle()
     assert [load_coverage(conn, s, "FINANCIALS").status for s in ("AAA", "BBB", "CCC")] == \
-        ["PARTIAL", "PARTIAL", "MISSING"]
+        ["READY", "PARTIAL", "MISSING"]
     assert r.counts()["FINANCIALS"] == {"SUCCESS": 1, "PARTIAL": 1, "MISSING": 1}
 
 
@@ -150,8 +150,8 @@ def test_one_symbol_exception_does_not_stop_the_next(tmp_path, monkeypatch) -> N
 
     monkeypatch.setattr(cw, "refresh_financials", flaky)
     r = engine.run_cycle()
-    assert load_coverage(conn, "AAA", "FINANCIALS").status == "PARTIAL"
-    assert load_coverage(conn, "CCC", "FINANCIALS").status == "PARTIAL"
+    assert load_coverage(conn, "AAA", "FINANCIALS").status == "READY"
+    assert load_coverage(conn, "CCC", "FINANCIALS").status == "READY"
     bad = load_coverage(conn, "BBB", "FINANCIALS")
     assert bad.status == "ERROR" and "abcdefgh12345678" not in bad.error_reason
     assert load_coverage(conn, "BBB", "INSTITUTIONAL").status == "READY"   # other dataset unaffected
@@ -164,15 +164,15 @@ def test_provider_exception_becomes_error_and_batch_continues(tmp_path) -> None:
     engine.run_cycle()
     assert load_coverage(conn, "AAA", "FINANCIALS").status == "ERROR"
     assert load_coverage(conn, "AAA", "INSTITUTIONAL").status == "READY"
-    assert load_coverage(conn, "BBB", "FINANCIALS").status == "PARTIAL"
+    assert load_coverage(conn, "BBB", "FINANCIALS").status == "READY"
 
 
 def test_successful_writes_survive_later_failures(tmp_path) -> None:
     prov = ScriptedProvider({"CCC": "raise"})
     engine, conn, *_ = build(tmp_path, prov, symbols=["AAA", "BBB", "CCC"], config=fast_config(max_retries=0))
     engine.run_cycle()
-    assert conn.execute("SELECT COUNT(*) FROM automated_financial_statements").fetchone()[0] == 2
-    assert conn.execute("SELECT COUNT(*) FROM financial_reports").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM automated_financial_statements").fetchone()[0] == 16
+    assert conn.execute("SELECT COUNT(*) FROM financial_reports").fetchone()[0] == 16
 
 
 # --------------------------------------------------------- retry/backoff
@@ -194,7 +194,7 @@ def test_retry_recovers(tmp_path) -> None:
                                        config=fast_config(datasets=("FINANCIALS",)))
     r = engine.run_cycle()
     assert r.outcomes[0].result == "SUCCESS" and r.outcomes[0].attempts == 2
-    assert load_coverage(conn, "AAA", "FINANCIALS").status == "PARTIAL"
+    assert load_coverage(conn, "AAA", "FINANCIALS").status == "READY"
 
 
 def test_request_delay_between_provider_calls(tmp_path) -> None:
@@ -269,7 +269,7 @@ def test_restart_reuses_persisted_state_without_duplicates(tmp_path) -> None:
     second.run_cycle(force=True)
     second.run_cycle(force=True)
     assert conn.execute("SELECT COUNT(*) FROM symbol_data_coverage").fetchone()[0] == 4
-    assert conn.execute("SELECT COUNT(*) FROM automated_financial_statements").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM automated_financial_statements").fetchone()[0] == 16
 
 
 def test_abandoned_in_progress_is_reclaimed_but_live_one_is_not(tmp_path) -> None:
@@ -279,7 +279,7 @@ def test_abandoned_in_progress_is_reclaimed_but_live_one_is_not(tmp_path) -> Non
     mark_in_progress(conn, "BBB", "FINANCIALS", now=T0 - timedelta(minutes=1)) # running now
     r = engine.run_cycle()
     assert r.selected == ("AAA",)
-    assert load_coverage(conn, "AAA", "FINANCIALS").status == "PARTIAL"
+    assert load_coverage(conn, "AAA", "FINANCIALS").status == "READY"
     assert load_coverage(conn, "BBB", "FINANCIALS").status == "IN_PROGRESS"
 
 
@@ -300,7 +300,7 @@ def test_graceful_stop_leaves_unprocessed_symbols_untouched(tmp_path) -> None:
                              should_stop=lambda: flag["stop"])
     r = engine.run_cycle()
     assert r.stopped_early and load_coverage(conn, "CCC", "FINANCIALS") is None
-    assert load_coverage(conn, "BBB", "FINANCIALS").status == "PARTIAL"
+    assert load_coverage(conn, "BBB", "FINANCIALS").status == "READY"
 
 
 def test_worker_thread_runs_and_stops_promptly(tmp_path) -> None:
@@ -424,7 +424,7 @@ def test_news_scheduled_projected_and_absence_is_missing(tmp_path) -> None:
     cfg = fast_config(datasets=("NEWS",), news_interval_seconds=1800.0)
     engine, conn, _, clock, _ = build(tmp_path, symbols=["AAA", "BBB"], config=cfg, news_runner=news)
     r = engine.run_cycle()
-    assert news.calls == [30] and r.news.startswith("OK")
+    assert news.calls == [30] and r.news.startswith("RSS")
     assert load_coverage(conn, "AAA", "NEWS").status == "READY"
     b = load_coverage(conn, "BBB", "NEWS")
     assert b.status == "MISSING" and "no relevant news" in b.error_reason   # never Neutral
@@ -455,7 +455,7 @@ def test_news_failure_is_isolated_and_marks_existing_rows(tmp_path) -> None:
     assert r.news.startswith("FAILED")
     row = load_coverage(conn, "AAA", "NEWS")
     assert row.status == "ERROR" and row.last_success_at is not None
-    assert load_coverage(conn, "AAA", "FINANCIALS").status == "PARTIAL"      # untouched
+    assert load_coverage(conn, "AAA", "FINANCIALS").status == "READY"        # untouched
 
 
 def test_news_runner_absent_and_close(tmp_path) -> None:
@@ -482,7 +482,7 @@ def test_news_canonical_eligibility_statuses_ready_partial_stale_missing(tmp_pat
     symbols = ["AAA", "BBB", "CCC", "DDD"]
     engine, conn, _, _, _ = build(tmp_path, symbols=symbols, config=cfg, news_runner=news)
     r = engine.run_cycle()
-    assert r.news.startswith("OK")
+    assert r.news.startswith("RSS")
 
     aaa = load_coverage(conn, "AAA", "NEWS")
     assert aaa.status == "READY"
@@ -499,4 +499,106 @@ def test_news_canonical_eligibility_statuses_ready_partial_stale_missing(tmp_pat
     ddd = load_coverage(conn, "DDD", "NEWS")
     assert ddd.status == "MISSING"
     assert "no relevant news in last 30d" in ddd.error_reason
+
+
+def test_ticker_page_sweep_queues_entire_universe_in_bounded_cycles(tmp_path) -> None:
+    symbols = ["AAA", "BBB", "CCC", "DDD", "EEE"]
+    cfg = fast_config(
+        datasets=("NEWS",),
+        news_ticker_requests_per_cycle=2,
+        news_ticker_refresh_interval_seconds=6 * 3600,
+    )
+    engine, conn, _provider, clock, _sleeper = build(
+        tmp_path, symbols=symbols, config=cfg, news_runner=FakeNews({})
+    )
+    requested: list[str] = []
+
+    def enqueue(symbol: str) -> bool:
+        requested.append(symbol)
+        mark_in_progress(conn, symbol, "NEWS", now=clock())
+        return True
+
+    engine.news_ticker_requester = enqueue
+    first = engine.run_cycle()
+    assert requested == ["AAA", "BBB"]
+    assert load_coverage(conn, "AAA", "NEWS").status == "IN_PROGRESS"
+    assert "ticker_pages queued=2/5" in first.news
+
+    engine.run_cycle()
+    engine.run_cycle()
+    assert requested == symbols
+    assert len(set(requested)) == len(symbols)
+    assert load_coverage(conn, "EEE", "NEWS").status == "IN_PROGRESS"
+
+
+def test_rss_projection_does_not_overwrite_recent_ticker_page_coverage(tmp_path) -> None:
+    symbols = ["AAA"]
+    cfg = fast_config(datasets=("NEWS",), news_interval_seconds=1800.0)
+    news = FakeNews({})
+    engine, conn, _provider, clock, _sleeper = build(
+        tmp_path, symbols=symbols, config=cfg, news_runner=news
+    )
+    record_attempt(
+        conn, "AAA", "NEWS", "READY", provider="CafeF",
+        provider_source="ticker_page", error_reason="3 linked articles in last 30d",
+        now=clock(),
+    )
+    engine.news_ticker_requester = lambda _symbol: False
+
+    engine.run_cycle()
+
+    status = load_coverage(conn, "AAA", "NEWS")
+    assert status.status == "READY"
+    assert status.provider_source == "ticker_page"
+
+
+def test_rss_positive_match_recovers_recent_ticker_page_missing(tmp_path) -> None:
+    news = FakeNews({"AAA": 2})
+    cfg = fast_config(datasets=("NEWS",), news_interval_seconds=1800.0)
+    engine, conn, _provider, clock, _sleeper = build(
+        tmp_path, symbols=["AAA"], config=cfg, news_runner=news
+    )
+    record_attempt(
+        conn, "AAA", "NEWS", "MISSING", provider="CafeF",
+        provider_source="ticker_page", error_reason="no relevant news in last 30d",
+        now=clock(),
+    )
+    engine.news_ticker_requester = lambda _symbol: False
+
+    engine.run_cycle()
+
+    status = load_coverage(conn, "AAA", "NEWS")
+    assert status.status == "PARTIAL"
+    assert status.provider_source == "rss"
+    assert "2 article(s) in last 30d" in status.error_reason
+
+
+def test_ticker_page_sweep_queues_every_symbol_in_bounded_batches(tmp_path) -> None:
+    symbols = ["AAA", "BBB", "CCC", "DDD", "EEE"]
+    news = FakeNews({})
+    cfg = fast_config(
+        datasets=("NEWS",),
+        news_ticker_requests_per_cycle=2,
+        news_ticker_refresh_interval_seconds=6 * 3600,
+    )
+    engine, conn, _provider, clock, _sleeper = build(
+        tmp_path, symbols=symbols, config=cfg, news_runner=news
+    )
+    requested: list[str] = []
+
+    def enqueue(symbol: str) -> bool:
+        requested.append(symbol)
+        mark_in_progress(conn, symbol, "NEWS", now=clock())
+        return True
+
+    engine.news_ticker_requester = enqueue
+    first = engine.run_cycle()
+    assert requested == ["AAA", "BBB"]
+    assert load_coverage(conn, "AAA", "NEWS").status == "IN_PROGRESS"
+    assert "ticker_pages queued=2/5" in first.news
+
+    engine.run_cycle()
+    engine.run_cycle()
+    assert requested == symbols
+    assert len(set(requested)) == len(symbols)
 

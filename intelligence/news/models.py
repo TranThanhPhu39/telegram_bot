@@ -60,10 +60,13 @@ class NewsItem:
     event_type: str = "OTHER"
     event_importance: float = 0.3
     sentiment: SentimentResult | None = None
+    retrieved_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if self.published_at.tzinfo is None:
             raise ValueError("published_at must be timezone-aware")
+        if self.retrieved_at is not None and self.retrieved_at.tzinfo is None:
+            raise ValueError("retrieved_at must be timezone-aware")
         normalized = tuple(dict.fromkeys(item.strip().upper() for item in self.tickers))
         object.__setattr__(self, "tickers", normalized)
         if self.primary_ticker and self.primary_ticker.upper() not in normalized:

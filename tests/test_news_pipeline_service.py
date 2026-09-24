@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import sqlite3
+import pytest
 
 from intelligence.news.benchmark import benchmark_decay_profiles, run_benchmark
 from intelligence.news.models import NewsItem, SentimentLabel, SentimentResult
@@ -17,6 +18,8 @@ from intelligence.news.sentiment import (
     FinancialHeadlineCalibrationModel, LexiconSentimentModel,
 )
 from intelligence.news.service import SentimentQueryService
+from runtime.views import NewsItemView
+from telegram_bot.formatters import format_news
 
 
 NOW = datetime(2026, 9, 20, tzinfo=timezone.utc)
@@ -311,6 +314,61 @@ def test_cafef_ticker_news_provider_parses_html():
     assert items[0].published_at.year == 2026
     assert items[0].published_at.month == 9
     assert items[0].published_at.day == 15
+    assert items[0].retrieved_at == NOW
+
+
+def test_cafef_ticker_fetch_bypasses_http_cache_and_stamps_retrieval_time():
+    from intelligence.news.pipeline import CafeFTickerNewsProvider
+
+    calls = []
+
+    class Response:
+        text = '<div id="divEvents"><p>19/09/2026 <a href="/fpt.chn">FPT tăng trưởng</a></p></div>'
+
+        def raise_for_status(self):
+            return None
+
+    def request_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    items = CafeFTickerNewsProvider(request_get=request_get).fetch("FPT", now=NOW)
+
+    assert len(items) == 1
+    assert items[0].retrieved_at == NOW
+    assert calls[0][1]["headers"]["Cache-Control"] == "no-cache"
+    assert calls[0][1]["headers"]["Pragma"] == "no-cache"
+
+
+def test_news_formatter_exposes_retrieval_time_and_fallback_quality():
+    result = format_news("FPT", (NewsItemView(
+        published_at=NOW,
+        title="FPT lập kỷ lục, ký hợp đồng mới",
+        source="cafef_ticker",
+        event_type="CONTRACT",
+        sentiment_label="neutral",
+        url="https://cafef.vn/fpt.chn",
+        retrieved_at=NOW,
+        sentiment_backend="lexicon_fallback",
+    ),))
+    assert "Tải lúc:" in result
+    assert "fallback từ khóa" in result
+
+
+def test_cafef_ticker_provider_distinguishes_transport_and_page_shape_errors():
+    from intelligence.news.pipeline import CafeFTickerNewsProvider, NewsProviderFetchError
+
+    class FailedResponse:
+        text = "<html><body>blocked</body></html>"
+
+        def raise_for_status(self):
+            raise RuntimeError("HTTP 403")
+
+    provider = CafeFTickerNewsProvider(request_get=lambda *a, **kw: FailedResponse())
+    with pytest.raises(NewsProviderFetchError, match="request failed"):
+        provider.fetch("VIC", now=NOW)
+    with pytest.raises(NewsProviderFetchError, match="#divEvents"):
+        provider.parse_html("<html><body></body></html>", "VIC", now=NOW)
 
 
 def test_refresh_ticker_news_populates_repository_and_sentiment(tmp_path):
@@ -344,6 +402,43 @@ def test_refresh_ticker_news_populates_repository_and_sentiment(tmp_path):
     assert agg is not None
     assert agg.article_count == 2
     assert agg.ticker == "HC1"
+
+
+def test_ticker_refetch_rescores_cached_recent_articles_without_faking_fetch_time(tmp_path):
+    from intelligence.news.pipeline import refresh_ticker_news
+    from intelligence.news.sentiment import FinancialHeadlineCalibrationModel
+
+    retrieved_at = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    checked_at = datetime(2026, 9, 24, tzinfo=timezone.utc)
+    stale_sentiment = SentimentResult(
+        SentimentLabel.NEUTRAL, .15, .70, .15, .70,
+        "lexicon_fallback", "financial-lexicon", "v1", retrieved_at,
+    )
+    cached = NewsItem(
+        "fpt-contract", "cafef_ticker", "https://cafef.vn/fpt-contract.chn",
+        retrieved_at, "FPT lập kỷ lục ngành CNTT Việt Nam: Hơn 1,5 tỷ USD hợp đồng mới",
+        tickers=("FPT",), primary_ticker="FPT", sentiment=stale_sentiment,
+        retrieved_at=retrieved_at,
+    )
+    repository = SQLiteNewsRepository(tmp_path / "news.db")
+    repository.save(cached)
+
+    class EmptyProvider:
+        def fetch(self, *args, **kwargs):
+            return ()
+
+    model = FinancialHeadlineCalibrationModel(
+        LexiconSentimentModel(backend="lexicon_fallback", now=lambda: checked_at)
+    )
+    refresh_ticker_news(
+        "FPT", repository=repository, sentiment_model=model,
+        provider=EmptyProvider(), now=checked_at,
+    )
+
+    refreshed = repository.get(cached.id)
+    assert refreshed.sentiment.label == SentimentLabel.POSITIVE
+    assert refreshed.sentiment.calibration_version == "vn-financial-headline-v1"
+    assert refreshed.retrieved_at == retrieved_at
 
 
 def test_targeted_news_worker_enqueues_and_processes(tmp_path):
@@ -392,3 +487,157 @@ def test_targeted_news_worker_enqueues_and_processes(tmp_path):
         worker.stop(timeout=5.0)
 
 
+def test_ticker_page_worker_records_provider_failure_as_error(tmp_path):
+    import time
+    from data.database import connect_database
+    from data.migrations import bootstrap_schema
+    from fundamentals.coverage_store import load_coverage
+    from intelligence.news.pipeline import NewsProviderFetchError
+    from runtime.news_refresh import TargetedNewsWorker
+
+    coverage_path = tmp_path / "coverage.sqlite3"
+    news_path = tmp_path / "news.sqlite3"
+
+    def coverage_connection():
+        connection = connect_database(f"sqlite:///{coverage_path.as_posix()}")
+        bootstrap_schema(connection)
+        return connection
+
+    class BrokenProvider:
+        def fetch(self, *args, **kwargs):
+            raise NewsProviderFetchError("CafeF ticker page request failed (HTTPError)")
+
+    worker = TargetedNewsWorker(
+        repository_factory=lambda: SQLiteNewsRepository(news_path),
+        sentiment_factory=lambda: LexiconSentimentModel(now=lambda: NOW),
+        provider_factory=BrokenProvider,
+        connection_factory=coverage_connection,
+    )
+    worker.start()
+    try:
+        assert worker.request("VIC") is True
+        status = None
+        for _ in range(100):
+            connection = coverage_connection()
+            try:
+                status = load_coverage(connection, "VIC", "NEWS")
+            finally:
+                connection.close()
+            if status is not None and status.status == "ERROR":
+                break
+            time.sleep(0.02)
+        assert status is not None and status.status == "ERROR"
+        assert status.provider_source == "ticker_page"
+        assert "ticker-page refresh failed" in (status.error_reason or "")
+    finally:
+        worker.stop(timeout=2.0)
+        worker.close()
+
+
+def test_ticker_page_queue_claims_symbols_and_reports_saturation(tmp_path):
+    import threading
+    from queue import Queue
+    from data.database import connect_database
+    from data.migrations import bootstrap_schema
+    from fundamentals.coverage_store import load_coverage
+    from runtime.news_refresh import TargetedNewsWorker
+
+    coverage_path = tmp_path / "coverage.sqlite3"
+    news_path = tmp_path / "news.sqlite3"
+
+    def coverage_connection():
+        connection = connect_database(f"sqlite:///{coverage_path.as_posix()}")
+        bootstrap_schema(connection)
+        return connection
+
+    entered_provider = threading.Event()
+    release_provider = threading.Event()
+
+    class BlockingProvider:
+        def fetch(self, *args, **kwargs):
+            entered_provider.set()
+            assert release_provider.wait(2)
+            return ()
+
+    worker = TargetedNewsWorker(
+        repository_factory=lambda: SQLiteNewsRepository(news_path),
+        sentiment_factory=lambda: LexiconSentimentModel(now=lambda: NOW),
+        provider_factory=BlockingProvider,
+        connection_factory=coverage_connection,
+    )
+    worker._queue = Queue(maxsize=1)
+    worker.start()
+    try:
+        assert worker.request("BLOCK") is True
+        assert entered_provider.wait(2)
+
+        connection = coverage_connection()
+        try:
+            assert load_coverage(connection, "BLOCK", "NEWS").status == "IN_PROGRESS"
+        finally:
+            connection.close()
+
+        assert worker.request("QUEUED") is True
+        assert worker.request("DEFERRED") is False
+        connection = coverage_connection()
+        try:
+            deferred = load_coverage(connection, "DEFERRED", "NEWS")
+        finally:
+            connection.close()
+        assert deferred is not None and deferred.status == "ERROR"
+        assert "queue is full" in (deferred.error_reason or "")
+    finally:
+        release_provider.set()
+        worker.stop(timeout=2.0)
+        worker.close()
+
+
+def test_ticker_page_startup_failure_closes_accepted_coverage_claim(tmp_path):
+    import threading
+    import time
+    from data.database import connect_database
+    from data.migrations import bootstrap_schema
+    from fundamentals.coverage_store import load_coverage
+    from runtime.news_refresh import TargetedNewsWorker
+
+    coverage_path = tmp_path / "coverage.sqlite3"
+    initializing = threading.Event()
+    release_startup = threading.Event()
+
+    def coverage_connection():
+        connection = connect_database(f"sqlite:///{coverage_path.as_posix()}")
+        bootstrap_schema(connection)
+        return connection
+
+    def fail_repository_startup():
+        initializing.set()
+        assert release_startup.wait(2)
+        raise RuntimeError("news database unavailable")
+
+    worker = TargetedNewsWorker(
+        repository_factory=fail_repository_startup,
+        sentiment_factory=lambda: LexiconSentimentModel(now=lambda: NOW),
+        connection_factory=coverage_connection,
+    )
+    worker.start()
+    try:
+        assert initializing.wait(2)
+        assert worker.request("FAIL") is True
+        release_startup.set()
+
+        status = None
+        for _ in range(100):
+            connection = coverage_connection()
+            try:
+                status = load_coverage(connection, "FAIL", "NEWS")
+            finally:
+                connection.close()
+            if status is not None and status.status == "ERROR":
+                break
+            time.sleep(0.02)
+        assert status is not None and status.status == "ERROR"
+        assert "worker initialization failed" in (status.error_reason or "")
+    finally:
+        release_startup.set()
+        worker.stop(timeout=2.0)
+        worker.close()

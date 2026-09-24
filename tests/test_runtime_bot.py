@@ -277,7 +277,7 @@ def test_latest_news_reports_cooldown_without_reenqueuing() -> None:
     assert "đang trong thời gian chống gọi lặp" in result
 
 
-def test_latest_news_does_not_enqueue_when_articles_exist() -> None:
+def test_latest_news_queues_refresh_when_latest_article_is_stale() -> None:
     fake_article = SimpleNamespace(
         published_at=datetime(2026, 9, 20, tzinfo=timezone.utc),
         title="FPT tăng trưởng", source="cafef_rss", event_type="EARNINGS",
@@ -296,9 +296,78 @@ def test_latest_news_does_not_enqueue_when_articles_exist() -> None:
         news_refresh_requester=lambda symbol: requested.append(symbol) or True,
     )
 
+    result = runtime.latest_news("FPT")
+
+    assert requested == ["FPT"]
+    assert "đã xếp" in result.casefold()
+
+
+def test_latest_news_does_not_enqueue_when_article_and_ticker_check_are_fresh() -> None:
+    from fundamentals.coverage_store import record_attempt
+
+    checked_at = datetime.fromtimestamp(1_800_000_000, timezone.utc)
+    fake_article = SimpleNamespace(
+        published_at=checked_at,
+        title="FPT tăng trưởng", source="cafef_rss", event_type="EARNINGS",
+        sentiment=None, url="https://cafef.vn/fpt-tang-truong.chn",
+    )
+
+    class News(EmptyNews):
+        def latest_news(self, *args, **kwargs):
+            return (fake_article,)
+
+    requested: list[str] = []
+    connection = connect_database("sqlite:///:memory:")
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connection,
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        news_service=News(), now=lambda: 1_800_000_000,
+        news_refresh_requester=lambda symbol: requested.append(symbol) or True,
+    )
+    record_attempt(
+        connection, "FPT", "NEWS", "READY", provider="CafeF",
+        provider_source="ticker_page", error_reason="3 article(s) in last 30d",
+        now=checked_at,
+    )
+
     runtime.latest_news("FPT")
 
     assert requested == []
+
+
+def test_recent_article_does_not_hide_stale_ticker_page_check(monkeypatch) -> None:
+    from fundamentals.coverage_store import record_attempt
+
+    monkeypatch.setenv("NEWS_TICKER_REFRESH_INTERVAL_SECONDS", "21600")
+    now_ts = 1_800_000_000
+    checked_at = datetime.fromtimestamp(now_ts - 7 * 3600, timezone.utc)
+    article = SimpleNamespace(
+        published_at=datetime.fromtimestamp(now_ts - 5 * 60, timezone.utc),
+        title="FPT vừa công bố thông tin", source="cafef_rss", event_type="OTHER",
+        sentiment=None, url="https://cafef.vn/fpt-moi.chn",
+    )
+
+    class News(EmptyNews):
+        def latest_news(self, *args, **kwargs):
+            return (article,)
+
+    requested = []
+    connection = connect_database("sqlite:///:memory:")
+    runtime = RuntimeBotDataService(
+        FakeClient(payload()), connection,
+        (ScannerInstrument("FPT", "HOSE", "STOCK"),),
+        news_service=News(), now=lambda: now_ts,
+        news_refresh_requester=lambda symbol: requested.append(symbol) or True,
+    )
+    record_attempt(
+        connection, "FPT", "NEWS", "READY", provider="CafeF",
+        provider_source="ticker_page", error_reason="page checked earlier",
+        now=checked_at,
+    )
+
+    runtime.latest_news("FPT")
+
+    assert requested == ["FPT"]
 
 
 def test_sentiment_overview_queues_targeted_refresh_when_coverage_is_missing() -> None:

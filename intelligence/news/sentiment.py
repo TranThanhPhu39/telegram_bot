@@ -33,7 +33,8 @@ class LexiconSentimentModel:
         positive = sum(phrase in text for phrase in self.POSITIVE)
         negative = sum(phrase in text for phrase in self.NEGATIVE)
         if positive == negative == 0:
-            probs = (.15, .70, .15)
+            # No recognized evidence is uncertainty, not confident neutrality.
+            probs = (1 / 3, 1 / 3, 1 / 3)
         else:
             total = positive + negative
             pos = .1 + .8 * positive / total
@@ -92,7 +93,8 @@ class FallbackSentimentModel:
 
 
 _FINANCIAL_METRIC = (
-    r"(?:lợi nhuận(?: sau thuế)?|lnst|lãi ròng|lãi sau thuế|doanh thu|eps)"
+    r"(?:lợi nhuận(?: sau thuế)?|lnst|lãi ròng|lãi sau thuế|doanh thu|eps|"
+    r"hợp đồng(?: mới)?|đơn hàng(?: mới)?|giá trị trúng thầu)"
 )
 _FINANCIAL_UP = r"(?:tăng(?: trưởng)?|vượt kế hoạch|cao hơn|lập kỷ lục|đạt kỷ lục|cải thiện)"
 _FINANCIAL_DOWN = r"(?:giảm|sụt|lao dốc|thấp hơn|không đạt kế hoạch)"
@@ -157,7 +159,7 @@ class FinancialHeadlineCalibrationModel:
         result = self.model.analyze(item)
         direction = _financial_headline_direction(item.model_text)
         if direction is None:
-            return result
+            return replace(result, calibration_version=FINANCIAL_CALIBRATION_VERSION)
 
         positive = result.probability_positive
         neutral = result.probability_neutral

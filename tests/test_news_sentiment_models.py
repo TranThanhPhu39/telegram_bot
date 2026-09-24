@@ -36,6 +36,15 @@ def test_explicit_lexicon_fallback():
     assert result.label == SentimentLabel.POSITIVE
 
 
+def test_lexicon_fallback_marks_unrecognized_headline_as_low_confidence():
+    result = LexiconSentimentModel(backend="lexicon_fallback").analyze(
+        item("Doanh nghiệp thay đổi lãnh đạo và công bố nghị quyết mới")
+    )
+    assert result.label == SentimentLabel.NEUTRAL
+    assert result.score == 0.0
+    assert result.model_confidence == 1 / 3
+
+
 def test_phobert_accepts_direct_single_input_pipeline_shape():
     class DirectPipeline:
         def __call__(self, *args, **kwargs):
@@ -69,8 +78,20 @@ def test_financial_calibration_corrects_clear_direction_but_preserves_ambiguity(
     ambiguous = model.analyze(item("Doanh thu tăng nhưng lợi nhuận giảm"))
     assert ambiguous.label == SentimentLabel.NEGATIVE
     assert ambiguous.probability_negative == .80
-    assert ambiguous.calibration_version is None
+    assert ambiguous.calibration_version == FINANCIAL_CALIBRATION_VERSION
 
     negated = model.analyze(item("Lợi nhuận không tăng so với cùng kỳ"))
     assert negated.probability_negative == .80
-    assert negated.calibration_version is None
+    assert negated.calibration_version == FINANCIAL_CALIBRATION_VERSION
+
+
+def test_live_fpt_record_contract_headline_is_not_flat_neutral_under_fallback():
+    headline = (
+        "FPT lập kỷ lục ngành CNTT Việt Nam: Hơn 1,5 tỷ USD hợp đồng mới từ nước ngoài"
+    )
+    calibrated = FinancialHeadlineCalibrationModel(
+        LexiconSentimentModel(backend="lexicon_fallback")
+    ).analyze(item(headline))
+    assert calibrated.label == SentimentLabel.POSITIVE
+    assert calibrated.score >= .20
+    assert calibrated.calibration_version == FINANCIAL_CALIBRATION_VERSION

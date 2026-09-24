@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import logging
 import os
-from queue import Queue
+from queue import Empty, Full, Queue
 import sqlite3
 import threading
 import time
@@ -400,13 +400,17 @@ class TargetedNewsWorker:
         provider_factory: Callable[[], object] | None = None,
         connection_factory: Callable[[], sqlite3.Connection] | None = None,
         request_cooldown_seconds: float = 300.0,
+        request_delay_seconds: float = 0.0,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
+        if request_cooldown_seconds < 0 or request_delay_seconds < 0:
+            raise ValueError("news request intervals cannot be negative")
         self.repository_factory = repository_factory
         self.sentiment_factory = sentiment_factory
         self.provider_factory = provider_factory
         self.connection_factory = connection_factory
         self.request_cooldown_seconds = request_cooldown_seconds
+        self.request_delay_seconds = request_delay_seconds
         self.monotonic = monotonic
 
         self._queue: Queue[str | object] = Queue(maxsize=100)
@@ -415,6 +419,8 @@ class TargetedNewsWorker:
         self._last_attempt: dict[str, float] = {}
         self._thread: threading.Thread | None = None
         self._stopped = False
+        self._worker_failed = False
+        self._repository = None
 
     def start(self) -> threading.Thread:
         with self._lock:
@@ -435,6 +441,10 @@ class TargetedNewsWorker:
         with self._lock:
             if self._stopped:
                 return False
+            if self._worker_failed:
+                return False
+            if self._thread is None or not self._thread.is_alive():
+                return False
             if normalized in self._pending:
                 return False
             last_attempt = self._last_attempt.get(normalized)
@@ -443,13 +453,40 @@ class TargetedNewsWorker:
                 and self.monotonic() - last_attempt < self.request_cooldown_seconds
             ):
                 return False
-            try:
-                self._pending.add(normalized)
-                self._queue.put_nowait(normalized)
-                return True
-            except Exception:
+            self._pending.add(normalized)
+
+        # Claim the symbol before enqueueing it. Otherwise subsequent coverage
+        # cycles can select the same first batch while it is still waiting in
+        # the queue and starve later symbols in the universe.
+        try:
+            self._record_in_progress(normalized)
+        except Exception:
+            with self._lock:
                 self._pending.discard(normalized)
-                return False
+            logger.exception("could not mark ticker news refresh in progress for %s", normalized)
+            return False
+
+        rejected_reason: str | None = None
+        with self._lock:
+            if self._stopped:
+                rejected_reason = "ticker news worker stopped before enqueue"
+            elif self._worker_failed:
+                rejected_reason = "ticker news worker initialization failed"
+            elif self._thread is None or not self._thread.is_alive():
+                rejected_reason = "ticker news worker is not running"
+            else:
+                try:
+                    self._queue.put_nowait(normalized)
+                    return True
+                except Full:
+                    rejected_reason = "ticker news worker queue is full"
+            self._pending.discard(normalized)
+
+        try:
+            self._record_coverage(normalized, "ERROR", rejected_reason or "ticker news enqueue failed")
+        except Exception:
+            logger.exception("could not persist ticker news enqueue failure for %s", normalized)
+        return False
 
     def stop(self, timeout: float | None = None) -> None:
         with self._lock:
@@ -457,24 +494,93 @@ class TargetedNewsWorker:
                 return
             self._stopped = True
             thread = self._thread
-            self._queue.put(self._STOP)
-        if thread is not None:
+            if thread is None:
+                return
+            try:
+                self._queue.put_nowait(self._STOP)
+            except Full:
+                # The worker checks _stopped after draining the bounded queue.
+                pass
+        if thread is not threading.current_thread():
             thread.join(timeout)
 
-    def _run(self) -> None:
-        from intelligence.news.pipeline import CafeFTickerNewsProvider, refresh_ticker_news
+    def close(self) -> None:
+        thread = self._thread
+        if thread is not None and thread.is_alive():
+            logger.warning("targeted news worker still running; repository left open")
+            return
+        self._close_repository()
 
-        repository = self.repository_factory()
-        sentiment_model = self.sentiment_factory()
-        provider = (
-            self.provider_factory()
-            if self.provider_factory is not None
-            else CafeFTickerNewsProvider()
-        )
+    def _close_repository(self) -> None:
+        repository = self._repository
+        self._repository = None
+        connection = getattr(repository, "connection", None)
+        if connection is not None:
+            try:
+                connection.close()
+            except sqlite3.Error:
+                logger.warning("targeted news repository close failed")
+
+    def _record_in_progress(self, symbol: str) -> None:
+        if self.connection_factory is None:
+            return
+        connection = self.connection_factory()
+        try:
+            from fundamentals.coverage_store import mark_in_progress
+
+            mark_in_progress(connection, symbol, "NEWS")
+        finally:
+            connection.close()
+
+    def _record_coverage(self, symbol: str, status: str, reason: str) -> None:
+        if self.connection_factory is None:
+            return
+        connection = self.connection_factory()
+        try:
+            from fundamentals.coverage_store import record_attempt
+
+            record_attempt(
+                connection,
+                symbol,
+                "NEWS",
+                status,
+                provider="CafeF",
+                provider_source="ticker_page",
+                error_reason=reason,
+            )
+        finally:
+            connection.close()
+
+    def _run(self) -> None:
+        try:
+            from intelligence.news.pipeline import CafeFTickerNewsProvider, refresh_ticker_news
+
+            repository = self.repository_factory()
+            self._repository = repository
+            sentiment_model = self.sentiment_factory()
+            provider = (
+                self.provider_factory()
+                if self.provider_factory is not None
+                else CafeFTickerNewsProvider()
+            )
+        except Exception as error:
+            logger.exception("targeted news worker initialization failed")
+            with self._lock:
+                self._worker_failed = True
+            self._fail_queued_requests(error)
+            return
         while True:
-            item = self._queue.get()
+            try:
+                item = self._queue.get(timeout=0.5)
+            except Empty:
+                with self._lock:
+                    if self._stopped:
+                        self._close_repository()
+                        return
+                continue
             if item is self._STOP:
                 self._queue.task_done()
+                self._close_repository()
                 return
             symbol = str(item)
             try:
@@ -486,45 +592,63 @@ class TargetedNewsWorker:
                     limit=5,
                     max_age_days=30,
                 )
-                if self.connection_factory is not None:
-                    try:
-                        conn = self.connection_factory()
-                        try:
-                            from fundamentals.coverage_store import record_attempt
-
-                            if count >= 3:
-                                status = "READY"
-                                reason = f"{count} article(s) in last 30d"
-                            elif count > 0:
-                                status = "PARTIAL"
-                                reason = f"{count} article(s) in last 30d"
-                            else:
-                                has_any = bool(repository.latest_for_ticker(symbol, 1))
-                                if has_any:
-                                    status = "STALE"
-                                    reason = "newest article is older than 30d"
-                                else:
-                                    status = "MISSING"
-                                    reason = "no relevant news in last 30d"
-                            record_attempt(
-                                conn,
-                                symbol,
-                                "NEWS",
-                                status,
-                                provider="CafeF",
-                                provider_source="ticker_page",
-                                error_reason=reason,
-                            )
-                        finally:
-                            conn.close()
-                    except Exception:
-                        logger.warning("failed to record news coverage for %s", symbol)
-            except Exception:
+                current = datetime.now(timezone.utc)
+                cutoff = current - timedelta(days=30)
+                recent = tuple(
+                    article for article in repository.latest_for_ticker(symbol, 20)
+                    if cutoff <= article.published_at <= current and article.sentiment is not None
+                )
+                if len(recent) >= 3:
+                    status, reason = "READY", f"{len(recent)} linked article(s) in last 30d"
+                elif recent:
+                    status, reason = "PARTIAL", f"{len(recent)} linked article(s) in last 30d"
+                elif repository.latest_for_ticker(symbol, 1):
+                    status, reason = "STALE", "newest linked article is older than 30d"
+                else:
+                    status, reason = "MISSING", "no relevant news in last 30d"
+                self._record_coverage(symbol, status, reason)
+            except Exception as error:
                 logger.exception("targeted news refresh failed for %s", symbol)
+                try:
+                    status_code = getattr(error, "status_code", None)
+                    reason = (
+                        f"HTTP {status_code}: ticker-page refresh failed"
+                        if status_code is not None
+                        else f"{type(error).__name__}: ticker-page refresh failed"
+                    )
+                    self._record_coverage(
+                        symbol,
+                        "ERROR",
+                        reason,
+                    )
+                except Exception:
+                    logger.exception("failed to persist ticker-page error for %s", symbol)
             finally:
                 with self._lock:
                     self._pending.discard(symbol)
                     self._last_attempt[symbol] = self.monotonic()
+                self._queue.task_done()
+                if self.request_delay_seconds:
+                    time.sleep(self.request_delay_seconds)
+
+    def _fail_queued_requests(self, error: Exception) -> None:
+        reason = f"{type(error).__name__}: ticker news worker initialization failed"
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except Empty:
+                return
+            try:
+                if item is not self._STOP:
+                    symbol = str(item)
+                    try:
+                        self._record_coverage(symbol, "ERROR", reason)
+                    except Exception:
+                        logger.exception("could not persist initialization failure for %s", symbol)
+                    with self._lock:
+                        self._pending.discard(symbol)
+                        self._last_attempt[symbol] = self.monotonic()
+            finally:
                 self._queue.task_done()
 
 
@@ -536,7 +660,7 @@ def start_targeted_news_worker_from_env(
 
     from intelligence.news.pipeline import CafeFTickerNewsProvider
     from intelligence.news.repository import SQLiteNewsRepository
-    from intelligence.news.sentiment import build_sentiment_model
+    from intelligence.news.sentiment import get_shared_sentiment_model
 
     load_dotenv()
     timeout = float(os.getenv("NEWS_HTTP_TIMEOUT", "15"))
@@ -544,10 +668,11 @@ def start_targeted_news_worker_from_env(
         repository_factory=lambda: SQLiteNewsRepository(
             os.getenv("NEWS_DATABASE_PATH", "news_sentiment.db")
         ),
-        sentiment_factory=build_sentiment_model,
+        sentiment_factory=get_shared_sentiment_model,
         provider_factory=lambda: CafeFTickerNewsProvider(timeout=timeout),
         connection_factory=connection_factory,
         request_cooldown_seconds=float(os.getenv("NEWS_ON_DEMAND_COOLDOWN_SECONDS", "300")),
+        request_delay_seconds=float(os.getenv("NEWS_TICKER_FETCH_DELAY_SECONDS", "0.5")),
     )
     worker.start()
     return worker

@@ -19,8 +19,8 @@ from fundamentals.refresh_service import (
 )
 
 #: Datasets refreshed symbol-by-symbol inside a bounded batch. SECTOR_HISTORY
-#: is handled per *sector* through the existing sector worker, and NEWS is one
-#: global scheduled ingestion projected onto per-symbol rows.
+#: is handled per *sector* through the existing sector worker. NEWS combines
+#: bounded per-ticker page checks with a supplementary global RSS ingest.
 BATCH_DATASETS = ("FINANCIALS", "INSTITUTIONAL", "MARKET_HISTORY")
 
 DEFAULT_DATASETS = COVERAGE_DATASETS
@@ -67,6 +67,9 @@ class CoverageConfig:
     news_ingest_limit: int = 30
     #: A symbol counts as having news coverage if linked to an article this recent.
     news_window_days: int = 30
+    #: Per-ticker CafeF page polling is rate-bounded and independent of the RSS sweep.
+    news_ticker_requests_per_cycle: int = 100
+    news_ticker_refresh_interval_seconds: float = 15 * 60.0
     datasets: tuple[str, ...] = DEFAULT_DATASETS
 
     def __post_init__(self) -> None:
@@ -80,12 +83,17 @@ class CoverageConfig:
             )
         if not 1 <= self.news_ingest_limit <= 100:
             raise CoverageConfigError("NEWS_INGEST_LIMIT must be between 1 and 100")
+        if not 1 <= self.news_ticker_requests_per_cycle <= 100:
+            raise CoverageConfigError(
+                "NEWS_TICKER_REQUESTS_PER_CYCLE must be between 1 and 100"
+            )
         if self.news_window_days < 1:
             raise CoverageConfigError("news_window_days must be positive")
         for name in (
             "worker_interval_seconds", "financials_interval_seconds",
             "institutional_interval_seconds", "market_history_interval_seconds",
             "sector_history_interval_seconds", "news_interval_seconds",
+            "news_ticker_refresh_interval_seconds",
         ):
             if getattr(self, name) <= 0:
                 raise CoverageConfigError(f"{name} must be positive")
@@ -109,7 +117,7 @@ class CoverageConfig:
             "INSTITUTIONAL": self.institutional_interval_seconds,
             "MARKET_HISTORY": self.market_history_interval_seconds,
             "SECTOR_HISTORY": self.sector_history_interval_seconds,
-            "NEWS": self.news_interval_seconds,
+            "NEWS": self.news_ticker_refresh_interval_seconds,
         }[dataset]
 
     def retry_wait(self, retry_number: int) -> float:
@@ -205,5 +213,14 @@ class CoverageConfig:
             news_window_days=int(number(
                 "NEWS_WINDOW_DAYS", defaults.news_window_days, integer=True
             )),
+            news_ticker_requests_per_cycle=int(number(
+                "NEWS_TICKER_REQUESTS_PER_CYCLE",
+                defaults.news_ticker_requests_per_cycle,
+                integer=True,
+            )),
+            news_ticker_refresh_interval_seconds=number(
+                "NEWS_TICKER_REFRESH_INTERVAL_SECONDS",
+                defaults.news_ticker_refresh_interval_seconds,
+            ),
             datasets=datasets,
         )

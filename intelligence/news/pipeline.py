@@ -245,7 +245,11 @@ class CafeFRSSProvider:
 
     def fetch(self, limit: int = 20) -> tuple[NewsItem, ...]:
         response = requests.get(self.url, timeout=self.timeout,
-                                headers={"User-Agent": "VNStockBot/1.0"})
+                                headers={
+                                    "User-Agent": "VNStockBot/1.0",
+                                    "Cache-Control": "no-cache",
+                                    "Pragma": "no-cache",
+                                })
         response.raise_for_status()
         root = ET.fromstring(response.content.replace(b"&nbsp;", b" "))
         items = []
@@ -272,7 +276,9 @@ class NewsIngestionService:
 
     def run_once(self, limit: int = 20) -> tuple[int, int]:
         inserted = duplicates = 0
+        retrieved_at = datetime.now(timezone.utc)
         for raw in self.provider.fetch(limit):
+            raw = replace(raw, retrieved_at=raw.retrieved_at or retrieved_at)
             linked = self.linker.link(raw)
             analyzed = replace(linked, sentiment=self.sentiment.analyze(linked))
             if self.repository.save(analyzed): inserted += 1
@@ -282,6 +288,14 @@ class NewsIngestionService:
 
 CAFEF_TICKER_EVENT_URL = "https://s.cafef.vn/tin-doanh-nghiep/{symbol}/Event.chn"
 VIETNAM_TZ = timezone(timedelta(hours=7))
+
+
+class NewsProviderFetchError(RuntimeError):
+    """A ticker-news source could not be fetched or its page shape was invalid."""
+
+    def __init__(self, message: str, *, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class CafeFTickerNewsProvider:
@@ -311,13 +325,25 @@ class CafeFTickerNewsProvider:
             response = self.request_get(
                 url,
                 timeout=self.timeout,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) VNStockBot/1.0"},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) VNStockBot/1.0",
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                },
             )
             response.raise_for_status()
             content = response.text
-        except Exception:
-            logger.warning("failed to fetch CafeF ticker news for %s", normalized_symbol)
-            return ()
+        except Exception as error:
+            status_code = getattr(getattr(error, "response", None), "status_code", None)
+            status_detail = f" HTTP {status_code}" if status_code is not None else ""
+            logger.warning(
+                "failed to fetch CafeF ticker news for %s error=%s status=%s",
+                normalized_symbol, type(error).__name__, status_code,
+            )
+            raise NewsProviderFetchError(
+                f"CafeF ticker page request failed ({type(error).__name__}){status_detail}",
+                status_code=status_code,
+            ) from error
 
         return self.parse_html(
             content, normalized_symbol, limit=limit, max_age_days=max_age_days, now=now
@@ -340,7 +366,7 @@ class CafeFTickerNewsProvider:
         soup = BeautifulSoup(html_content, "html.parser")
         div_events = soup.find(id="divEvents")
         if not div_events:
-            return ()
+            raise NewsProviderFetchError("CafeF ticker page missing #divEvents")
 
         items: list[NewsItem] = []
         seen_urls: set[str] = set()
@@ -400,6 +426,7 @@ class CafeFTickerNewsProvider:
                     ticker_relevance={symbol: 1.0},
                     event_type=event,
                     event_importance=importance,
+                    retrieved_at=current_time,
                 )
             )
 
@@ -419,11 +446,25 @@ def refresh_ticker_news(
 ) -> int:
     """Fetch, analyze and persist ticker-specific news for a single symbol."""
     prov = provider or CafeFTickerNewsProvider()
-    items = prov.fetch(symbol, limit=limit, max_age_days=max_age_days, now=now)
+    retrieved_at = now or datetime.now(timezone.utc)
+    items = prov.fetch(
+        symbol, limit=limit, max_age_days=max_age_days, now=retrieved_at
+    )
     inserted = 0
+    fetched_ids: set[str] = set()
     for raw in items:
-        analyzed = replace(raw, sentiment=sentiment_model.analyze(raw))
+        fresh = replace(raw, retrieved_at=raw.retrieved_at or retrieved_at)
+        analyzed = replace(fresh, sentiment=sentiment_model.analyze(fresh))
         if repository.save(analyzed):
             inserted += 1
+        fetched_ids.add(raw.id)
+
+    # Re-score the currently visible cached set too. This catches RSS-linked
+    # articles and rows created under an older sentiment/calibration version,
+    # without changing their actual retrieval timestamps.
+    for cached in repository.latest_for_ticker(symbol, limit):
+        if cached.id in fetched_ids:
+            continue
+        repository.save(replace(cached, sentiment=sentiment_model.analyze(cached)))
     return len(items)
 
