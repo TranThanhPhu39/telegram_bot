@@ -39,19 +39,45 @@ def test_migration_adds_columns_without_dropping_legacy_row(tmp_path):
     assert repo.connection.execute("SELECT COUNT(*) FROM news_items WHERE id='old'").fetchone()[0] == 1
 
 
-def test_duplicate_news_refreshes_ticker_links_without_reinserting(tmp_path):
+def test_duplicate_news_refreshes_metadata_inference_and_ticker_links(tmp_path):
     repo = SQLiteNewsRepository(tmp_path / "news.db")
     original = NewsItem(
         "dynamic", "cafef_rss", "https://example.test/dynamic",
         datetime.now(timezone.utc), "DGC công bố kết quả",
     )
     assert repo.save(original) is True
+    sentiment = SentimentResult(
+        SentimentLabel.POSITIVE, .9, .1, 0.0, .9,
+        "financial_rules", "financial-rules", "v2",
+        datetime.now(timezone.utc), "rules-v2",
+    )
     relinked = NewsItem(
         original.id, original.source, original.url, original.published_at,
-        original.title, tickers=("DGC",), primary_ticker="DGC",
-        ticker_relevance={"DGC": 1.0},
+        original.title, summary="Nội dung mới", tickers=("DGC",),
+        primary_ticker="DGC", ticker_relevance={"DGC": 1.0}, sentiment=sentiment,
     )
     assert repo.save(relinked) is False
     loaded = repo.latest_for_ticker("DGC")
     assert len(loaded) == 1
     assert loaded[0].primary_ticker == "DGC"
+    assert loaded[0].summary == "Nội dung mới"
+    assert loaded[0].sentiment.label == SentimentLabel.POSITIVE
+
+
+def test_explicit_reanalysis_updates_only_inference_metadata(tmp_path):
+    repo = SQLiteNewsRepository(tmp_path / "news.db")
+    original = sample()
+    assert repo.save(original)
+    replacement = SentimentResult(
+        SentimentLabel.POSITIVE, .9, .1, 0.0, .9,
+        "financial_rules", "financial-rules", "v2",
+        datetime.now(timezone.utc), "rules-v2",
+    )
+    repo.update_sentiment(original.id, replacement)
+    loaded = repo.get(original.id)
+    assert loaded is not None and loaded.sentiment is not None
+    assert loaded.title == original.title
+    assert loaded.tickers == original.tickers
+    assert loaded.sentiment.label == SentimentLabel.POSITIVE
+    assert loaded.sentiment.calibration_version == "rules-v2"
+    assert len(repo.all_items()) == 1

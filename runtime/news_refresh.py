@@ -356,34 +356,34 @@ class TargetedNewsRefreshWorker:
 
 def build_targeted_news_refresh_worker_from_env(
     connection_factory: Callable[[], sqlite3.Connection],
-) -> TargetedNewsRefreshWorker:
-    """Build the production on-demand worker with the same env contract as
-    ``build_news_runner_from_env``, plus its own fetch-limit/cooldown knobs.
+) -> "TargetedNewsWorker":
+    """Build the production per-symbol CafeF tag-page worker.
+
+    The previous implementation only re-read a larger slice of the same
+    market-wide RSS feed.  It could not guarantee that the requested ticker was
+    present and therefore left popular symbols stale.  The worker below fetches
+    exactly ``/{symbol}/trang-1.html`` off the Telegram command path.
     """
     from dotenv import load_dotenv
 
-    from intelligence.news.pipeline import CafeFCompanyCatalogProvider, CafeFRSSProvider
+    from intelligence.news.pipeline import CafeFTickerNewsProvider
     from intelligence.news.repository import SQLiteNewsRepository
     from intelligence.news.sentiment import get_shared_sentiment_model
 
     load_dotenv()
     timeout = float(os.getenv("NEWS_HTTP_TIMEOUT", "15"))
-    return TargetedNewsRefreshWorker(
-        connection_factory=connection_factory,
+    return TargetedNewsWorker(
         repository_factory=lambda: SQLiteNewsRepository(
             os.getenv("NEWS_DATABASE_PATH", "news_sentiment.db")
         ),
-        provider_factory=lambda: CafeFRSSProvider(timeout=timeout),
-        catalog_factory=lambda: CafeFCompanyCatalogProvider(
-            url=os.getenv(
-                "NEWS_COMPANY_CATALOG_URL",
-                "https://cafefnew.mediacdn.vn/Search/company.json",
-            ),
-            timeout=timeout,
-        ),
+        provider_factory=lambda: CafeFTickerNewsProvider(timeout=timeout),
         sentiment_factory=get_shared_sentiment_model,
-        fetch_limit=int(os.getenv("NEWS_TARGETED_FETCH_LIMIT", "60")),
-        cooldown_seconds=float(os.getenv("NEWS_TARGETED_COOLDOWN_SECONDS", "300")),
+        connection_factory=connection_factory,
+        fetch_limit=int(os.getenv("NEWS_TARGETED_FETCH_LIMIT", "10")),
+        max_age_days=int(os.getenv("NEWS_WINDOW_DAYS", "30")),
+        request_cooldown_seconds=float(
+            os.getenv("NEWS_TARGETED_COOLDOWN_SECONDS", "300")
+        ),
     )
 
 
@@ -399,6 +399,8 @@ class TargetedNewsWorker:
         sentiment_factory: Callable[[], object],
         provider_factory: Callable[[], object] | None = None,
         connection_factory: Callable[[], sqlite3.Connection] | None = None,
+        fetch_limit: int = 5,
+        max_age_days: int = 30,
         request_cooldown_seconds: float = 300.0,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -406,6 +408,10 @@ class TargetedNewsWorker:
         self.sentiment_factory = sentiment_factory
         self.provider_factory = provider_factory
         self.connection_factory = connection_factory
+        if fetch_limit < 1 or max_age_days < 1:
+            raise ValueError("fetch_limit and max_age_days must be positive")
+        self.fetch_limit = fetch_limit
+        self.max_age_days = max_age_days
         self.request_cooldown_seconds = request_cooldown_seconds
         self.monotonic = monotonic
 
@@ -461,6 +467,9 @@ class TargetedNewsWorker:
         if thread is not None:
             thread.join(timeout)
 
+    def close(self) -> None:
+        """Compatibility hook; the worker closes its repository on thread exit."""
+
     def _run(self) -> None:
         from intelligence.news.pipeline import CafeFTickerNewsProvider, refresh_ticker_news
 
@@ -471,61 +480,84 @@ class TargetedNewsWorker:
             if self.provider_factory is not None
             else CafeFTickerNewsProvider()
         )
-        while True:
-            item = self._queue.get()
-            if item is self._STOP:
-                self._queue.task_done()
-                return
-            symbol = str(item)
-            try:
-                count = refresh_ticker_news(
-                    symbol,
-                    repository=repository,
-                    sentiment_model=sentiment_model,
-                    provider=provider,
-                    limit=5,
-                    max_age_days=30,
-                )
-                if self.connection_factory is not None:
-                    try:
-                        conn = self.connection_factory()
-                        try:
-                            from fundamentals.coverage_store import record_attempt
+        try:
+            while True:
+                item = self._queue.get()
+                if item is self._STOP:
+                    self._queue.task_done()
+                    return
+                symbol = str(item)
+                try:
+                    count = refresh_ticker_news(
+                        symbol,
+                        repository=repository,
+                        sentiment_model=sentiment_model,
+                        provider=provider,
+                        limit=self.fetch_limit,
+                        max_age_days=self.max_age_days,
+                    )
+                    self._record_coverage(repository, symbol, count)
+                except Exception as error:
+                    logger.exception("targeted news refresh failed for %s", symbol)
+                    self._record_error(symbol, error)
+                finally:
+                    with self._lock:
+                        self._pending.discard(symbol)
+                        self._last_attempt[symbol] = self.monotonic()
+                    self._queue.task_done()
+        finally:
+            connection = getattr(repository, "connection", None)
+            if connection is not None:
+                connection.close()
 
-                            if count >= 3:
-                                status = "READY"
-                                reason = f"{count} article(s) in last 30d"
-                            elif count > 0:
-                                status = "PARTIAL"
-                                reason = f"{count} article(s) in last 30d"
-                            else:
-                                has_any = bool(repository.latest_for_ticker(symbol, 1))
-                                if has_any:
-                                    status = "STALE"
-                                    reason = "newest article is older than 30d"
-                                else:
-                                    status = "MISSING"
-                                    reason = "no relevant news in last 30d"
-                            record_attempt(
-                                conn,
-                                symbol,
-                                "NEWS",
-                                status,
-                                provider="CafeF",
-                                provider_source="ticker_page",
-                                error_reason=reason,
-                            )
-                        finally:
-                            conn.close()
-                    except Exception:
-                        logger.warning("failed to record news coverage for %s", symbol)
-            except Exception:
-                logger.exception("targeted news refresh failed for %s", symbol)
+    def _record_coverage(self, repository, symbol: str, count: int) -> None:
+        if self.connection_factory is None:
+            return
+        try:
+            conn = self.connection_factory()
+            try:
+                from fundamentals.coverage_store import record_attempt
+
+                if count >= 3:
+                    status = "READY"
+                    reason = f"{count} article(s) in last {self.max_age_days}d"
+                elif count > 0:
+                    status = "PARTIAL"
+                    reason = f"{count} article(s) in last {self.max_age_days}d"
+                else:
+                    has_any = bool(repository.latest_for_ticker(symbol, 1))
+                    status = "STALE" if has_any else "MISSING"
+                    reason = (
+                        f"newest article is older than {self.max_age_days}d"
+                        if has_any else f"no relevant news in last {self.max_age_days}d"
+                    )
+                record_attempt(
+                    conn, symbol, "NEWS", status, provider="CafeF",
+                    provider_source="ticker_tag", error_reason=reason,
+                )
             finally:
-                with self._lock:
-                    self._pending.discard(symbol)
-                    self._last_attempt[symbol] = self.monotonic()
-                self._queue.task_done()
+                conn.close()
+        except Exception:
+            logger.warning("failed to record news coverage for %s", symbol)
+
+    def _record_error(self, symbol: str, error: Exception) -> None:
+        if self.connection_factory is None:
+            return
+        try:
+            from fundamentals.coverage_store import record_attempt
+            from runtime.redaction import safe_reason
+
+            conn = self.connection_factory()
+            try:
+                record_attempt(
+                    conn, symbol, "NEWS", "ERROR", provider="CafeF",
+                    provider_source="ticker_tag",
+                    error_reason=safe_reason(f"{type(error).__name__}: {error}"),
+                )
+            finally:
+                conn.close()
+        except Exception:
+            logger.warning("failed to record news error coverage for %s", symbol)
 
 
 def start_targeted_news_worker_from_env(
@@ -536,7 +568,7 @@ def start_targeted_news_worker_from_env(
 
     from intelligence.news.pipeline import CafeFTickerNewsProvider
     from intelligence.news.repository import SQLiteNewsRepository
-    from intelligence.news.sentiment import build_sentiment_model
+    from intelligence.news.sentiment import get_shared_sentiment_model
 
     load_dotenv()
     timeout = float(os.getenv("NEWS_HTTP_TIMEOUT", "15"))
@@ -544,7 +576,7 @@ def start_targeted_news_worker_from_env(
         repository_factory=lambda: SQLiteNewsRepository(
             os.getenv("NEWS_DATABASE_PATH", "news_sentiment.db")
         ),
-        sentiment_factory=build_sentiment_model,
+        sentiment_factory=get_shared_sentiment_model,
         provider_factory=lambda: CafeFTickerNewsProvider(timeout=timeout),
         connection_factory=connection_factory,
         request_cooldown_seconds=float(os.getenv("NEWS_ON_DEMAND_COOLDOWN_SECONDS", "300")),

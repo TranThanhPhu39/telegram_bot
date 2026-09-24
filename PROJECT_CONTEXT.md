@@ -4607,3 +4607,68 @@ bank fundamentals, scanner consistency or sentiment work.
 The Vietcap IQ canonical integrity follow-up is COMPLETE. Stop before starting
 another phase.
 
+### 2026-09-25 — News coverage, freshness and sentiment integrity PASS
+
+#### Confirmed root causes
+
+- The periodic and on-demand production paths both reread one generic market RSS
+  feed. Increasing the on-demand limit did not target the requested symbol, so
+  a roughly 1,500-symbol universe had only 29 linked tickers in the local news DB.
+- The alternative `s.cafef.vn/tin-doanh-nghiep/.../Event.chn` parser represented
+  corporate events rather than CafeF's current editorial news and was not wired
+  into the bot builder. FPT and SSI therefore retained old RSS-only caches.
+- Persisted evidence showed the obvious positive headline “FPT lãi ròng gần 30
+  tỷ đồng mỗi ngày” labeled negative. The configured
+  `FiinGroup/phobert-finetuned` checkpoint classified the controlled 10-case
+  benchmark at 4/10 under the assumed generic-label mapping and assigned clear
+  positive and negative probes to the same raw `LABEL_0`. Its current config/card
+  does not encode semantic names for `LABEL_0/1/2`.
+- The lexicon path also selected labels by comparing only positive versus
+  negative probabilities, ignoring a larger neutral probability for mixed news.
+
+#### Implementation
+
+- The scheduled runner now merges CafeF's official Chứng khoán, Doanh nghiệp,
+  Tài chính-Ngân hàng and Smart Money RSS feeds with URL deduplication and
+  partial-feed failure isolation.
+- The production on-demand builder now fetches the exact lowercase CafeF tag
+  page `/{symbol}/trang-1.html`, parses current timestamps/title/sapo, and runs
+  outside the Telegram request path. `/tin` and `/sentiment` always queue a
+  cooldown-protected refresh, even when cached articles exist; the current cache
+  is still returned immediately.
+- Tag articles that mention the ticker directly receive relevance 1.0 and may be
+  primary; indirect tag articles receive relevance 0.4 and no primary ticker.
+  Aggregate sentiment now includes this relevance weight. This prevents a broad
+  market article from counting like a company-specific article or becoming a
+  severe-negative company blocker.
+- `financial_rules` v2 is the conservative production default. Explicit
+  directional Vietnamese financial evidence is positive/negative; unknown or
+  balanced evidence is neutral. An unvalidated transformer is disabled unless
+  `SENTIMENT_ALLOW_UNVALIDATED_TRANSFORMER=true` is explicitly set.
+- Duplicate URLs now refresh metadata, ticker links and inference instead of
+  retaining stale labels. `scripts.reanalyze_news` versions existing inference;
+  `scripts.sync_ticker_news` performs bounded per-symbol sync and records NEWS
+  coverage as `CafeF/ticker_tag`.
+
+#### Verification and live evidence
+
+- Focused news/sentiment/runtime/coverage/dashboard regression: 133 passed.
+- Full regression: 1007 passed in 40.13s.
+- Controlled benchmark after the change: 10/10, macro-F1 1.0, versus 4/10 and
+  macro-F1 0.1905 before. The fixture has only ten high-signal cases and is a
+  regression gate, not evidence of general production accuracy.
+- Live read-only tag-page probes returned current/recent results for all sampled
+  symbols. The persisted bounded sync fetched FPT=10, SSI=10, ACB=10, HPG=3 and
+  VIC=10 articles within 30 days.
+- Reanalyzed 175 stored articles. FPT's profit headline is now positive with
+  `backend=financial_rules`; SSI's promotional “treo thưởng” headline is neutral
+  instead of negative.
+- Coverage now reports `NEWS READY provider=CafeF/ticker_tag` with 10 articles
+  for both FPT and SSI. A recoverable pre-migration copy remains at
+  `tmp/news_sentiment.before-news-fix-20260925.db`.
+
+Freshness is near-real-time on access, not a push-news guarantee: Telegram returns
+cache immediately while the background fetch completes, and the next request
+sees the update. The periodic market-wide RSS cadence remains configurable
+(default 30 minutes). The phase is COMPLETE; stop before another phase.
+

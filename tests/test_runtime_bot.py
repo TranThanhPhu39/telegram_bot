@@ -277,7 +277,7 @@ def test_latest_news_reports_cooldown_without_reenqueuing() -> None:
     assert "đang trong thời gian chống gọi lặp" in result
 
 
-def test_latest_news_does_not_enqueue_when_articles_exist() -> None:
+def test_latest_news_enqueues_refresh_even_when_cached_articles_exist() -> None:
     fake_article = SimpleNamespace(
         published_at=datetime(2026, 9, 20, tzinfo=timezone.utc),
         title="FPT tăng trưởng", source="cafef_rss", event_type="EARNINGS",
@@ -298,7 +298,9 @@ def test_latest_news_does_not_enqueue_when_articles_exist() -> None:
 
     runtime.latest_news("FPT")
 
-    assert requested == []
+    # Cached news is returned immediately, while a cooldown-protected refresh
+    # checks the ticker tag page for newer articles in the background.
+    assert requested == ["FPT"]
 
 
 def test_sentiment_overview_queues_targeted_refresh_when_coverage_is_missing() -> None:

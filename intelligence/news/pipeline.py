@@ -12,7 +12,7 @@ import re
 import sqlite3
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
 
 import requests
@@ -239,30 +239,68 @@ def _simplify_company_name(value: str) -> str:
     return simplified if len(simplified) >= 3 else value.strip()
 
 
+CAFEF_RSS_URLS = (
+    "https://cafef.vn/thi-truong-chung-khoan.rss",
+    "https://cafef.vn/doanh-nghiep.rss",
+    "https://cafef.vn/tai-chinh-ngan-hang.rss",
+    "https://cafef.vn/smart-money.rss",
+)
+
+
 class CafeFRSSProvider:
-    def __init__(self, url: str = "https://cafef.vn/thi-truong-chung-khoan.rss", timeout: float = 15):
-        self.url, self.timeout = url, timeout
+    """Merge CafeF's official finance RSS channels into one fresh stream."""
+
+    def __init__(
+        self,
+        url: str | None = None,
+        timeout: float = 15,
+        *,
+        urls: Iterable[str] | None = None,
+        request_get: Callable | None = None,
+    ):
+        self.urls = tuple(urls or ((url,) if url else CAFEF_RSS_URLS))
+        if not self.urls:
+            raise ValueError("at least one CafeF RSS URL is required")
+        self.url, self.timeout = self.urls[0], timeout
+        self.request_get = request_get or requests.get
 
     def fetch(self, limit: int = 20) -> tuple[NewsItem, ...]:
-        response = requests.get(self.url, timeout=self.timeout,
-                                headers={"User-Agent": "VNStockBot/1.0"})
-        response.raise_for_status()
-        root = ET.fromstring(response.content.replace(b"&nbsp;", b" "))
-        items = []
-        for node in root.findall(".//item")[:max(1, limit)]:
-            title = normalize_text(node.findtext("title"))
-            summary = normalize_text(node.findtext("description"))
-            raw_url = normalize_text(node.findtext("link"))
-            parts = urlsplit(raw_url)
-            url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
-            published = parsedate_to_datetime(node.findtext("pubDate"))
-            if published.tzinfo is None:
-                published = published.replace(tzinfo=timezone.utc)
-            identifier = hashlib.sha256(url.encode()).hexdigest()
-            event, importance = classify_event(title, summary)
-            items.append(NewsItem(identifier, "cafef_rss", url, published.astimezone(timezone.utc),
-                                  title, summary, event_type=event, event_importance=importance))
-        return tuple(items)
+        wanted = max(1, limit)
+        items: dict[str, NewsItem] = {}
+        errors: list[Exception] = []
+        for feed_url in self.urls:
+            try:
+                response = self.request_get(
+                    feed_url, timeout=self.timeout,
+                    headers={"User-Agent": "VNStockBot/1.0"},
+                )
+                response.raise_for_status()
+                root = ET.fromstring(response.content.replace(b"&nbsp;", b" "))
+            except (OSError, ValueError, ET.ParseError, requests.RequestException) as error:
+                logger.warning("CafeF RSS fetch failed url=%s", feed_url)
+                errors.append(error)
+                continue
+            for node in root.findall(".//item")[:wanted]:
+                title = normalize_text(node.findtext("title"))
+                summary = normalize_text(node.findtext("description"))
+                raw_url = normalize_text(node.findtext("link"))
+                parts = urlsplit(raw_url)
+                clean_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+                if not title or not clean_url:
+                    continue
+                published = parsedate_to_datetime(node.findtext("pubDate"))
+                if published.tzinfo is None:
+                    published = published.replace(tzinfo=timezone.utc)
+                identifier = hashlib.sha256(clean_url.encode()).hexdigest()
+                event, importance = classify_event(title, summary)
+                items[clean_url] = NewsItem(
+                    identifier, "cafef_rss", clean_url,
+                    published.astimezone(timezone.utc), title, summary,
+                    event_type=event, event_importance=importance,
+                )
+        if not items and errors:
+            raise ConnectionError("all configured CafeF RSS feeds failed") from errors[0]
+        return tuple(sorted(items.values(), key=lambda item: item.published_at, reverse=True)[:wanted])
 
 
 class NewsIngestionService:
@@ -280,16 +318,16 @@ class NewsIngestionService:
         return inserted, duplicates
 
 
-CAFEF_TICKER_EVENT_URL = "https://s.cafef.vn/tin-doanh-nghiep/{symbol}/Event.chn"
+CAFEF_TICKER_NEWS_URL = "https://cafef.vn/{symbol}/trang-1.html"
 VIETNAM_TZ = timezone(timedelta(hours=7))
 
 
 class CafeFTickerNewsProvider:
-    """Fetch ticker-specific news/events directly from CafeF corporate event page."""
+    """Fetch the current ticker-tag page instead of the stale event calendar."""
 
     def __init__(
         self,
-        base_url: str = CAFEF_TICKER_EVENT_URL,
+        base_url: str = CAFEF_TICKER_NEWS_URL,
         timeout: float = 15,
         request_get: Callable | None = None,
     ):
@@ -306,18 +344,14 @@ class CafeFTickerNewsProvider:
         now: datetime | None = None,
     ) -> tuple[NewsItem, ...]:
         normalized_symbol = _normalize_symbol(symbol)
-        url = self.base_url.format(symbol=normalized_symbol)
-        try:
-            response = self.request_get(
-                url,
-                timeout=self.timeout,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) VNStockBot/1.0"},
-            )
-            response.raise_for_status()
-            content = response.text
-        except Exception:
-            logger.warning("failed to fetch CafeF ticker news for %s", normalized_symbol)
-            return ()
+        url = self.base_url.format(symbol=normalized_symbol.lower())
+        response = self.request_get(
+            url,
+            timeout=self.timeout,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) VNStockBot/1.0"},
+        )
+        response.raise_for_status()
+        content = response.text
 
         return self.parse_html(
             content, normalized_symbol, limit=limit, max_age_days=max_age_days, now=now
@@ -338,6 +372,13 @@ class CafeFTickerNewsProvider:
         from bs4 import BeautifulSoup
 
         soup = BeautifulSoup(html_content, "html.parser")
+        tag_nodes = soup.select("div.tlitem")
+        if tag_nodes:
+            return self._parse_tag_nodes(
+                tag_nodes, symbol, limit=limit, min_date=min_date,
+                current_time=current_time,
+            )
+
         div_events = soup.find(id="divEvents")
         if not div_events:
             return ()
@@ -404,6 +445,57 @@ class CafeFTickerNewsProvider:
             )
 
         items.sort(key=lambda x: x.published_at, reverse=True)
+        return tuple(items[:max(1, limit)])
+
+    @staticmethod
+    def _parse_tag_nodes(
+        nodes, symbol: str, *, limit: int, min_date: datetime,
+        current_time: datetime,
+    ) -> tuple[NewsItem, ...]:
+        items: list[NewsItem] = []
+        seen_urls: set[str] = set()
+        for node in nodes:
+            anchor = node.select_one("a.box-category-link-title")
+            time_node = node.select_one("span.time")
+            if anchor is None or time_node is None or not anchor.get("href"):
+                continue
+            try:
+                local_time = datetime.strptime(
+                    normalize_text(time_node.get_text(" ", strip=True)),
+                    "%d/%m/%Y %H:%M",
+                ).replace(tzinfo=VIETNAM_TZ)
+            except ValueError:
+                continue
+            published = local_time.astimezone(timezone.utc)
+            if published < min_date or published > current_time + timedelta(days=1):
+                continue
+            raw_url = urljoin("https://cafef.vn/", anchor["href"].strip())
+            parts = urlsplit(raw_url)
+            clean_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+            if clean_url in seen_urls:
+                continue
+            title = normalize_text(anchor.get_text(" ", strip=True))
+            summary_node = node.select_one("p.sapo")
+            summary = normalize_text(
+                summary_node.get_text(" ", strip=True) if summary_node else ""
+            )
+            if not title:
+                continue
+            seen_urls.add(clean_url)
+            event, importance = classify_event(title, summary)
+            direct = re.search(
+                rf"(?<![A-Za-z0-9]){re.escape(symbol)}(?![A-Za-z0-9])",
+                f"{title} {summary}", re.I,
+            ) is not None
+            items.append(NewsItem(
+                id=hashlib.sha256(clean_url.encode("utf-8")).hexdigest(),
+                source="cafef_ticker_tag", url=clean_url,
+                published_at=published, title=title, summary=summary,
+                tickers=(symbol,), primary_ticker=symbol if direct else None,
+                ticker_relevance={symbol: 1.0 if direct else .4}, event_type=event,
+                event_importance=importance,
+            ))
+        items.sort(key=lambda item: item.published_at, reverse=True)
         return tuple(items[:max(1, limit)])
 
 

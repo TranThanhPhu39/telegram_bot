@@ -22,6 +22,33 @@ unchecked; they are NOT TESTED, not PASS:
 - Phase 25: coverage worker running inside the real bot process against live providers
 
 ## ACTIVE IMPLEMENTATION PHASE
+**News coverage, freshness and sentiment integrity — COMPLETE (PASS)**
+
+- [x] Confirm production gaps from SQLite: only 29 linked tickers; FPT had two
+  articles, SSI one, and ACB/HPG/VIC none
+- [x] Replace the on-demand generic-RSS retry with a bounded CafeF tag-page fetch
+  for the exact requested ticker
+- [x] Refresh non-empty caches on every `/tin`/`/sentiment` request through the
+  existing background queue and five-minute cooldown
+- [x] Merge four official CafeF RSS channels for the periodic market-wide sweep
+- [x] Fail closed from the unvalidated generic-label transformer to conservative
+  `financial_rules` v2; fix neutral-label selection
+- [x] Weight aggregate sentiment by direct/indirect ticker relevance
+- [x] Refresh duplicate metadata/inference and add a bounded reanalysis CLI
+- [x] Focused regression — 133 passed
+- [x] Full regression — 1007 passed in 40.13s
+- [x] Controlled benchmark — 10/10 after the fix versus 4/10 before; this small
+  fixture is a regression check, not a general model-accuracy claim
+- [x] Live CafeF acceptance — FPT/SSI/ACB/VIC each returned 10 recent tag-page
+  articles and HPG returned 3; FPT and SSI coverage became READY
+- [x] Persisted repair — 175 existing articles reanalyzed; the FPT profit article
+  changed from an incorrect negative label to positive
+
+Stop condition reached: per-ticker coverage, background freshness, conservative
+sentiment, persisted reanalysis and live FPT/SSI coverage are verified.
+
+### Previous completed phase
+
 **Vietcap IQ canonical integrity follow-up — COMPLETE (PASS)**
 
 - [x] Correct Vietcap debt semantics: `bsa56` short-term loans and `bsa71`
@@ -44,8 +71,6 @@ unchecked; they are NOT TESTED, not PASS:
 
 Stop condition reached: corrected debt semantics, source precedence, fallback,
 authenticated live acquisition and canonical persistence are all verified.
-
-### Previous completed phase
 
 **Vietcap IQ authenticated live acceptance — COMPLETE (PASS)**
 

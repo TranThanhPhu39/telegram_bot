@@ -1,7 +1,12 @@
 from datetime import datetime, timezone
 
 from intelligence.news.models import NewsItem, SentimentLabel
-from intelligence.news.sentiment import FallbackSentimentModel, LexiconSentimentModel, PhoBERTSentimentModel
+from intelligence.news.sentiment import (
+    FallbackSentimentModel,
+    LexiconSentimentModel,
+    PhoBERTSentimentModel,
+    build_sentiment_model,
+)
 
 
 def item(text="ACB lợi nhuận tăng mạnh"):
@@ -39,3 +44,20 @@ def test_phobert_accepts_direct_single_input_pipeline_shape():
     result = PhoBERTSentimentModel("test", loader=DirectPipeline).analyze(item())
     assert result.label == SentimentLabel.POSITIVE
     assert result.probability_positive == .7
+
+
+def test_financial_rules_are_directional_and_conservative():
+    model = LexiconSentimentModel()
+    assert model.analyze(item("FPT lãi ròng gần 30 tỷ đồng mỗi ngày")).label == SentimentLabel.POSITIVE
+    assert model.analyze(item("Doanh nghiệp bị khởi tố vì gian lận")).label == SentimentLabel.NEGATIVE
+    mixed = model.analyze(item("Doanh thu giảm nhưng lợi nhuận tăng trưởng"))
+    assert mixed.label == SentimentLabel.NEUTRAL
+    assert mixed.calibration_version == "rules-v2"
+
+
+def test_unvalidated_transformer_config_fails_closed_to_financial_rules(monkeypatch):
+    monkeypatch.setenv("SENTIMENT_MODEL_BACKEND", "phobert")
+    monkeypatch.delenv("SENTIMENT_ALLOW_UNVALIDATED_TRANSFORMER", raising=False)
+    result = build_sentiment_model().analyze(item("FPT lãi ròng tăng mạnh"))
+    assert result.backend == "financial_rules"
+    assert result.label == SentimentLabel.POSITIVE

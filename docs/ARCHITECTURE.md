@@ -515,10 +515,22 @@ WATCH → MONEY_FLOW → BREAKOUT → CONFIRMED → ACTIVE → EXIT
 
 ## News
 News is optional context and must not block core bot delivery. The bounded
-ingestion command reads CafeF's securities RSS, classifies each item, runs the
-configured sentiment backend, and persists normalized results in the separate
-news SQLite database. Telegram queries only this repository and never fetch news
-on the command path.
+ingestion command merges CafeF's official securities, business, banking and
+Smart Money RSS feeds, classifies each item, runs the configured sentiment
+backend, and persists normalized results in the separate news SQLite database.
+Telegram queries only this repository and never fetches news on the command
+path. Every listed-ticker query also queues a cooldown-protected background read
+of CafeF's current `/{symbol}/trang-1.html` tag page, so a non-empty but old
+cache is refreshed as well as a missing cache.
+
+Production sentiment is fail-closed. The conservative `financial_rules` v2
+backend recognizes explicit Vietnamese financial direction and returns neutral
+for unknown or balanced evidence. The previous generic-label PhoBERT checkpoint
+scored 40% on the controlled benchmark and assigned obvious positive and
+negative sentences to the same raw label, so it is disabled unless the operator
+explicitly opts into an unvalidated transformer. Existing persisted inference
+can be versioned forward with `scripts.reanalyze_news` without changing article
+or ticker evidence.
 
 Ticker linking is dynamic. `scripts/run_news_once.py` loads all active
 `STOCK`/`COMMON_STOCK` symbols from the main SQLite catalog, then uses CafeF's

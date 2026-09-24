@@ -291,6 +291,73 @@ def test_cafef_ticker_news_provider_parses_html():
     assert items[0].published_at.day == 15
 
 
+def test_cafef_ticker_news_provider_parses_current_tag_page():
+    from intelligence.news.pipeline import CafeFTickerNewsProvider
+
+    html_sample = """
+    <div class="tlitem">
+      <div class="knswli-right">
+        <h3><a class="box-category-link-title"
+          href="/fpt-lai-rong-188260924.chn?utm_source=tag">FPT lãi ròng tăng mạnh</a></h3>
+        <p class="time_cate"><span class="time">24/09/2026 20:20</span></p>
+        <p class="sapo box-category-sapo">Lợi nhuận tháng 8 vượt kế hoạch.</p>
+      </div>
+    </div>
+    """
+    provider = CafeFTickerNewsProvider()
+    items = provider.parse_html(
+        html_sample, "FPT", limit=5, max_age_days=30,
+        now=datetime(2026, 9, 25, tzinfo=timezone.utc),
+    )
+    assert len(items) == 1
+    assert items[0].source == "cafef_ticker_tag"
+    assert items[0].primary_ticker == "FPT"
+    assert items[0].ticker_relevance == {"FPT": 1.0}
+    assert items[0].summary == "Lợi nhuận tháng 8 vượt kế hoạch."
+    assert items[0].url == "https://cafef.vn/fpt-lai-rong-188260924.chn"
+
+
+def test_cafef_ticker_tag_marks_indirect_articles_as_secondary():
+    from intelligence.news.pipeline import CafeFTickerNewsProvider
+
+    html_sample = """
+    <div class="tlitem"><div class="knswli-right">
+      <h3><a class="box-category-link-title" href="/market.chn">Tin thị trường chung</a></h3>
+      <span class="time">24/09/2026 20:20</span>
+      <p class="sapo">Bài được CafeF gắn tag nhưng không nhắc trực tiếp mã.</p>
+    </div></div>
+    """
+    item = CafeFTickerNewsProvider().parse_html(
+        html_sample, "VIC", limit=5, max_age_days=30,
+        now=datetime(2026, 9, 25, tzinfo=timezone.utc),
+    )[0]
+    assert item.primary_ticker is None
+    assert item.ticker_relevance == {"VIC": .4}
+
+
+def test_cafef_rss_provider_merges_official_feeds_and_deduplicates():
+    from intelligence.news.pipeline import CafeFRSSProvider
+
+    def xml(title, url, date):
+        return (f"<rss><channel><item><title>{title}</title><description>x</description>"
+                f"<link>{url}</link><pubDate>{date}</pubDate></item></channel></rss>").encode()
+
+    class Response:
+        def __init__(self, content): self.content = content
+        def raise_for_status(self): pass
+
+    payloads = {
+        "stock": xml("Tin cũ", "https://cafef.vn/a.chn", "Wed, 23 Sep 2026 10:00:00 +0700"),
+        "business": xml("Tin mới", "https://cafef.vn/b.chn", "Thu, 24 Sep 2026 10:00:00 +0700"),
+    }
+    provider = CafeFRSSProvider(
+        urls=("stock", "business"),
+        request_get=lambda url, **_kwargs: Response(payloads[url]),
+    )
+    items = provider.fetch(10)
+    assert [item.title for item in items] == ["Tin mới", "Tin cũ"]
+
+
 def test_refresh_ticker_news_populates_repository_and_sentiment(tmp_path):
     from intelligence.news.pipeline import CafeFTickerNewsProvider, refresh_ticker_news
 

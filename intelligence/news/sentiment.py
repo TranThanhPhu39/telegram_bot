@@ -20,8 +20,41 @@ class SentimentModel(Protocol):
 
 
 class LexiconSentimentModel:
-    POSITIVE = ("lợi nhuận tăng", "tăng trưởng", "vượt kế hoạch", "trúng thầu", "cổ tức")
-    NEGATIVE = ("khởi tố", "gian lận", "thua lỗ", "lỗ ròng", "đình chỉ", "nợ xấu tăng")
+    """Conservative, auditable Vietnamese financial-news classifier.
+
+    Unknown language is neutral instead of being forced into a directional
+    bucket.  This is intentional: a false negative can block ASMF, while a
+    neutral result is only context.  Directional accounting phrases are scored
+    before generic phrases so mixed results such as revenue down/profit up stay
+    mixed rather than inheriting one keyword's label.
+    """
+
+    POSITIVE = (
+        "lãi kỷ lục", "lợi nhuận kỷ lục", "vượt kế hoạch", "vượt kỳ vọng",
+        "trúng thầu", "ký hợp đồng", "hợp đồng mới", "mua ròng",
+        "tăng trưởng", "tăng vốn", "nâng hạng", "cổ tức tiền mặt",
+        "hoàn tất mua", "lãi ròng", "có lãi",
+    )
+    NEGATIVE = (
+        "khởi tố", "gian lận", "thua lỗ", "lỗ ròng", "đình chỉ",
+        "nợ xấu tăng", "bán tháo", "hủy niêm yết", "phá sản", "vỡ nợ",
+        "xử phạt", "truy thu", "giảm sâu", "lao dốc", "sụt giảm",
+        "xả mạnh", "bán ròng", "mất gần", "mất hơn",
+    )
+    POSITIVE_PATTERNS = (
+        re.compile(
+            r"(?:lợi nhuận|lãi ròng|doanh thu|doanh số|eps).{0,40}"
+            r"(?:tăng|tăng trưởng|vượt|cao hơn)",
+            re.I,
+        ),
+    )
+    NEGATIVE_PATTERNS = (
+        re.compile(
+            r"(?:lợi nhuận|lãi ròng|doanh thu|doanh số|eps).{0,40}"
+            r"(?:giảm|sụt|lao dốc|âm)",
+            re.I,
+        ),
+    )
 
     def __init__(self, *, backend: str = "lexicon", now: Callable[[], datetime] | None = None):
         self.backend = backend
@@ -31,17 +64,27 @@ class LexiconSentimentModel:
         text = re.sub(r"\s+", " ", item.model_text.lower())
         positive = sum(phrase in text for phrase in self.POSITIVE)
         negative = sum(phrase in text for phrase in self.NEGATIVE)
+        positive += 2 * sum(pattern.search(text) is not None for pattern in self.POSITIVE_PATTERNS)
+        negative += 2 * sum(pattern.search(text) is not None for pattern in self.NEGATIVE_PATTERNS)
         if positive == negative == 0:
-            probs = (.15, .70, .15)
+            probs = (.10, .80, .10)
+        elif positive and negative:
+            total = positive + negative
+            # Mixed evidence should not be presented with false certainty.
+            probs = (.45 * positive / total, .55, .45 * negative / total)
         else:
             total = positive + negative
-            pos = .1 + .8 * positive / total
-            neg = .1 + .8 * negative / total
+            pos = .10 + .80 * positive / total
+            neg = .10 + .80 * negative / total
             probs = (pos, 0.0, neg)
-        label = (SentimentLabel.POSITIVE if probs[0] > probs[2] else
-                 SentimentLabel.NEGATIVE if probs[2] > probs[0] else SentimentLabel.NEUTRAL)
+        label = (
+            SentimentLabel.POSITIVE,
+            SentimentLabel.NEUTRAL,
+            SentimentLabel.NEGATIVE,
+        )[max(range(3), key=probs.__getitem__)]
         return SentimentResult(label, probs[0], probs[1], probs[2], max(probs),
-                               self.backend, "financial-lexicon", "v1", self.now())
+                               self.backend, "financial-rules", "v2", self.now(),
+                               calibration_version="rules-v2")
 
 
 class PhoBERTSentimentModel:
@@ -91,9 +134,18 @@ class FallbackSentimentModel:
 
 
 def build_sentiment_model() -> SentimentModel:
-    lexicon = LexiconSentimentModel(backend="lexicon_fallback")
-    if os.getenv("SENTIMENT_MODEL_BACKEND", "phobert").lower() == "lexicon":
-        return LexiconSentimentModel()
+    backend = os.getenv("SENTIMENT_MODEL_BACKEND", "financial_rules").lower()
+    rules = LexiconSentimentModel(backend="financial_rules")
+    if backend in {"lexicon", "financial_rules", "rules"}:
+        return rules
+    if os.getenv("SENTIMENT_ALLOW_UNVALIDATED_TRANSFORMER", "false").lower() != "true":
+        logger.warning(
+            "Transformer sentiment is disabled because its generic LABEL_0/1/2 "
+            "semantics and local benchmark are not production-validated; using "
+            "conservative financial rules"
+        )
+        return rules
+    lexicon = LexiconSentimentModel(backend="financial_rules_fallback")
     primary = PhoBERTSentimentModel(
         os.getenv("SENTIMENT_MODEL_NAME", "FiinGroup/phobert-finetuned"),
         device=os.getenv("SENTIMENT_DEVICE", "cpu"),

@@ -190,8 +190,28 @@ một batch ingest có giới hạn:
 py -3.12 scripts\run_news_once.py --limit 20
 ```
 
-Backend mặc định là `FiinGroup/phobert-finetuned`; có thể cấu hình fallback qua
-các biến `SENTIMENT_*` trong `.env.example`.
+Backend production mặc định là `financial_rules`: bộ quy tắc tài chính bảo thủ,
+không ép câu không rõ nghĩa thành tích cực/tiêu cực. Checkpoint
+`FiinGroup/phobert-finetuned` hiện không được dùng tự động vì chỉ đạt 40% trên
+benchmark có kiểm soát và model config không công bố ngữ nghĩa `LABEL_0/1/2`;
+chỉ bật thử nghiệm bằng `SENTIMENT_ALLOW_UNVALIDATED_TRANSFORMER=true`.
+
+Worker định kỳ gộp các RSS chính thức Chứng khoán, Doanh nghiệp, Tài chính-Ngân
+hàng và Smart Money. Khi gọi `/tin <MÃ>` hoặc `/sentiment <MÃ>`, bot trả cache
+ngay và đồng thời xếp một lượt cập nhật nền từ trang tag CafeF riêng của mã
+(giới hạn/cooldown qua `NEWS_TARGETED_*`). Vì vậy tin đang có cũng được kiểm tra
+làm mới, không phải chờ đến khi cache rỗng. Sau khi đổi logic sentiment, có thể
+tái chấm dữ liệu cũ bằng:
+
+```powershell
+py -3.12 -m scripts.reanalyze_news
+```
+
+Có thể đồng bộ có giới hạn một nhóm mã ngay lập tức (không cần khởi động bot):
+
+```powershell
+py -3.12 -m scripts.sync_ticker_news FPT SSI ACB --limit 10
+```
 
 ## Nạp dữ liệu ASMF
 

@@ -77,6 +77,10 @@ class SentimentQueryService:
             return None
         weights = [
             x.event_importance * x.sentiment.model_confidence *
+            max(
+                x.ticker_relevance.get(ticker.upper(), 0.0),
+                1.0 if x.primary_ticker == ticker.upper() else .4,
+            ) *
             math.pow(2, -(end - x.published_at).total_seconds() / 3600 / self.half_life_hours)
             for x in items
         ]

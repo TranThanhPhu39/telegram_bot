@@ -101,10 +101,38 @@ class SQLiteNewsRepository:
                     (item.id, item.url),
                 ).fetchone()
                 if existing is not None:
+                    self._update_existing(existing["id"], item)
                     self._replace_ticker_links(existing["id"], item)
                 return False
             self._replace_ticker_links(item.id, item)
         return True
+
+    def _update_existing(self, news_id: str, item: NewsItem) -> None:
+        """Refresh duplicate metadata/inference while retaining the stable id."""
+        sentiment = item.sentiment
+        self.connection.execute(
+            "UPDATE news_items SET source=?,published_at=?,title=?,summary=?,content=?,"
+            "event_type=?,event_importance=?,sentiment_label=?,sentiment_score=?,"
+            "probability_positive=?,probability_neutral=?,probability_negative=?,"
+            "model_confidence=?,model_backend=?,model_name=?,model_version=?,"
+            "analyzed_at=?,calibration_version=? WHERE id=?",
+            (
+                item.source, _utc(item.published_at), item.title, item.summary,
+                item.content, item.event_type, item.event_importance,
+                sentiment.label.value if sentiment else None,
+                sentiment.score if sentiment else None,
+                sentiment.probability_positive if sentiment else None,
+                sentiment.probability_neutral if sentiment else None,
+                sentiment.probability_negative if sentiment else None,
+                sentiment.model_confidence if sentiment else None,
+                sentiment.backend if sentiment else None,
+                sentiment.model_name if sentiment else None,
+                sentiment.model_version if sentiment else None,
+                _utc(sentiment.analyzed_at) if sentiment else None,
+                sentiment.calibration_version if sentiment else None,
+                news_id,
+            ),
+        )
 
     def _replace_ticker_links(self, news_id: str, item: NewsItem) -> None:
         self.connection.execute("DELETE FROM news_tickers WHERE news_id=?", (news_id,))
@@ -167,3 +195,29 @@ class SQLiteNewsRepository:
             "SELECT DISTINCT ticker FROM news_tickers"
         ).fetchall()
         return {row["ticker"] for row in rows}
+
+    def all_items(self) -> tuple[NewsItem, ...]:
+        """Return every stored article for an explicit bounded maintenance run."""
+        rows = self.connection.execute(
+            "SELECT id FROM news_items ORDER BY published_at,id"
+        ).fetchall()
+        return tuple(item for row in rows if (item := self.get(row["id"])) is not None)
+
+    def update_sentiment(self, item_id: str, sentiment: SentimentResult) -> None:
+        """Replace inference metadata without changing article/ticker evidence."""
+        with self.connection:
+            cursor = self.connection.execute(
+                "UPDATE news_items SET sentiment_label=?,sentiment_score=?,"
+                "probability_positive=?,probability_neutral=?,probability_negative=?,"
+                "model_confidence=?,model_backend=?,model_name=?,model_version=?,"
+                "analyzed_at=?,calibration_version=? WHERE id=?",
+                (
+                    sentiment.label.value, sentiment.score,
+                    sentiment.probability_positive, sentiment.probability_neutral,
+                    sentiment.probability_negative, sentiment.model_confidence,
+                    sentiment.backend, sentiment.model_name, sentiment.model_version,
+                    _utc(sentiment.analyzed_at), sentiment.calibration_version, item_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"unknown news item: {item_id}")

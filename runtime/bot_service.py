@@ -508,12 +508,13 @@ class RuntimeBotDataService:
             )
             for item in items
         ))
+        refresh_note = self._request_news_refresh(symbol)
         # Issue 5: no eligible coverage for this ticker -- enqueue an
         # on-demand targeted refresh instead of only waiting on the next
         # periodic sweep. Never blocks this response; the gap is still
         # reported honestly, just with a note that a refresh was queued.
         if not items:
-            rendered += self._request_news_refresh(symbol)
+            rendered += refresh_note
         return rendered
 
     def scan_results(self) -> tuple[str, ...]:
@@ -797,8 +798,9 @@ class RuntimeBotDataService:
         # /soi and /sentiment paths. VNINDEX is the market-wide benchmark
         # symbol used internally by market_overview(), not a listed ticker
         # CafeF/the ticker linker covers, so it is excluded here.
+        refresh_note = "" if symbol == "VNINDEX" else self._request_news_refresh(symbol)
         if not view.available and symbol != "VNINDEX":
-            note = (view.note or "") + self._request_news_refresh(symbol)
+            note = (view.note or "") + refresh_note
             view = replace(view, note=note.strip())
         return view
 
