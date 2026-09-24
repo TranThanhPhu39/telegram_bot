@@ -226,7 +226,6 @@ def test_asmf_buy_is_blocked_only_when_severe_news_exists(monkeypatch) -> None:
                          80.0, ("trigger",), (), ())
     monkeypatch.setattr("runtime.bot_service.evaluate_asmf", lambda *a, **k: buy)
     monkeypatch.setattr("runtime.bot_service.fundamental_score", lambda *a: 80.0)
-    monkeypatch.setattr("runtime.bot_service.institutional_flow_score", lambda *a: 80.0)
     monkeypatch.setattr("runtime.bot_service.sector_strength_score", lambda *a: 80.0)
     assert "CHƯA ĐỦ ĐIỀU KIỆN" in runtime.symbol_overview("FPT", "ASMF")
 

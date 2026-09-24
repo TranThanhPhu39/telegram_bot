@@ -138,15 +138,11 @@ class ASMFHistoricalAdapter:
             fundamental_score = asmf_scoring.fundamental_score(
                 self.connection, current.symbol, as_of
             )
-            flow_score = asmf_scoring.institutional_flow_score(
-                self.connection, current.symbol, as_of
-            )
             result = self._evaluator(
                 stock_prefix,
                 benchmark_prefix,
                 sector_score=sector_score,
                 fundamental_score=fundamental_score,
-                institutional_flow_score=flow_score,
             )
             if result.symbol != current.symbol or result.timestamp != current.timestamp:
                 raise ValueError("ASMF evaluator result does not match the current completed bar")

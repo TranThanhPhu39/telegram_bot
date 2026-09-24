@@ -364,14 +364,21 @@ runs inside a Telegram request.
 `backtest.adapters.ASMFHistoricalAdapter` applies the same chronology boundary
 to ASMF. At each stock session T it builds stock and VNINDEX prefixes ending no
 later than T; resolves effective-dated sector membership at T; slices every
-available sector-member series at T; and calls the existing ASMF scoring queries
-with `as_of=T`. Those queries enforce `public_date <= T` for financial reports
-and `trading_date <= T` for institutional flows. The adapter then calls the
-production `strategy.technical_strategies.evaluate_asmf` function with the five
+available sector-member series at T; and calls the ASMF fundamental scoring query
+with `as_of=T`, which enforces `public_date <= T`. The adapter then calls the
+production `strategy.technical_strategies.evaluate_asmf` function with the V2
 historical layers. It does not append runtime news context. Missing mandatory
 layers therefore remain BLOCKED exactly as the pure live strategy contract
 requires. The P5 offline CLI feeds those decisions into the shared execution
 simulator using caller-supplied settlement assumptions.
+
+ASMF V2 deliberately excludes foreign/proprietary institutional flow from both
+the score and the automatic signal gate. The stored flow pipeline remains an
+experimental research/lookup facility only. SMF is computed strictly from the
+latest 20 completed price-volume bars with normalized component weights:
+Accumulation 43.75%, OBV trend 31.25%, and Volume Z-score 25%. Consequently,
+missing institutional-flow data cannot produce `BLOCKED`; Sector and Fundamental
+remain the mandatory external evidence layers.
 
 ## Strategy execution and analytics
 
@@ -435,17 +442,24 @@ context. It is not imported by `SignalEngine` and cannot directly create a signa
 ## Automated financial-statement acquisition
 
 Slow-moving statement acquisition is isolated under `fundamentals.providers`.
-The primary adapter uses VNStock 4.0.8 with KBS before VCI; it converts KBS's
+When explicitly enabled, `VietcapIQFinancialProvider` is first in the chain and
+reads the observed IQ `BALANCE_SHEET` and `INCOME_STATEMENT` quarterly payloads.
+It uses actual `publicDate`, verifies both balance and profit identities, and
+fails closed if the undocumented frontend schema changes. No IQ secret is
+embedded or logged. Live authentication remains an external runtime condition.
+
+The next adapter uses VNStock 4.0.8 with KBS before VCI; it converts KBS's
 semantic wide format (one metric per row and one reporting period per column)
 into provider-independent `StatementRow` values. Sources are constructed and
 queried sequentially, so a later VCI timeout cannot delay a successful KBS
-response. yfinance remains a strict fallback when VNStock is missing or errors.
+response. TCBS follows VNStock and yfinance remains the final fallback.
 
 All automated statements first enter staging with provider/source provenance.
-Rows without a real `public_date` are never promoted into the canonical
-point-in-time tables, and automated bank statements are never promoted because
-their cumulative-versus-standalone convention has not been established. This
-keeps acquisition coverage separate from ASMF evidence safety.
+Rows use an actual provider `public_date` when available or the established
+period-end-plus-45-day fallback; period end itself is never used as publication
+date. Automated bank statements are never promoted because their cumulative-
+versus-standalone convention has not been established. This keeps acquisition
+coverage separate from ASMF evidence safety.
 
 ## Runtime bot orchestration
 
@@ -476,9 +490,10 @@ because their entry logic, holding horizon, and required evidence differ.
 CL1 evaluates completed daily bars using EMA20/EMA50 cross timing, RSI14, ADX14,
 three-versus-twenty-session volume, MA200, and a 22-session/3×ATR Chandelier
 Exit. ASMF currently evaluates its VNINDEX regime and price-volume footprint
-layers. It reports a partial score but blocks BUY when sector breadth, point-in-
-time fundamentals, or institutional-flow data is missing. This preserves the
-strategy contract rather than treating neutral placeholders as real evidence.
+layers. It reports a partial score but blocks BUY when sector breadth or point-in-
+time fundamentals are missing. Institutional flow is experimental lookup data
+and is not an ASMF V2 score, trigger, or gate. This preserves the strategy
+contract rather than treating unavailable data as neutral evidence.
 
 ## Planned V1 signal features
 - Market Regime

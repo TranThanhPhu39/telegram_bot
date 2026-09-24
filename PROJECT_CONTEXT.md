@@ -4236,3 +4236,314 @@ Next: run the two offline jobs against an adequately populated local SQLite
 cache, then inspect the persisted Telegram output. This requires real local data
 and remains a follow-up, not a new automatically started phase.
 
+### 2026-09-24 — ASMF V2 institutional-flow removal complete
+
+#### Decision and implementation
+
+- The user confirmed that reliable Vietnamese foreign/proprietary trading-flow
+  data is not available. ASMF V2 therefore no longer uses this dataset in an
+  automatic score, trigger, or missing-data gate.
+- Removed `institutional_flow_score` from the shared `evaluate_asmf` contract.
+  Missing flow data can no longer make an otherwise valid result `BLOCKED`, and
+  the rendered layer list no longer reports an Institutional layer.
+- Reweighted the price-volume-only SMF score exactly as specified:
+  Accumulation 43.75%, OBV trend 31.25%, Volume Z-score 25%.
+- Removed institutional-flow queries from the Telegram runtime, persisted market
+  scanner, and point-in-time historical ASMF adapter. Live and backtest paths
+  continue to share the same production evaluator.
+- Kept the existing institutional-flow schema, acquisition, refresh, scoring,
+  import and reporting code intact as an experimental research/lookup facility.
+  It is not evidence for ASMF V2 and cannot create or block an automatic signal.
+- Sector and point-in-time Fundamental remain mandatory external ASMF layers.
+  Market RISK-OFF and the existing severe-negative-news overlay retain their
+  established blocking behavior. No ASMF SELL rule was invented.
+- Updated the Telegram strategy catalog, README, architecture documentation and
+  regression expectations to describe the V2 contract.
+
+#### Tests and evidence
+
+- Added a deterministic component test: with Accumulation=0, OBV=75 and volume
+  Z-score=50, SMF equals `0.4375*0 + 0.3125*75 + 0.25*50`.
+- Added a contract test that the removed `institutional_flow_score` evaluator
+  argument is rejected, preventing accidental reintroduction at a call site.
+- Historical adapter tests now prove only Sector and Fundamental scores are
+  supplied, and missing flow is absent from both missing reasons and UI layers.
+- Focused ASMF/runtime/scanner regression: **86 passed in 3.97s**.
+- Full regression: `py -3.12 -m pytest -q` — **987 passed in 33.89s**.
+- Live Telegram delivery and production-like ASMF backtest remain **NOT TESTED**;
+  this change required no network data and makes no profitability claim.
+
+Next: run the ASMF offline job against a populated local SQLite cache and inspect
+the persisted `/performance ASMF` output when suitable real local data exists.
+
+### 2026-09-24 — Local backtest evidence follow-up split at data-readiness boundary
+
+#### Local data audit
+
+- Confirmed `stock_bot.db` exists locally (about 23.5 MiB) and contains 263–264
+  daily bars for many symbols through 2026-09-24, including VNINDEX.
+- Selected HPG, VNM and GAS because all three have at least 260 daily bars, a
+  current sector membership, and eight stored corporate report rows.
+- Their sectors have ample cached peer histories: 101/103 usable members for
+  HPG's sector 1700, 141/143 for VNM's sector 3500, and 140/141 for GAS's
+  sector 7500.
+- The stored sector memberships are not historical for the whole test: each
+  begins on 2026-09-20. Earlier decisions must therefore report the Sector
+  layer missing instead of backdating current membership.
+- The eight BCTC rows per selected symbol are not eight contiguous quarters.
+  They include annual gaps such as 2022Q4, 2023Q4 and 2024Q4 and omit required
+  quarters such as Q3. `analyze_quarter_continuity(required=8)` correctly keeps
+  the Fundamental score unavailable. The rows carry yfinance provenance and
+  are not treated as adequate point-in-time ASMF evidence.
+
+#### Persisted local runs
+
+- Ran CL1 using HPG,VNM,GAS from 2026-06-01 through 2026-09-24 with the README's
+  explicit two-session settlement choice and default costs. Persisted run
+  `local-cl1-20260924` produced 188 decisions (5 BUY, 67 SELL, 116 WATCH), one
+  closed trade and one open mark-to-market position. Net total return was
+  +1.19%, maximum drawdown -2.56%, and VNINDEX return -4.95%. These are
+  `IN_SAMPLE_ONLY` local simulation results, not a profitability claim.
+- Ran ASMF V2 over the identical universe/range and persisted
+  `local-asmf-v2-20260924`. It produced 188 BLOCKED decisions and no trades.
+  The missing-reason audit counted Fundamental on all 188 decisions and Sector
+  on 179 decisions. Institutional flow was absent from the reasons, confirming
+  the ASMF V2 removal works on the real local path.
+- Rendered the same repository records used by Telegram for `/performance`,
+  `/performance CL1` and `/performance ASMF`. Both strategies remained
+  `IN_SAMPLE_ONLY`; ASMF return/risk/trade metrics remained N/A rather than
+  fabricating 0% performance.
+
+#### Observability hardening
+
+- `backtest.runner` now persists `missing_reason_counts` beside action counts for
+  both signal-only and executed runs.
+- `/performance <strategy>` now includes a `TÍN HIỆU` block showing action
+  counts and each persisted missing reason. The saved ASMF output explicitly
+  renders `BLOCKED=188`, Fundamental=188 and Sector=179.
+- Added formatter/repository and ASMF-runner regression coverage.
+- Focused backtest suite: **26 passed in 1.16s**.
+- Full regression: `py -3.12 -m pytest -q` — **988 passed in 30.44s**.
+- `git diff --check` — **PASS** (line-ending conversion warnings only).
+
+#### Split reason and remaining acceptance
+
+The execution and Telegram-read follow-up is verified, but an ASMF performance
+run with complete mandatory evidence cannot be produced honestly from this
+cache. Completion requires real effective-dated membership covering the chosen
+historical dates plus at least eight contiguous point-in-time quarters for an
+eligible non-bank universe. No synthetic rows or backdated memberships were
+inserted. Rerun ASMF after those inputs exist; it must then demonstrate decisions
+without mandatory missing layers while remaining `IN_SAMPLE_ONLY`.
+
+Next: populate valid historical sector membership and eight contiguous published
+quarters for the ASMF universe, then rerun and inspect `/performance ASMF`.
+
+### 2026-09-24 — ASMF data-readiness provider exhaustion confirmed
+
+#### Exhaustive local and provider checks
+
+- Scanned every symbol having at least 200 daily bars, a current sector
+  membership and canonical corporate reports. There were 97 candidates and
+  **zero** returned a non-NULL `fundamental_score` on 2026-09-24. Switching the
+  backtest universe therefore cannot resolve the blocker.
+- Found environment drift: `requirements.txt` pins `vnstock==4.0.8`, while the
+  active `py -3.12` installation was 3.2.6 with `vnai==2.1.9`. Installed the
+  tracked requirements successfully; the active versions are now VNStock 4.0.8
+  and VNAI 2.6.1.
+- Retried HPG, VNM and GAS with the default KBS-first VNStock path. VNStock became
+  the selected provider instead of Yahoo, but the result for every symbol still
+  lacked 2024Q3 and 2024Q4, so the eight-quarter continuity rule remained unmet.
+- Tried VCI first for HPG. It returned four raw periods but all lacked usable
+  revenue for canonical promotion; readiness did not improve.
+- Tried MAS for HPG. The installed community package exposed no usable MAS
+  result through the adapter, so the chain continued to incomplete Yahoo data.
+- Tried the independent TCBS adapter directly through the same refresh/promotion
+  boundary. TCBS returned MISSING and stored/promoted no rows.
+- This matches current official VNStock documentation: KBS is explicitly not
+  recommended for this use because its source limits the number of report
+  periods; VCI is recommended, but the observed local payload was not promotable
+  by the repository's required-field boundary.
+- No CSV, report date, quarter, sector history or financial value was invented.
+  Resolving readiness now requires a trustworthy external export/document set
+  containing the missing contiguous quarters and historical memberships.
+
+#### Revalidation
+
+- Re-ran `local-asmf-v2-20260924` after all provider attempts. It remained 188
+  BLOCKED decisions, with Fundamental missing 188 times and Sector missing 179
+  times. Institutional flow remained absent from all blockers.
+- Full regression under VNStock 4.0.8/VNAI 2.6.1:
+  `py -3.12 -m pytest -q` — **988 passed in 30.49s**.
+- `pip check` is **FAIL** in the shared user Python environment because unrelated
+  installed Google/Streamlit packages require older protobuf, and pyppeteer
+  requires older urllib3/websockets. The repo itself pins protobuf 7.36.2,
+  urllib3 transitively, and websockets-compatible dependencies; do not mutate
+  project pins to repair unrelated global packages. README already recommends a
+  project virtual environment.
+
+Next: obtain a licensed/controlled export or verified report documents for at
+least eight contiguous quarters plus historical sector membership, import them
+through the existing strict boundary, then rerun ASMF. Until those external
+inputs exist, the phase remains PARTIAL rather than fabricating acceptance.
+
+### 2026-09-24 — Verified HPG filings close ASMF data-readiness follow-up
+
+#### Controlled financial evidence
+
+- Downloaded and visually inspected eight HPG consolidated quarterly filings
+  published through Vietstock: 2024Q3, 2024Q4, 2025Q1, 2025Q2, 2025Q3,
+  2025Q4, 2026Q1 and 2026Q2.
+- Transcribed net revenue (income-statement line 10), parent-company NPAT
+  (line 61), equity (line 400/410) and liabilities (line 300). This corrects the
+  earlier provider ambiguity between total NPAT (line 60) and parent-company
+  NPAT, and replaces the suspicious KBS 2025Q4 row that nearly duplicated
+  2025Q1.
+- Used the actual Vietstock publication dates 2024-11-01, 2025-02-03,
+  2025-04-30, 2025-07-31, 2025-11-01, 2026-01-30, 2026-05-04 and 2026-07-31.
+  No estimated dates, synthetic quarters or backdated sector memberships were
+  introduced.
+- Imported the eight records through the existing strict CSV boundary. A
+  read-only database verification returned exactly eight contiguous HPG rows
+  for 2024Q3–2026Q2 and `fundamental_score(HPG, 2026-09-24) = 80.0`.
+
+#### Acceptance run
+
+- Preserved the existing HPG sector membership effective date of 2026-09-20 and
+  narrowed the acceptance interval to 2026-09-20 → 2026-09-24 rather than
+  pretending that current membership was historical.
+- Persisted `local-asmf-v2-verified-hpg-20260924` with the shared production
+  evaluator and explicit two-session settlement convention.
+- Result: `SUCCESS`, `IN_SAMPLE_ONLY`, 3 decisions, all WATCH, no trades, and
+  `missing_reason_counts={}`. Fundamental and Sector are therefore both present;
+  institutional flow is neither queried nor used as a gate in ASMF V2.
+- Zero trades leave total return and maximum drawdown NULL/N/A by design. The
+  three-session window proves readiness only and is not performance evidence.
+
+#### Verification
+
+- `py -3.12 -m scripts.import_asmf_eod --financials tmp\\hpg_financials_verified.csv`
+  — PASS, 8 records upserted.
+- Read-only database verification — PASS, 8 contiguous rows and Fundamental 80.0.
+- `py -3.12 -m scripts.run_asmf_backtest --symbols HPG --start-date 2026-09-20
+  --end-date 2026-09-24 --settlement-sessions 2
+  --run-id local-asmf-v2-verified-hpg-20260924` — PASS, 3 WATCH decisions.
+- Persisted config verification — PASS, `missing_reason_counts={}`.
+- `py -3.12 -m pytest -q` — PASS, 988 tests in 36.58s.
+
+The local backtest evidence follow-up is COMPLETE. The next phase is not started
+automatically; remaining production Telegram/live-session checks stay NOT TESTED.
+
+### 2026-09-24 — Vietcap IQ financial provider
+
+#### Observed contract
+
+- User-supplied Vietcap IQ responses establish an authenticated frontend GET:
+  `/api/iq-insight-service/v1/company/{symbol}/financial-statement`, with
+  `section=BALANCE_SHEET` and `section=INCOME_STATEMENT`.
+- Both responses contain `data.years` and `data.quarters`; the FPT samples have
+  34 quarterly rows and carry actual `publicDate` values.
+- Verified mappings are `isa3` net revenue, `isa20` total NPAT, `isa22` parent-
+  company NPAT, `bsa53` total assets, `bsa54` total liabilities, `bsa55`
+  current liabilities, `bsa67` non-current liabilities and `bsa78` equity.
+- The provider revalidates `bsa55+bsa67=bsa54`, `bsa54+bsa78=bsa53`, and, when
+  all profit components exist, `isa21+isa22=isa20`. A failed identity removes
+  that section's evidence rather than guessing a changed field meaning.
+- Comparing the 2025 annual and 2025Q4 income rows confirms the quarterly array
+  contains standalone Q4 values, not duplicated annual cumulative values.
+
+#### Implementation
+
+- Added `fundamentals.providers.vietcap_iq_provider` with bounded GETs, strict
+  response-wrapper validation, quarterly normalization, actual publication
+  dates, safe provenance and no institutional-flow scope.
+- Vietcap IQ is first in the provider chain only when
+  `VIETCAP_IQ_FINANCIALS_ENABLED=true`; the default remains disabled. Existing
+  environment-managed Vietcap values can be passed without being printed or
+  persisted by the adapter. No new credential or token variable was added.
+- HTTP/authentication failure remains an ERROR at the adapter boundary and the
+  chain proceeds to VNStock, TCBS and Yahoo. Partial statement evidence stays
+  staged and cannot bypass the canonical promotion checks.
+- Anonymous live GET returned HTTP 403. The existing trading-domain Vietcap
+  environment session returned HTTP 400 against IQ, confirming it is not valid
+  evidence of IQ authentication. Authenticated live acquisition is NOT TESTED;
+  no credentials were requested or copied from browser DevTools.
+
+#### Verification
+
+- Focused provider/chain/config/promotion regression:
+  `py -3.12 -m pytest -q tests\\test_fundamental_providers.py
+  tests\\test_coverage_config_report.py tests\\test_fundamental_refresh.py`
+  — 122 passed in 2.39s after the final canonical-promotion assertion.
+- Full regression: `py -3.12 -m pytest -q` — 994 passed in 31.27s.
+
+The Vietcap IQ provider phase is COMPLETE at the code/offline-contract boundary.
+Live authenticated IQ fetch remains NOT TESTED and must be rerun only with a
+locally valid session; this does not justify requesting or persisting browser
+credentials. Stop before the next phase.
+
+### 2026-09-24 — Vietcap IQ authenticated live-acceptance follow-up
+
+- Added `scripts.test_vietcap_iq_live`, which calls the IQ provider directly so
+  no VNStock/TCBS/Yahoo fallback can create a false PASS. It reports only symbol,
+  complete-quarter count, actual-public-date count and latest period on success.
+- PASS requires at least eight complete quarters. An authentication/transport
+  failure is `NOT TESTED`; an authenticated but structurally incomplete answer
+  is FAIL. No configured secret value or upstream response body is printed.
+- Offline verdict/redaction and provider regression:
+  `py -3.12 -m pytest -q tests\\test_vietcap_iq_live_script.py
+  tests\\test_fundamental_providers.py` — 68 passed in 0.27s.
+- Direct bounded run:
+  `py -3.12 -m scripts.test_vietcap_iq_live --symbol FPT` — NOT TESTED. Both
+  BALANCE_SHEET and INCOME_STATEMENT were rejected or unusable with the existing
+  local trading-domain session. No fallback ran and no secret was emitted.
+- Full regression: `py -3.12 -m pytest -q` — 997 passed in 30.46s.
+
+The follow-up is complete with an honest NOT TESTED live verdict. The concrete
+external blocker is a locally valid Vietcap IQ session; do not request or copy
+browser access tokens/cookies. Rerun the harness only after the user configures
+the session locally, then stop.
+
+### 2026-09-24 — Vietcap IQ header-contract correction
+
+- Browser evidence confirmed the successful IQ financial-statement request has
+  an `Authorization` header but no `Cookie` and no `device-id`.
+- The browser page is hosted at `trading.vietcap.com.vn/iq/...`; therefore the
+  correct request context is Origin `https://trading.vietcap.com.vn` and Referer
+  `https://trading.vietcap.com.vn/iq/`, while the API host remains
+  `https://iq.vietcap.com.vn`.
+- Removed Cookie/device-id from the IQ provider and live harness. The market-
+  data clients keep their existing credential contract unchanged.
+- Added regression assertions proving IQ requests omit Cookie/device-id and use
+  the observed Origin/Referer.
+- Focused tests: 87 passed in 1.46s. Full regression: 997 passed in 31.44s.
+- Direct FPT harness after the correction remains NOT TESTED: the currently
+  configured Authorization was rejected or returned unusable content. This now
+  isolates the external blocker to the Authorization value itself; none was
+  printed, persisted or requested in chat.
+
+The correction follow-up is COMPLETE. Live IQ acquisition remains NOT TESTED
+until the user supplies a current Authorization locally and reruns the harness.
+
+### 2026-09-24 — Vietcap IQ authenticated live acceptance PASS
+
+- The user configured the current IQ `Authorization` only in the local
+  PowerShell process and ran the direct, no-fallback harness for FPT.
+- Harness result: PASS with 34 complete quarters, 34 actual publication dates
+  and latest period 2026Q2.
+- With `VIETCAP_IQ_FINANCIALS_ENABLED=true`, forced FPT synchronization completed
+  through provider `VietcapIQ` in one selected attempt. Coverage became
+  `FINANCIALS READY` with provenance `VietcapIQ/IQ/financial-statement`.
+- Independent read-only verification confirmed 34 canonical FPT rows spanning
+  2018Q1 through 2026Q2 and `fundamental_score(FPT, 2026-09-24) = 60.0`.
+- The PowerShell environment variables were removed by the user after the run.
+  No Authorization value was sent to chat, logged by the harness or persisted
+  in repository files.
+- `INSTITUTIONAL MISSING` remains visible in coverage as experimental lookup
+  state only; ASMF V2 does not score or gate on institutional flow.
+- `MARKET_HISTORY STALE` and `NEWS PARTIAL` are separate dataset freshness
+  states and do not invalidate the financial-statement acceptance result.
+
+The Vietcap IQ authenticated live-acceptance phase is COMPLETE. Stop before any
+new phase; production bot-process coverage validation remains separately pending.
+

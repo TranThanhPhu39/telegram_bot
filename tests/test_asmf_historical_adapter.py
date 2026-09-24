@@ -87,7 +87,7 @@ def test_adapter_reuses_production_evaluate_asmf_and_slices_all_prices(monkeypat
     assert len(stock) == len(benchmark) == 200
     assert max(bar.timestamp for bar in stock) == current_timestamp
     assert max(bar.timestamp for bar in benchmark) <= current_timestamp
-    assert set(scores) == {"sector_score", "fundamental_score", "institutional_flow_score"}
+    assert set(scores) == {"sector_score", "fundamental_score"}
     assert scores["sector_score"] == 75.0
     assert len(sector_calls) == 1
     _, member_histories, sector_benchmark = sector_calls[0]
@@ -126,7 +126,7 @@ def test_adapter_excludes_financial_report_published_after_as_of() -> None:
     assert captured == [100.0]
 
 
-def test_missing_mandatory_layers_stay_blocked_like_live() -> None:
+def test_missing_mandatory_v2_layers_stay_blocked_like_live() -> None:
     db = database()
     histories = {symbol: bars(symbol, 200) for symbol in ("FPT", "VNINDEX")}
     as_of = date(2026, 1, 16)
@@ -138,7 +138,6 @@ def test_missing_mandatory_layers_stay_blocked_like_live() -> None:
     assert set(decision.missing) == {
         "sức mạnh ngành/breadth",
         "chất lượng BCTC theo ngày công bố",
-        "dòng tiền khối ngoại/tự doanh",
     }
 
 
@@ -155,8 +154,14 @@ def test_runner_persists_asmf_signal_only_result_without_metrics() -> None:
     assert loaded is not None and loaded.run_id == "asmf-p4"
     assert result.run.config["evaluator"].endswith("evaluate_asmf")
     assert result.run.config["action_counts"] == {"BLOCKED": 1}
+    assert result.run.config["missing_reason_counts"] == {
+        "chất lượng BCTC theo ngày công bố": 1,
+        "sức mạnh ngành/breadth": 1,
+    }
     assert result.run.total_return_percent is None
     assert any("không phát SELL" in warning for warning in result.run.warnings)
     text = format_performance_detail("ASMF", loaded)
     assert "HISTORICAL SIGNAL EVALUATION" in text
     assert "Giao dịch đóng: N/A" in text
+    assert "Actions: BLOCKED=1" in text
+    assert "chất lượng BCTC theo ngày công bố: 1 quyết định" in text

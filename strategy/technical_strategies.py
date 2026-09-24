@@ -88,12 +88,13 @@ def evaluate_asmf(
     *,
     sector_score: float | None = None,
     fundamental_score: float | None = None,
-    institutional_flow_score: float | None = None,
 ) -> StrategyResult:
     """Evaluate the available ASMF layers without inventing missing inputs.
 
     A technical score is still useful as WATCH context, but BUY is blocked until
-    sector, fundamental and institutional-flow inputs are genuinely supplied.
+    sector and fundamental inputs are genuinely supplied. Institutional-flow
+    data is deliberately excluded from ASMF V2 because it is not collected
+    reliably enough to drive an automatic signal.
     """
     stock = _daily_bars(bars, minimum=200)
     index = _daily_bars(benchmark, minimum=200)
@@ -105,7 +106,7 @@ def evaluate_asmf(
     percentile = 100 * sum(value <= current_vol for value in historical_vol) / len(historical_vol)
     risk_off = percentile >= 90 and index[-1].close < market_ma200
     regime_score = 0.0 if risk_off else min(100.0, max(0.0, 50 + (hurst - 0.5) * 500))
-    smf_score = _smf_price_volume_score(stock, institutional_flow_score)
+    smf_score = _smf_price_volume_score(stock)
     atr_values = atr(stock, 14)
     atr_ratios = [_required(atr_values[i]) / stock[i].close for i in range(len(stock) - 5, len(stock))]
     contraction = all(left > right for left, right in zip(atr_ratios, atr_ratios[1:]))
@@ -131,8 +132,6 @@ def evaluate_asmf(
         missing.append("sức mạnh ngành/breadth")
     if fundamental_score is None:
         missing.append("chất lượng BCTC theo ngày công bố")
-    if institutional_flow_score is None:
-        missing.append("dòng tiền khối ngoại/tự doanh")
 
     positive = [f"Hurst={hurst:.2f}; chế độ {'RISK-OFF' if risk_off else 'hoạt động'}",
                 f"SMF giá-khối lượng={smf_score:.1f}/100"]
@@ -151,7 +150,6 @@ def evaluate_asmf(
         ),
         _supplied_layer("Sector", sector_score),
         _supplied_layer("Fundamental", fundamental_score),
-        _supplied_layer("Institutional", institutional_flow_score),
         StrategyLayer(
             "Technical", "PASS" if trigger and smf_score >= 60 else "FAIL",
             f"SMF {smf_score:.1f}/100; trigger {'có' if trigger else 'chưa'}",
@@ -202,7 +200,13 @@ def adx(bars: Sequence[OHLCVBar], period: int = 14) -> tuple[float | None, ...]:
     return tuple(result)
 
 
-def _smf_price_volume_score(bars: tuple[OHLCVBar, ...], institutional: float | None) -> float:
+def _smf_price_volume_score(bars: tuple[OHLCVBar, ...]) -> float:
+    """Score ASMF V2's large-money footprint from price and volume only.
+
+    The former 20% institutional-flow component is removed, and its weight is
+    normalized across accumulation (43.75%), OBV (31.25%) and volume z-score
+    (25%).
+    """
     recent = bars[-20:]
     avg_volume = sum(bar.volume for bar in recent) / 20
     accumulation = sum(1 for bar in recent if bar.volume >= 1.5 * avg_volume and
@@ -218,8 +222,7 @@ def _smf_price_volume_score(bars: tuple[OHLCVBar, ...], institutional: float | N
     deviation = pstdev(volumes)
     zscore = 0.0 if deviation == 0 else (volumes[-1] - sum(volumes) / 20) / deviation
     z_score = min(100.0, max(0.0, 50 + zscore / 3 * 50))
-    inst = 50.0 if institutional is None else institutional
-    return .35 * accum_score + .25 * obv_score + .20 * z_score + .20 * inst
+    return .4375 * accum_score + .3125 * obv_score + .25 * z_score
 
 
 def _crossed_recently(left: Sequence[float | None], right: Sequence[float | None], *, direction: int, lookback: int) -> bool:

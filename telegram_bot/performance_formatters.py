@@ -77,6 +77,7 @@ def format_performance_detail(strategy: str, run: BacktestRun | None) -> str:
             f"Universe: {len(run.symbols)} mã\n"
             f"{activity}"
         ),
+        _signal_evidence(config),
         (
             f"💰 HIỆU QUẢ ({'N/A — chưa execution' if signals_only else 'NET SAU CHI PHÍ'})\n"
             f"• Total Return: {_percent(run.total_return_percent)}\n"
@@ -124,6 +125,24 @@ def format_performance_detail(strategy: str, run: BacktestRun | None) -> str:
         blocks.append("⚠️ GIỚI HẠN\n" + warning_lines)
     blocks.extend((LIVE_UNAVAILABLE, "Không phải khuyến nghị đầu tư."))
     return "\n\n".join(blocks)
+
+
+def _signal_evidence(config: Mapping[str, object]) -> str:
+    actions = config.get("action_counts")
+    missing = config.get("missing_reason_counts")
+    action_text = "N/A"
+    if isinstance(actions, Mapping) and actions:
+        action_text = ", ".join(
+            f"{key}={value}" for key, value in sorted(actions.items())
+        )
+    lines = ["🔎 TÍN HIỆU", f"• Actions: {action_text}"]
+    if isinstance(missing, Mapping) and missing:
+        lines.append("• Nguyên nhân thiếu:")
+        lines.extend(
+            f"  - {key}: {value} quyết định"
+            for key, value in sorted(missing.items())
+        )
+    return "\n".join(lines)
 
 
 def _percent(value: float | None) -> str:

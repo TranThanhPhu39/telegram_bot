@@ -258,7 +258,7 @@ def test_asmf_missing_layer_blocks_buy_and_is_shown() -> None:
     assert "CHƯA ĐỦ ĐIỀU KIỆN" in text
     assert "Sector=MISSING" in text
     assert "Fundamental=MISSING" in text
-    assert "Institutional=MISSING" in text
+    assert "Institutional=" not in text
 
 
 def test_positive_sentiment_alone_never_produces_buy() -> None:

@@ -75,6 +75,25 @@ def test_detail_formatter_uses_persisted_result_and_explicit_na() -> None:
     assert "ENGINE TEST" not in text
 
 
+def test_detail_formatter_explains_persisted_blocked_reasons() -> None:
+    value = run("blocked", "ASMF")
+    value = BacktestRun(
+        **{
+            name: getattr(value, name)
+            for name in value.__dataclass_fields__
+            if name != "config"
+        },
+        config={
+            "action_counts": {"BLOCKED": 4},
+            "missing_reason_counts": {"chất lượng BCTC theo ngày công bố": 4},
+        },
+    )
+
+    text = format_performance_detail("ASMF", value)
+    assert "Actions: BLOCKED=4" in text
+    assert "chất lượng BCTC theo ngày công bố: 4 quyết định" in text
+
+
 def test_no_run_is_honest_and_never_uses_engine_smoke_test() -> None:
     text = format_performance_detail("ASMF", None)
     assert "Chưa có backtest ASMF hợp lệ" in text

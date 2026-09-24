@@ -29,7 +29,7 @@ from scanner.universe import (
     daily_prescreen,
     realtime_watch_universe,
 )
-from asmf_data.scoring import fundamental_score, institutional_flow_score
+from asmf_data.scoring import fundamental_score
 from strategy.technical_strategies import evaluate_asmf, evaluate_cl1
 
 LOGGER = logging.getLogger(__name__)
@@ -255,11 +255,9 @@ def run_scan_cycle(
                 if strat_upper == "ASMF":
                     try:
                         f_score = fundamental_score(connection, sym, as_of_sym)
-                        flow_score = institutional_flow_score(connection, sym, as_of_sym)
                         asmf_res = evaluate_asmf(
                             bars, benchmark_bars,
                             fundamental_score=f_score,
-                            institutional_flow_score=flow_score,
                         )
                         strategy_view = build_strategy_view(asmf_res)
                     except (ValueError, Exception):

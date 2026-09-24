@@ -19,7 +19,7 @@ from typing import Protocol, Sequence
 
 from dotenv import load_dotenv
 
-from asmf_data.scoring import fundamental_score, institutional_flow_score, sector_strength_score
+from asmf_data.scoring import fundamental_score, sector_strength_score
 from asmf_data.store import active_sector, sector_members
 from backtest.repository import latest_successful_backtest, latest_successful_backtests
 from data.database import connect_database
@@ -629,10 +629,11 @@ class RuntimeBotDataService:
             "  (đỉnh 22 phiên − 3×ATR14).\n"
             "  Dữ liệu cần: ≥200 phiên OHLCV ngày.\n\n"
             "• ASMF — nhiều tầng độc lập\n"
-            "  Tầng: Market regime, Sector, Fundamental, Institutional flow,\n"
-            "  Technical, và Sentiment (chỉ là context).\n"
+            "  Tầng: Market regime, Sector, Fundamental, Technical,\n"
+            "  và Sentiment (chỉ là context).\n"
             "  Chỉ phát MUA khi không tầng nào thiếu dữ liệu và thị trường không RISK-OFF.\n"
-            "  Dữ liệu cần: lịch sử ngành, BCTC theo public_date, dòng tiền tổ chức.\n\n"
+            "  Dữ liệu cần: lịch sử ngành, BCTC theo public_date và OHLCV ngày.\n"
+            "  SMF V2 chỉ dùng giá-khối lượng; khối ngoại/tự doanh không chặn tín hiệu.\n\n"
             "CL1 và ASMF được giữ độc lập, không gộp thành một điểm số chung.\n"
             "Không tầng nào là 'AI prediction'.\n"
             "Dùng: /soi ACB CL1 hoặc /soi ACB ASMF"
@@ -736,9 +737,8 @@ class RuntimeBotDataService:
         as_of = datetime.fromtimestamp(bars[-1].timestamp, VIETNAM_TIMEZONE).date()
         symbol = bars[-1].symbol
         fundamental = fundamental_score(self.connection, symbol, as_of)
-        flow = institutional_flow_score(self.connection, symbol, as_of)
         # The membership snapshot is knowledge available at runtime; financial
-        # and flow inputs remain point-in-time at the last completed bar.
+        # inputs remain point-in-time at the last completed bar.
         membership_as_of = datetime.fromtimestamp(self.now(), VIETNAM_TIMEZONE).date()
         histories = self._sector_histories(symbol, bars, membership_as_of)
         membership = active_sector(self.connection, symbol, membership_as_of)
@@ -759,7 +759,7 @@ class RuntimeBotDataService:
         )
         result = evaluate_asmf(
             bars, benchmark, sector_score=sector,
-            fundamental_score=fundamental, institutional_flow_score=flow,
+            fundamental_score=fundamental,
         )
         if result.action == StrategyAction.BUY and self._severe_negative_news(symbol) is not None:
             result = replace(

@@ -115,6 +115,9 @@ class ProviderChain:
 
 def build_default_chain(
     *,
+    vietcap_iq_session: object | None = None,
+    vietcap_iq_enabled: bool = False,
+    vietcap_authorization: str | None = None,
     vnstock_module: object | None = None,
     yfinance_module: object | None = None,
     tcbs_session: object | None = None,
@@ -122,7 +125,7 @@ def build_default_chain(
     yfinance_enabled: bool = True,
     tcbs_enabled: bool = True,
 ) -> ProviderChain:
-    """VNStock first, TCBS second, Yahoo strictly as last-resort fallback.
+    """Vietcap IQ first when enabled, then VNStock, TCBS and Yahoo.
 
     TCBS sits ahead of yfinance because it is a Vietnamese-market-specific
     source (see ``tcbs_provider.py``), so it is a closer analog to VNStock
@@ -130,12 +133,20 @@ def build_default_chain(
     primary source is never skipped.
     """
     from fundamentals.providers.tcbs_provider import TCBSProvider
+    from fundamentals.providers.vietcap_iq_provider import VietcapIQFinancialProvider
     from fundamentals.providers.vnstock_provider import (
         DEFAULT_SOURCE_PREFERENCE, VNStockProvider,
     )
     from fundamentals.providers.yfinance_provider import YFinanceProvider
 
-    return ProviderChain((
+    providers: list[FundamentalProvider] = []
+    if vietcap_iq_enabled:
+        providers.append(VietcapIQFinancialProvider(
+            session=vietcap_iq_session,
+            enabled=True,
+            authorization=vietcap_authorization,
+        ))
+    providers.extend((
         VNStockProvider(
             module=vnstock_module,
             source_preference=source_preference or DEFAULT_SOURCE_PREFERENCE,
@@ -143,3 +154,4 @@ def build_default_chain(
         TCBSProvider(session=tcbs_session, enabled=tcbs_enabled),
         YFinanceProvider(module=yfinance_module, enabled=yfinance_enabled),
     ))
+    return ProviderChain(providers)

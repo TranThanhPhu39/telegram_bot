@@ -43,9 +43,11 @@ def parse_source_preference(raw: str | None) -> tuple[str, ...] | None:
 
 
 def build_chain_from_env(environ: Mapping[str, str] | None = None) -> ProviderChain:
-    """VNStock first, Yahoo strictly as fallback (Phase 24 chain, env-configured)."""
+    """Build the financial provider chain without exposing configured secrets."""
     source = os.environ if environ is None else environ
     return build_default_chain(
+        vietcap_iq_enabled=_flag(source.get("VIETCAP_IQ_FINANCIALS_ENABLED"), False),
+        vietcap_authorization=source.get("VIETCAP_AUTHORIZATION"),
         source_preference=parse_source_preference(source.get("VNSTOCK_SOURCE_PREFERENCE")),
         yfinance_enabled=_flag(source.get("YFINANCE_ENABLED"), True),
         tcbs_enabled=_flag(source.get("TCBS_ENABLED"), True),

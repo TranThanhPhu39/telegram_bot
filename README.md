@@ -26,7 +26,7 @@ Bot chấp nhận mã cổ phiếu hợp lệ ngoài `BOT_WATCH_SYMBOLS`, nhưng
 |---|---|
 | Giá và lịch sử | Hoạt động khi Vietcap có dữ liệu cho mã |
 | Kỹ thuật và CL1 | Cần đủ số phiên lịch sử; mã mới có thể báo thiếu dữ liệu |
-| ASMF | Cần đồng thời dữ liệu ngành, BCTC và dòng tiền tổ chức |
+| ASMF | Cần dữ liệu ngành, BCTC point-in-time và OHLCV ngày; SMF V2 không dùng dòng tiền khối ngoại/tự doanh |
 | News/sentiment | Mọi mã trong universe đều có thể được liên kết; chỉ có kết quả khi đã ingest tin liên quan |
 | Biểu đồ nến | Dùng lịch sử Vietcap hoặc SQLite fallback; cần tối thiểu 5 phiên |
 | Portfolio/risk | Hoạt động với mã có lịch sử giá; định giá hiện dùng historical/EOD |
@@ -38,13 +38,17 @@ phản hồi Telegram đều lấy trực tiếp từ WebSocket.
 
 ## Giới hạn dữ liệu cần biết
 
-- BCTC và các chỉ số cơ bản như EPS, P/E, P/B, ROE, tăng trưởng doanh thu/lợi
-  nhuận chưa được tự động phủ toàn thị trường. Runtime đọc dữ liệu point-in-time
-  đã import vào SQLite và/hoặc file CSV cấu hình.
-- Kho dữ liệu dòng tiền khối ngoại/tự doanh và logic chấm điểm đã có, nhưng dữ
-  liệu thực tế chưa được tự động cập nhật đầy đủ cho mọi mã.
-- ASMF fail closed: thiếu ngành, BCTC hoặc dòng tiền tổ chức thì lớp tương ứng là
-  `MISSING` và bot không tạo tín hiệu `BUY` từ dữ liệu chưa đủ.
+- BCTC point-in-time có thể được đồng bộ tự động từ Vietcap IQ khi
+  `VIETCAP_IQ_FINANCIALS_ENABLED=true`. Đây là interface frontend nội bộ, không
+  phải API công khai ổn định; khi session không hợp lệ hoặc schema thay đổi,
+  provider fail-closed rồi chuỗi tiếp tục với VNStock, TCBS và Yahoo. Độ phủ
+  toàn thị trường vẫn phụ thuộc dữ liệu thực tế của từng nguồn.
+- Kho dữ liệu dòng tiền khối ngoại/tự doanh và logic tra cứu vẫn được
+  giữ cho thử nghiệm. Dữ liệu này không tham gia điểm ASMF V2, không chặn
+  `BUY` và không tạo tín hiệu tự động.
+- ASMF V2 fail closed khi thiếu dữ liệu ngành hoặc BCTC point-in-time. Tầng SMF
+  chỉ dùng giá và khối lượng 20 phiên: Accumulation 43,75%, OBV 31,25% và
+  Volume Z-score 25%.
 - Dữ liệu ngành của mã chưa cache được đồng bộ nền. Lệnh không chờ network và bot
   sẽ thông báo khi batch đồng bộ hoàn tất hoặc vẫn chưa đủ peer history.
 - Sentiment cần một lượt ingest CafeF và một bài viết có thể liên kết với ticker
@@ -139,17 +143,37 @@ bằng `Ctrl+C`.
 
 ### Coverage worker và script quản trị (Phase 25)
 
-Worker nền làm mới fundamentals, institutional flow, lịch sử giá, sector history
+Worker nền làm mới fundamentals, institutional flow thử nghiệm, lịch sử giá, sector history
 và news theo từng batch nhỏ cho các mã trong bảng `symbols`. Lệnh Telegram chỉ
 đọc dữ liệu đã lưu, không gọi VNStock/Yahoo/CafeF. Cấu hình ở `.env.example`
 (`COVERAGE_*`, `*_REFRESH_INTERVAL`; tắt bằng `COVERAGE_WORKER_ENABLED=false`).
+
+Vietcap IQ BCTC là opt-in. Provider đọc hai section `BALANCE_SHEET` và
+`INCOME_STATEMENT`, dùng `publicDate` thực tế và chỉ chuẩn hóa các mã chỉ tiêu
+đã được đối chiếu bằng phương trình kế toán. Không sao chép header đăng nhập,
+cookie hoặc token vào mã nguồn hay tài liệu.
+
+Request IQ đã quan sát chỉ dùng `Authorization`; nó không dùng `Cookie` hay
+`device-id`. `Origin` là `https://trading.vietcap.com.vn` và `Referer` nằm dưới
+`/iq/`. Harness đọc `VIETCAP_AUTHORIZATION` từ môi trường cục bộ và không in
+giá trị này.
+
+Live acceptance ngày 24/09/2026 với FPT đã PASS: Vietcap IQ trả 34 quý hoàn
+chỉnh với 34 `publicDate` thực tế; forced sync đưa coverage thành
+`FINANCIALS READY`. Đây là bằng chứng acquisition/readiness, không phải cam kết
+API frontend sẽ ổn định lâu dài.
 
 ```powershell
 py -3.12 scripts\sync_fundamentals.py --symbol FPT --force
 py -3.12 scripts\sync_institutional_flow.py --limit 10
 py -3.12 scripts\sync_market_coverage.py --dry-run
 py -3.12 scripts\coverage_report.py
+py -3.12 -m scripts.test_vietcap_iq_live --symbol FPT
 ```
+
+Lệnh cuối gọi trực tiếp Vietcap IQ, không fallback sang provider khác và không
+in secret. `PASS` yêu cầu ít nhất 8 quý hoàn chỉnh có ngày công bố; session bị
+từ chối được báo `NOT TESTED`, không bị diễn giải thành dữ liệu thiếu của mã.
 
 ## Nạp news và sentiment
 

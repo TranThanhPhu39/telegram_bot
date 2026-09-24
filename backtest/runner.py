@@ -86,6 +86,12 @@ def run_strategy_backtest(
         for evaluation in evaluations
         for decision in evaluation.decisions
     )
+    missing_reasons = Counter(
+        reason
+        for evaluation in evaluations
+        for decision in evaluation.decisions
+        for reason in decision.missing
+    )
     decision_count = sum(actions.values())
     completed_at = max(started_at, int(now()))
     if execution_config is not None:
@@ -109,6 +115,7 @@ def run_strategy_backtest(
             "minimum_history": 200,
             "decision_count": decision_count,
             "action_counts": dict(sorted(actions.items())),
+            "missing_reason_counts": dict(sorted(missing_reasons.items())),
             "entry_mode": execution_config.entry_mode.value,
             "commission_rate": execution_config.commission_rate,
             "sell_tax_rate": execution_config.sell_tax_rate,
@@ -195,6 +202,7 @@ def run_strategy_backtest(
             "minimum_history": 200,
             "decision_count": decision_count,
             "action_counts": dict(sorted(actions.items())),
+            "missing_reason_counts": dict(sorted(missing_reasons.items())),
         },
         warnings=(
             f"P3/P4 chỉ đánh giá tín hiệu {normalized_strategy} theo lịch sử; chưa mô phỏng khớp lệnh.",

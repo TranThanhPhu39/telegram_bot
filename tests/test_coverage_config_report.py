@@ -9,6 +9,7 @@ import pytest
 
 from fundamentals.coverage_store import record_attempt
 from runtime.coverage_config import CoverageConfig, CoverageConfigError
+from runtime.coverage_factory import build_chain_from_env
 from runtime.coverage_report import (
     build_coverage_report, render_report, render_status_listing, render_symbol_detail,
 )
@@ -52,6 +53,17 @@ def test_from_env_reads_every_documented_variable() -> None:
 def test_invalid_env_is_rejected_clearly(env) -> None:
     with pytest.raises(CoverageConfigError):
         CoverageConfig.from_env(env)
+
+
+def test_vietcap_iq_financial_provider_is_explicitly_opt_in() -> None:
+    disabled = build_chain_from_env({})
+    enabled = build_chain_from_env({"VIETCAP_IQ_FINANCIALS_ENABLED": "true"})
+    assert [provider.name for provider in disabled.providers] == [
+        "VNStock", "TCBS", "yfinance"
+    ]
+    assert [provider.name for provider in enabled.providers] == [
+        "VietcapIQ", "VNStock", "TCBS", "yfinance"
+    ]
 
 
 def test_every_env_example_coverage_setting_is_consumed() -> None:

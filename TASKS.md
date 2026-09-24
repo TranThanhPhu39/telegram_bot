@@ -22,6 +22,97 @@ unchecked; they are NOT TESTED, not PASS:
 - Phase 25: coverage worker running inside the real bot process against live providers
 
 ## ACTIVE IMPLEMENTATION PHASE
+**Vietcap IQ authenticated live acceptance — COMPLETE (PASS)**
+
+- [x] User confirmed the successful browser request has Authorization only
+- [x] Correct Origin/Referer to the trading.vietcap.com.vn IQ frontend
+- [x] Remove Cookie/device-id from the IQ request contract and harness gate
+- [x] Re-run focused tests — 87 passed in 1.46s
+- [x] Re-run full regression — 997 passed in 31.44s
+- [x] Direct FPT live acceptance — PASS with a current locally configured
+  Authorization: 34 complete quarters, 34 actual publication dates, latest 2026Q2
+- [x] Forced FPT sync — SUCCESS through VietcapIQ with one selected attempt
+- [x] Persisted verification — `FINANCIALS READY`, 34 canonical rows from
+  2018Q1 through 2026Q2, `fundamental_score=60.0` as of 2026-09-24
+
+Stop condition reached: the browser-observed header contract, authenticated live
+fetch, canonical promotion and readiness report all pass. The local Authorization
+was removed from the PowerShell environment after the bounded run.
+
+### Previous completed phase
+
+**Vietcap IQ authenticated live acceptance — COMPLETE (superseded NOT TESTED verdict)**
+
+- [x] Add a bounded live harness that never prints or persists session secrets
+- [x] Test PASS/NOT TESTED/FAIL verdict semantics offline — 68 passed in 0.27s
+- [x] Run one direct FPT IQ fetch without provider fallback
+- [x] Authentication unavailable: both sections rejected/unusable with the
+  existing local trading-domain session; verdict `NOT TESTED`, no secret output
+- [x] Full regression — 997 passed in 30.46s
+
+Stop condition reached: code and redaction semantics pass; a locally valid IQ
+session is an unresolved external dependency. Do not mark live acquisition PASS.
+
+**Vietcap IQ financial-statement provider — COMPLETE (live auth NOT TESTED)**
+
+- [x] Capture BALANCE_SHEET and INCOME_STATEMENT response schemas without secrets
+- [x] Verify quarterly period and actual `publicDate` fields
+- [x] Verify accounting-code mappings through balance/profit identities
+- [x] Implement a provider-local Vietcap IQ adapter with fail-closed validation
+- [x] Put Vietcap IQ first in the chain only when explicitly enabled
+- [x] Add provider, chain, environment and promotion regression tests
+- [x] Run focused and full regression tests
+  - Focused: 122 passed in 2.39s
+  - Full: 994 passed in 31.27s
+- [x] Record live authentication as PASS or NOT TESTED without requesting credentials
+  - NOT TESTED: anonymous GET is 403 and the existing trading-domain session is
+    rejected with 400 by IQ. No browser token/cookie was requested or copied.
+
+**Local backtest evidence follow-up — COMPLETE**
+
+- [x] Audit local SQLite daily bars, sector membership and point-in-time BCTC
+- [x] Run and persist CL1 for HPG,VNM,GAS over 2026-06-01 → 2026-09-24
+- [x] Run and persist ASMF V2 over the identical universe/range
+- [x] Inspect persisted `/performance`, `/performance CL1`, `/performance ASMF`
+- [x] Persist and render action counts plus missing-reason counts
+- [x] Keep both runs `IN_SAMPLE_ONLY`
+- [x] Run focused tests: 26 passed
+- [x] Run full regression: `py -3.12 -m pytest -q` — 988 passed in 30.44s
+- [x] Audit all locally eligible symbols: 0/97 have a ready Fundamental score
+- [x] Align runtime to pinned `vnstock==4.0.8` and `vnai==2.6.1`
+- [x] Probe KBS, VCI, MAS, TCBS direct and Yahoo fallback without fabricating rows
+- [x] Rerun ASMF after provider refresh: still 188 BLOCKED; missing counts unchanged
+- [x] Re-run full regression after dependency alignment: 988 passed in 30.49s
+- [x] Supply at least 8 contiguous point-in-time quarters for an eligible ASMF universe
+  - HPG 2024Q3–2026Q2 was transcribed from eight verified consolidated Vietstock
+    filings using actual publication dates and parent-company NPAT (line 61).
+- [x] Supply effective-dated sector membership covering the requested historical range
+  - Acceptance range was narrowed to 2026-09-20 → 2026-09-24, matching the
+    existing effective start date instead of backdating membership.
+- [x] Rerun ASMF until decisions are evaluated without mandatory data layers missing
+  - `local-asmf-v2-verified-hpg-20260924`: 3 WATCH decisions,
+    `missing_reason_counts={}`, `fundamental_score=80.0`, no trades,
+    `IN_SAMPLE_ONLY`.
+- [x] Run full regression after verified import: `py -3.12 -m pytest -q` —
+  988 passed in 36.58s
+
+Acceptance is limited to data readiness and execution of the shared ASMF path.
+The three-session run is too short for performance inference; zero trades leave
+return and drawdown unavailable, and no profitability claim is made.
+
+**ASMF V2 — Remove unreliable institutional flow from automatic signals — COMPLETE**
+
+- [x] Remove institutional-flow input from the shared ASMF evaluator
+- [x] Normalize SMF weights to Accumulation 43.75%, OBV 31.25%, Volume Z-score 25%
+- [x] Remove institutional-flow reads from live runtime, scanner, and historical adapter
+- [x] Keep institutional-flow storage/sync/scoring available for experimental lookup only
+- [x] Update strategy output/catalog and documentation
+- [x] Add regression tests for exact V2 weights and required-layer behavior
+- [x] Run focused and full regression tests
+  - PASS: 86 focused ASMF/runtime/scanner tests.
+  - PASS: `py -3.12 -m pytest -q` — 987 passed in 33.89s.
+- [x] STOP and report
+
 **Performance remediation P5 — Execution, costs, settlement, benchmark & metrics — COMPLETE**
 
 - [x] Add configurable T+1 open execution without same-close fills
@@ -46,11 +137,12 @@ unchecked; they are NOT TESTED, not PASS:
 - [x] Update `README.md`, `docs/ARCHITECTURE.md`, and `PROJECT_CONTEXT.md`
 - [x] STOP and report
 
-### Follow-up requiring real local data (not started)
+### Original real-data follow-up status
 
-- [ ] Run CL1 and ASMF jobs against a populated production-like SQLite cache
-- [ ] Inspect persisted `/performance`, `/performance CL1`, `/performance ASMF`
-- [ ] Keep status `IN_SAMPLE_ONLY` until a separately authorised OOS/walk-forward phase exists
+- [x] Run CL1 and ASMF jobs against the current local SQLite cache
+- [x] Inspect persisted `/performance`, `/performance CL1`, `/performance ASMF`
+- [x] Keep status `IN_SAMPLE_ONLY` until a separately authorised OOS/walk-forward phase exists
+- [ ] Repeat ASMF after the cache becomes production-like for mandatory PIT inputs
 
 ## Phase 0 — Repository bootstrap & planning
 - [x] Inspect repository structure

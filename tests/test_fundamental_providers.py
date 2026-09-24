@@ -8,6 +8,7 @@ import types
 
 import pytest
 
+from fundamentals.adapters import promote_corporate_statement
 from fundamentals.providers.base import (
     FlowRow,
     FundamentalProvider,
@@ -20,6 +21,7 @@ from fundamentals.providers.base import (
 )
 from fundamentals.providers.provider_chain import ProviderChain, build_default_chain
 from fundamentals.providers.tcbs_provider import REPORT_TYPES, TCBSProvider
+from fundamentals.providers.vietcap_iq_provider import VietcapIQFinancialProvider
 from fundamentals.providers.vnstock_provider import DEFAULT_SOURCE_PREFERENCE, VNStockProvider
 from fundamentals.providers.yfinance_provider import YFinanceProvider, candidate_tickers
 
@@ -511,6 +513,148 @@ def test_build_default_chain_tries_tcbs_between_vnstock_and_yfinance() -> None:
         tcbs_session=_FakeTCBSSession({}),
     )
     assert [provider.name for provider in chain.providers] == ["VNStock", "TCBS", "yfinance"]
+
+
+# ------------------------------------------------------------ Vietcap IQ
+class _FakeIQResponse:
+    def __init__(self, payload: object, status_code: int = 200) -> None:
+        self._payload = payload
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise ConnectionError(f"HTTP {self.status_code}")
+
+    def json(self) -> object:
+        return self._payload
+
+
+class _FakeIQSession:
+    def __init__(self, sections: dict[str, object], status_code: int = 200) -> None:
+        self.sections = sections
+        self.status_code = status_code
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def get(self, url: str, **kwargs: object) -> _FakeIQResponse:
+        params = kwargs.get("params")
+        assert isinstance(params, dict)
+        section = str(params["section"])
+        self.calls.append((section, kwargs))
+        payload = self.sections.get(section, {})
+        return _FakeIQResponse(payload, self.status_code)
+
+
+def _iq_payload(row: dict[str, object]) -> dict[str, object]:
+    return {
+        "status": 200,
+        "successful": True,
+        "data": {"years": [], "quarters": [row]},
+    }
+
+
+def _iq_balance(**overrides: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "organCode": "FPT", "yearReport": 2026, "lengthReport": 2,
+        "publicDate": "2026-08-22T00:00:00",
+        "bsa53": 1000.0, "bsa54": 600.0, "bsa55": 400.0,
+        "bsa67": 200.0, "bsa78": 400.0,
+    }
+    row.update(overrides)
+    return row
+
+
+def _iq_income(**overrides: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "organCode": "FPT", "yearReport": 2026, "lengthReport": 2,
+        "publicDate": "2026-08-22T00:00:00",
+        "isa3": 500.0, "isa20": 60.0, "isa21": 2.0, "isa22": 58.0,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_vietcap_iq_normalizes_verified_quarter_and_actual_public_date() -> None:
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(_iq_balance()),
+        "INCOME_STATEMENT": _iq_payload(_iq_income()),
+    })
+
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("fpt")
+
+    assert result.status is ProviderStatus.AVAILABLE
+    assert result.provider_source == "IQ/financial-statement"
+    assert [name for name, _ in session.calls] == ["BALANCE_SHEET", "INCOME_STATEMENT"]
+    request_headers = session.calls[0][1]["headers"]
+    assert request_headers["Origin"] == "https://trading.vietcap.com.vn"
+    assert request_headers["Referer"] == "https://trading.vietcap.com.vn/iq/"
+    assert "Cookie" not in request_headers and "device-id" not in request_headers
+    row = result.statements[0]
+    assert row.period == "2026Q2"
+    assert row.public_date == date(2026, 8, 22)
+    assert row.public_date_source == "actual"
+    assert row.get("revenue") == 500.0
+    assert row.get("net_income") == 60.0
+    assert row.get("net_income_parent") == 58.0
+    assert row.get("total_assets") == 1000.0
+    assert row.get("total_liabilities") == 600.0
+    assert row.get("short_term_debt") == 400.0
+    assert row.get("long_term_debt") == 200.0
+    assert row.get("total_equity") == 400.0
+    canonical = promote_corporate_statement(row, source=result.provenance)
+    assert canonical is not None
+    assert canonical.net_profit == 58.0
+    assert canonical.total_debt == 600.0
+    assert canonical.public_date == date(2026, 8, 22)
+
+
+def test_vietcap_iq_fails_closed_when_accounting_identity_changes() -> None:
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(_iq_balance(bsa78=999.0)),
+        "INCOME_STATEMENT": _iq_payload(_iq_income()),
+    })
+
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("FPT")
+
+    assert result.status is ProviderStatus.PARTIAL
+    assert result.statements[0].get("revenue") == 500.0
+    assert result.statements[0].get("total_equity") is None
+
+
+def test_vietcap_iq_rejects_conflicting_section_public_dates() -> None:
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(_iq_balance()),
+        "INCOME_STATEMENT": _iq_payload(_iq_income(publicDate="2026-08-23T00:00:00")),
+    })
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("FPT")
+    assert result.status is ProviderStatus.MISSING
+    assert result.statements == ()
+
+
+def test_vietcap_iq_http_failure_becomes_error_and_never_crashes_chain() -> None:
+    session = _FakeIQSession({}, status_code=403)
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("FPT")
+    assert result.status is ProviderStatus.ERROR
+    assert result.attempted == (
+        "BALANCE_SHEET:ConnectionError", "INCOME_STATEMENT:ConnectionError"
+    )
+
+
+def test_vietcap_iq_is_first_only_when_explicitly_enabled() -> None:
+    disabled = build_default_chain(
+        vnstock_module=types.SimpleNamespace(), yfinance_module=types.SimpleNamespace(),
+        tcbs_session=_FakeTCBSSession({}),
+    )
+    enabled = build_default_chain(
+        vietcap_iq_enabled=True, vietcap_iq_session=_FakeIQSession({}),
+        vnstock_module=types.SimpleNamespace(), yfinance_module=types.SimpleNamespace(),
+        tcbs_session=_FakeTCBSSession({}),
+    )
+    assert [provider.name for provider in disabled.providers] == [
+        "VNStock", "TCBS", "yfinance"
+    ]
+    assert [provider.name for provider in enabled.providers] == [
+        "VietcapIQ", "VNStock", "TCBS", "yfinance"
+    ]
 
 
 # ------------------------------------------------------------- provider chain
