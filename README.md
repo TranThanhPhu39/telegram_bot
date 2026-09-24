@@ -69,6 +69,18 @@ Phân tích thị trường và cổ phiếu:
 /scan
 /chienluoc
 /performance
+/performance CL1
+/performance ASMF
+```
+
+Chạy backtest từ dữ liệu ngày đã cache trong SQLite. Settlement là số phiên giao
+dịch do người chạy chọn; repo không tự giả định T+2 hay T+2.5. Mặc định job dùng
+phí 0.15% mỗi chiều, thuế bán 0.10%, slippage 0.20%, lô 100 cổ phiếu và vốn
+500 triệu VND; tất cả đều có thể đổi bằng CLI flags:
+
+```powershell
+py -3.12 -m scripts.run_cl1_backtest --symbols FPT,ACB --start-date 2025-01-01 --end-date 2026-09-23 --settlement-sessions 2
+py -3.12 -m scripts.run_asmf_backtest --symbols FPT,ACB --start-date 2025-01-01 --end-date 2026-09-23 --settlement-sessions 2
 ```
 
 Danh mục và rủi ro, chỉ dùng trong private chat:

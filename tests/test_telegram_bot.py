@@ -31,8 +31,8 @@ class FakeData:
     def signal_explanation(self, symbol: str) -> str | None:
         return self.explanations.get(symbol)
 
-    def performance_overview(self) -> str:
-        return "Win rate: 50%"
+    def performance_overview(self, strategy: str | None = None) -> str:
+        return "Win rate: 50%" if strategy is None else f"Performance {strategy}"
 
     def strategy_catalog(self) -> str:
         return "CL1, ASMF"
@@ -73,6 +73,7 @@ def test_start_help_and_all_data_commands() -> None:
     assert commands.market() == "VNINDEX: BULL"
     assert commands.why(["fpt"]) == "RVOL tốt"
     assert commands.performance() == "Win rate: 50%"
+    assert commands.performance(["cl1"]) == "Performance CL1"
     assert commands.news(["fpt"]) == "TIN MỚI NHẤT — FPT"
     assert commands.sentiment(["fpt"]) == "NEWS SENTIMENT: FPT"
     assert "24 giờ" not in commands.help()
@@ -90,6 +91,8 @@ def test_commands_handle_missing_data_and_usage() -> None:
         commands.soi(["FPT", "unknown"])
     with pytest.raises(ValueError, match="/why FPT"):
         commands.why(["FPT", "ACB"])
+    with pytest.raises(ValueError, match=r"/performance \[CL1\|ASMF\]"):
+        commands.performance(["UNKNOWN"])
 
 
 def test_safe_runtime_fallback_never_fabricates_market_data() -> None:

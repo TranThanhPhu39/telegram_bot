@@ -90,11 +90,11 @@ def main() -> int:
     _, report = run_backtest(engine, observations)
     days = (report.end_timestamp - report.start_timestamp) // 86_400
     print(
-        f"[PASS] Preliminary daily backtest; symbol={stock_symbol}; "
+        f"[PASS] BACKTEST ENGINE VALIDATION; symbol={stock_symbol}; "
         f"aligned_bars={len(stock)}; calendar_days={days}"
     )
     print(format_performance(report))
-    print("LIMITATION: daily volume proxy and trend-only VNINDEX regime; not final live-strategy evidence")
+    print("LIMITATION: ENGINE ONLY; not CL1/ASMF performance or strategy validation")
     return 0
 
 

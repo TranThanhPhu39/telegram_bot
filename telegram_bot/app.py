@@ -271,7 +271,7 @@ def build_application(
         await _reply_with_usage(update, lambda: commands.why(context.args))
 
     async def performance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await reply(update, commands.performance())
+        await _reply_with_usage(update, lambda: commands.performance(context.args))
 
     async def strategies(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await reply(update, commands.strategies())

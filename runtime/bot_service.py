@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 from asmf_data.scoring import fundamental_score, institutional_flow_score, sector_strength_score
 from asmf_data.store import active_sector, sector_members
+from backtest.repository import latest_successful_backtest, latest_successful_backtests
 from data.database import connect_database
 from data.indicators import ema20, ema50, rsi14
 from data.migrations import bootstrap_schema
@@ -63,6 +64,7 @@ from strategy.technical_strategies import (
     evaluate_cl1,
 )
 from telegram_bot.portfolio_formatters import format_portfolio_context
+from telegram_bot.performance_formatters import format_performance_detail, format_performance_summary
 from telegram_bot.formatters import (
     format_data_quality,
     format_fundamental,
@@ -636,17 +638,12 @@ class RuntimeBotDataService:
             "Dùng: /soi ACB CL1 hoặc /soi ACB ASMF"
         )
 
-    def performance_overview(self) -> str:
-        return (
-            "📉 HIỆU NĂNG\n\n"
-            "ENGINE TEST (kiểm thử cơ chế, KHÔNG phải kiểm định chiến lược)\n"
-            "Mẫu: 120 phiên ACB/VNINDEX (175 ngày lịch)\n"
-            "Giao dịch: 0 | Win rate: 0.00% | Lợi nhuận TB: 0.00%\n"
-            "Max drawdown: 0.00% | Profit factor: N/A\n\n"
-            "STRATEGY VALIDATION\n"
-            "Chưa thực hiện. No trades generated in this sample; metrics do not "
-            "establish strategy profitability.\n"
-            "Cần backtest nhiều mã, nhiều chu kỳ và out-of-sample trước khi kết luận."
+    def performance_overview(self, strategy: str | None = None) -> str:
+        if strategy is None:
+            return format_performance_summary(latest_successful_backtests(self.connection))
+        normalized = strategy.strip().upper()
+        return format_performance_detail(
+            normalized, latest_successful_backtest(self.connection, normalized)
         )
 
     # ------------------------------------------------------------- internals

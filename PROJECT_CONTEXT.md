@@ -3859,3 +3859,380 @@ The newly supplied remediation plan supersedes the earlier blanket completion
 statement. Issue 1 is implemented and verified offline. Issues 2, 3 and 5 remain
 untouched. Issue 4 is the only other issue already repaired under that plan.
 
+### 2026-09-24 — `/performance` remediation P1 audit and architecture
+
+Scope was deliberately limited to audit and design. No production Python code,
+schema, or existing test expectation was changed in P1.
+
+#### Confirmed current flow
+
+- Telegram registers `/performance` in `telegram_bot/app.py`. The handler ignores
+  `context.args` and calls `TelegramCommandService.performance()` with no input.
+- `TelegramCommandService.performance()` delegates to
+  `BotDataService.performance_overview()` with no strategy selector.
+- `RuntimeBotDataService.performance_overview()` returns a hard-coded ACB/VNINDEX
+  120-session ENGINE TEST paragraph. It performs no database read and cannot
+  distinguish CL1 from ASMF.
+- `scripts/run_preliminary_backtest.py` independently fetches one configured stock
+  (default ACB) plus VNINDEX, aligns the latest 120 daily bars, constructs proxy
+  `SignalInputs`, and replays the generic `SignalEngine`.
+- `backtest.engine.run_backtest()` opens/closes at the same `SignalEvent.price`
+  emitted from close-based observations. It has no pending-order chronology,
+  cash, quantity, costs, sellability date, portfolio equity curve, or benchmark.
+- `calculate_performance()` compounds sequential trade percentages rather than a
+  dated portfolio equity curve. Its drawdown is therefore not portfolio max
+  drawdown. Zero trades return zero average return and drawdown; profit factor is
+  unavailable. CAGR, Sharpe, Sortino and exposure do not exist.
+- There is no `backtest_runs` storage, repository, migration, structured JSON
+  result, or completed-run status boundary. Existing `signals`/`signal_events`
+  describe signal lifecycles, not reproducible strategy-backtest results and not
+  live execution history.
+
+#### Strategy and point-in-time findings
+
+- Real CL1 logic lives only in `strategy.technical_strategies.evaluate_cl1()` and
+  requires at least 200 completed daily bars. It owns EMA20/EMA50 crossing, RSI14,
+  ADX14, volume 3/20, MA200, EMA cross-down and Chandelier exit logic. The current
+  preliminary runner does not call it.
+- Real ASMF logic lives in `evaluate_asmf()`. Runtime supplies its Sector,
+  Fundamental and Institutional scores through `asmf_data.scoring`; missing
+  mandatory layers correctly produce BLOCKED. The preliminary runner does not
+  call it.
+- Financial and bank readers already enforce `public_date <= as_of`; flow readers
+  enforce `trading_date <= as_of`; sector membership readers enforce effective
+  dates. A historical ASMF adapter can reuse these boundaries.
+- Runtime `_evaluate_asmf()` is not itself safe to reuse as a historical adapter:
+  it resolves sector membership at `now()` rather than the historical bar date
+  and can apply current severe-news context. P4 must build historical inputs using
+  the bar's `as_of=T`, then call the shared pure `evaluate_asmf()` directly.
+- Sector histories passed to `sector_strength_score()` are not internally sliced
+  to `<= as_of`. The P4 adapter must provide pre-sliced histories and aligned
+  VNINDEX bars; a defensive check/slice should be considered at that boundary.
+
+#### Settlement, execution and live-performance findings
+
+- No T+2 or T+2.5 convention is specified anywhere in repository code or project
+  documentation. Portfolio V1 explicitly has no realized-P&L ledger and excludes
+  fees, taxes and slippage. P5 must add a configurable settlement abstraction and
+  must not claim a specific Vietnamese convention until the user/project supplies
+  one. The default/result must identify the configured value explicitly.
+- No persisted brokerage execution history exists. `signal_events` alone cannot
+  establish fills, quantities, costs, realized P&L, or live equity. LIVE
+  PERFORMANCE must therefore render NOT AVAILABLE rather than infer results.
+
+#### Approved architecture for later phases
+
+Keep `backtest.engine` legacy APIs for the ENGINE VALIDATION diagnostic. Add the
+strategy-backtest path as separate, provider-independent modules:
+
+- `backtest/models.py`: immutable enums/models for strategy, validation status,
+  run status, execution config, orders/fills, positions, trades, equity points,
+  benchmark and metrics. Optional metrics use `None`, never fabricated zero.
+- `backtest/adapters.py`: `CL1HistoricalAdapter` and `ASMFHistoricalAdapter`.
+  Each evaluates only completed bars `<= T` and calls the imported production
+  evaluator. Adapters must expose/inject that callable so tests can prove reuse.
+- `backtest/execution.py`: chronological pending-order simulator. A signal based
+  on close T queues an order for open T+1 by default. Fill prices are constrained
+  to the next bar's OHLC and configured slippage. Exit follows the same chronology;
+  settlement gates sellability. Config owns entry mode, fees, sell tax, slippage,
+  lot size, settlement sessions, initial capital, allocation mode and allocation.
+- `backtest/portfolio.py`: cash, open/pending/closed positions, quantities, fees,
+  realized P&L and dated mark-to-market equity curve. Initial P2 persistence may
+  store summary/config only; full execution artifacts arrive with P5.
+- `backtest/analytics.py`: metrics calculated from actual net equity and closed
+  trades, with explicit data-sufficiency rules. Benchmark is VNINDEX buy-and-hold
+  over the same effective date range; raw difference is named Excess Return.
+- `backtest/runner.py`: proposed API
+  `run_strategy_backtest(strategy, symbols, start_date, end_date, config, data_port, asmf_port=None)`.
+  It remains multi-symbol and does not hard-code ACB.
+- `backtest/repository.py`: SQLite access for persisted completed runs. Telegram
+  reads only the latest `SUCCESS` run for the exact requested strategy; failed or
+  partial jobs never replace a valid displayed result.
+- `telegram_bot/performance_formatters.py` (or the existing formatter module):
+  pure rendering of summaries/detail. Command execution remains read-only and
+  never launches a heavy backtest.
+
+#### Proposed additive P2 schema
+
+Migration 11 should create `backtest_runs` with at least: `run_id` text primary
+key, `strategy` constrained to CL1/ASMF, `run_kind`, `validation_status`, `status`,
+`started_at`, nullable `completed_at`, `start_date`, `end_date`, `universe_size`,
+`symbols_json`, `initial_capital`, nullable `final_equity`, `trade_count`,
+nullable `open_position_count`, nullable summary metrics (`total_return_percent`,
+`cagr_percent`, `max_drawdown_percent`, `sharpe_ratio`, `sortino_ratio`,
+`profit_factor`, `benchmark_return_percent`, `benchmark_max_drawdown_percent`,
+`excess_return_percent`), `config_json`, `warnings_json`, and `created_at`.
+JSON columns require `json_valid`; numeric values must be finite before insert.
+Indexes should support `(strategy, status, completed_at DESC)` and latest-success
+summary queries. Store percentages in one documented unit consistently.
+
+P2 may legitimately persist fields as NULL until P3/P5 can calculate them from a
+real strategy execution/equity curve. Schema evolution should be additive; avoid
+inventing zeros. Store versioned `config_json` so later walk-forward/OOS metadata
+can be added without redefining the result identity.
+
+#### Phase boundaries and risks
+
+- P2: storage/repository, dynamic Telegram parser/formatter, unavailable states,
+  ENGINE VALIDATION naming, and LIVE PERFORMANCE NOT AVAILABLE. No heavy job in
+  a Telegram request and no fabricated strategy run.
+- P3: CL1 adapter/runner reusing `evaluate_cl1`; multi-symbol signal generation.
+- P4: ASMF adapter with every layer evaluated point-in-time and missing layers
+  BLOCKED exactly as live.
+- P5: execution simulator, costs, configurable settlement, cash/positions/equity,
+  benchmark and advanced metrics. This ordering means P3/P4 can first verify
+  shared signal semantics; their outputs must not be published as valid net
+  performance until P5 supplies execution accounting.
+- Material risks: SQLite migration compatibility; accidental future-bar leakage
+  in sector histories; treating BLOCKED as WATCH; ambiguous simultaneous
+  multi-symbol capital allocation; non-trading-session settlement arithmetic;
+  and reporting statistically undefined metrics. Each must fail closed and be
+  covered before a run can reach `SUCCESS`.
+
+#### Verification
+
+- Full baseline: `py -3.12 -m pytest -q` — **960 passed in 39.80s**.
+- P1 added no code tests because it intentionally made no production change.
+- Existing pending live acceptance remains NOT TESTED and unchanged.
+
+Next: Performance remediation P2 only. Stop before CL1 implementation.
+
+### 2026-09-24 — `/performance` remediation P2 complete
+
+#### Implementation
+
+- Added `backtest.models.BacktestRun` with explicit run status and validation
+  status. Strategy results are limited to CL1/ASMF, undefined metrics remain
+  nullable, and non-finite numeric values are rejected before persistence.
+- Added migration 11, `backtest_run_results`. The new `backtest_runs` table
+  stores strategy/run identity, date range, universe, capital, nullable summary
+  metrics, benchmark fields, versionable configuration JSON and warning JSON.
+  Its index supports latest successful results by strategy and completion time.
+- Added `backtest.repository` with upsert and exact-strategy latest-success
+  queries. RUNNING/FAILED runs never replace the result displayed by Telegram.
+- Replaced the hard-coded ACB 120-session runtime output. `/performance` now
+  summarizes the latest saved CL1 and ASMF runs, while `/performance CL1` and
+  `/performance ASMF` load only their respective latest successful run.
+- Added a pure Telegram formatter. Missing runs report `Chưa có backtest ... hợp
+  lệ`; missing metrics render `N/A`; ENGINE VALIDATION is kept distinct; LIVE
+  PERFORMANCE is explicitly NOT AVAILABLE because no execution ledger exists.
+- Telegram request handling remains read-only and does not start a backtest job.
+  Invalid or extra arguments return `/performance [CL1|ASMF]` usage.
+- Renamed the preliminary script's success label to `BACKTEST ENGINE VALIDATION`
+  and states `ENGINE ONLY`; its calculation was preserved as an internal
+  diagnostic and was not relabelled as CL1/ASMF.
+- Updated README command examples and the architecture document. No CL1 adapter,
+  ASMF adapter, execution simulator, costs, settlement or advanced metric
+  calculation was implemented in P2.
+
+#### Tests and evidence
+
+- Added repository/formatter tests for model round-trip, nullable data,
+  latest-success ordering, failure exclusion, exact CL1/ASMF isolation,
+  unavailable output, dynamic runtime summary, saved assumptions and the live
+  performance boundary.
+- Updated migration tests for schema version 11 and replaced stale schema-version
+  assertions in coverage/portfolio tests with the current version boundary.
+- First full run: 960 passed, 6 failed. All six failures were old tests asserting
+  schema version 10 after migration 11; no runtime or data failure occurred.
+- Focused follow-up: 33 passed.
+- Final full regression: `py -3.12 -m pytest -q` — **966 passed in 35.00s**.
+- Live Telegram delivery and real stored CL1/ASMF runs are **NOT TESTED** because
+  P2 creates the read/storage boundary only; no real strategy backtest job exists
+  before P3/P4/P5.
+
+Next: Performance remediation P3 only — real historical CL1 adapter reusing
+`evaluate_cl1`. Stop before ASMF and execution-cost work.
+
+### 2026-09-24 — `/performance` remediation P3 complete
+
+#### Implementation
+
+- Added `backtest.adapters.CL1HistoricalAdapter`. It validates a single-symbol,
+  strictly chronological `ONE_DAY` series and requires the same 200-bar warm-up
+  as production CL1. For each requested session T it calls the production
+  `strategy.technical_strategies.evaluate_cl1` with only `bars[:T+1]`.
+- The adapter verifies that every evaluator result matches the current symbol and
+  completed-bar timestamp. Empty requested ranges, short histories, mixed symbols,
+  non-daily bars and non-chronological inputs fail closed.
+- Added `backtest.runner.run_strategy_backtest(...)` with caller-supplied strategy,
+  symbols, start/end date, historical data port and SQLite connection. P3 accepts
+  CL1 only and rejects ASMF until its point-in-time adapter exists in P4.
+- Multi-symbol histories are evaluated independently. The run persists the exact
+  universe, decision count and BUY/WATCH/SELL action counts through the P2
+  repository with `validation_status=IN_SAMPLE_ONLY`.
+- P3 deliberately does not create fills or trades before P5. Persisted config is
+  `execution_mode=SIGNALS_ONLY`; `final_equity` and every return/risk/benchmark
+  metric remain NULL. Warnings explicitly list execution, costs, settlement,
+  portfolio equity and benchmark as unavailable.
+- Updated the Telegram formatter so a signal-only run is labelled `HISTORICAL
+  SIGNAL EVALUATION`. It displays decision count and `Giao dịch đóng: N/A — chưa
+  mô phỏng execution`, never the storage placeholder `trade_count=0` as evidence.
+- Added `backtest.data.SQLiteDailyBarData`, a read-only chronological adapter over
+  cached normalized daily candles.
+- Added `scripts.run_cl1_backtest`, an offline SQLite job requiring explicit
+  `--symbols`, `--start-date` and `--end-date`. It is not invoked from Telegram
+  and does not fetch a provider or expose secrets.
+
+#### Tests and evidence
+
+- A monkeypatched production-module evaluator received prefixes of lengths 200,
+  201 and 202 for three consecutive decisions, proving the adapter resolves and
+  reuses `strategy.technical_strategies.evaluate_cl1` rather than a second CL1.
+- A no-look-ahead spy confirmed the maximum timestamp visible on every evaluator
+  call equals the decision timestamp and precedes the next future bar.
+- A two-symbol run produced ten chronological decisions, persisted as the latest
+  successful CL1 record, retained all performance metrics as NULL, and rendered
+  no fabricated zero-trade/zero-return claim.
+- Short histories, duplicate symbols and an ASMF request all fail closed.
+- SQLite daily-bar loading was verified chronological.
+- Focused P3/backtest/strategy suite: **15 passed**.
+- Full regression: `py -3.12 -m pytest -q` — **971 passed in 30.90s**.
+- CLI boundary: `py -3.12 -m scripts.run_cl1_backtest --help` — **PASS**.
+- A real production-database CL1 evaluation is **NOT TESTED** in this clone; no
+  assumption is made that its SQLite cache contains 200 bars for requested
+  symbols. No live or profitability claim is made.
+
+Next: Performance remediation P4 only — ASMF historical adapter with every
+required layer resolved point-in-time at T. Stop before P5 execution work.
+
+### 2026-09-24 — `/performance` remediation P4 complete
+
+#### Implementation
+
+- Added `ASMFHistoricalAdapter` beside the CL1 adapter. It resolves the
+  production `strategy.technical_strategies.evaluate_asmf` callable rather than
+  implementing a second ASMF formula.
+- For each completed stock session T after the 200-bar warm-up, the adapter uses
+  the stock prefix ending at T and a VNINDEX prefix whose last timestamp is no
+  later than T. A missing or short VNINDEX prefix fails closed.
+- Sector membership and members are queried using the historical stock date T.
+  Full peer histories may be cached for efficiency, but every series passed to
+  `sector_strength_score` is sliced to timestamps `<= T`. Current membership or
+  future peer bars cannot leak into the layer.
+- Fundamental scoring uses the existing point-in-time store with
+  `public_date <= T`; institutional scoring uses `trading_date <= T`. Market
+  regime and technical/SMF price-volume evidence are calculated by the shared
+  evaluator from the T-bounded price prefixes.
+- No sentiment/news layer is applied because runtime news is not historical
+  ASMF evidence. Missing sector, fundamental or institutional layers remain
+  `BLOCKED` exactly as in the pure production evaluator.
+- Extended `run_strategy_backtest` to accept ASMF and persist exact-strategy
+  decision/action counts through the P2 repository. Both CL1 and ASMF remain
+  `SIGNALS_ONLY`; performance metrics remain NULL and Telegram renders them as
+  historical signal evaluations rather than simulated trades.
+- Added `scripts.run_asmf_backtest`, an explicit offline SQLite job. It never
+  performs provider acquisition or runs inside a Telegram request.
+
+#### Tests and evidence
+
+- A monkeypatched production-module evaluator confirmed the adapter calls
+  `evaluate_asmf` with stock/benchmark prefixes ending at T and all three supplied
+  score keyword arguments.
+- A sector-score spy confirmed all five effective-dated member histories and the
+  VNINDEX series end at or before the current decision timestamp.
+- An integration test stored eight visible contiguous quarters plus a deliberately
+  adverse 2026Q1 report published after T. Historical fundamental score remained
+  the expected 100.0, proving the future report was excluded.
+- With no sector, financial or flow evidence, the real production evaluator
+  returned `BLOCKED` and listed all three mandatory missing layers.
+- An ASMF runner result persisted under the ASMF key, retained all performance
+  metrics as NULL and rendered `Giao dịch đóng: N/A`.
+- Focused ASMF/PIT/backtest suite: **31 passed**.
+- Full regression: `py -3.12 -m pytest -q` — **975 passed in 33.33s**.
+- CLI boundary: `py -3.12 -m scripts.run_asmf_backtest --help` — **PASS**.
+- A real production-database ASMF evaluation is **NOT TESTED** in this clone.
+  It requires adequate cached VNINDEX/sector histories and real point-in-time
+  ASMF inputs; no completeness or profitability claim is made.
+
+Next: Performance remediation P5 only — execution chronology, costs, configurable
+settlement, portfolio equity, benchmark and supported analytics.
+
+### 2026-09-24 — `/performance` remediation P5 complete
+
+#### Execution and portfolio accounting
+
+- Added `BacktestExecutionConfig`. Entry mode is explicitly `OPEN_T_PLUS_1` and
+  allocation is explicitly `EQUAL_WEIGHT`. Commission, sell tax, slippage, lot
+  size and initial capital are configurable. Settlement sessions have no default
+  and must be supplied by the caller; the repo still makes no claim whether the
+  applicable market convention should be described as T+2 or T+2.5.
+- A decision created from close T only schedules an order. It cannot fill at the
+  same close and fills no earlier than the next available open for that symbol.
+  Exit orders follow the same chronology and cannot fill before the configured
+  sellable session index.
+- Adverse slippage is applied to the next open and clamped into that bar's
+  observed low/high range. No synthetic out-of-range fill is possible.
+- Added whole-lot quantity sizing, cash debits/credits, entry and exit commissions,
+  sell tax, realized P&L, explicit open positions, closed trades and pending-order
+  accounting. Equal-weight budget is bounded by available cash and includes the
+  entry commission; no leverage is assumed.
+- Added a dated mark-to-market equity curve containing cash, market value, total
+  equity and exposure. End-of-test positions are not force-closed; they remain
+  explicit and have not incurred hypothetical exit costs.
+
+#### Benchmark and analytics
+
+- Added VNINDEX buy-and-hold using exactly the strategy equity curve's effective
+  first and last timestamps. Strategy minus benchmark is labelled Excess Return,
+  not alpha. Both strategy and benchmark drawdown come from dated value curves.
+- Added net total return, CAGR, max drawdown, Sharpe, Sortino, Calmar, win rate,
+  average net trade, profit factor, expectancy, average win/loss, payoff,
+  best/worst trade, average holding sessions, longest losing streak, average
+  exposure and trades/year.
+- Risk ratios require at least 30 equity-return observations and a valid
+  denominator. Undefined values remain NULL/N/A. A zero-trade run reports win
+  rate 0 but leaves total return, CAGR, Sharpe, profit factor and trade-return
+  metrics unavailable, avoiding the false claim that no trades means 0% strategy
+  performance.
+- `run_strategy_backtest` now optionally executes either the CL1 or point-in-time
+  ASMF decision stream, persists final equity, open/closed counts, net analytics,
+  benchmark results, costs and exact assumptions through the P2 repository.
+- `/performance` labels executed results `NET SAU CHI PHÍ`, displays final equity,
+  benchmark drawdown and the supported advanced metrics, and retains the
+  `IN-SAMPLE-ONLY` warning. LIVE PERFORMANCE remains NOT AVAILABLE because this
+  is offline simulation, not broker execution history.
+- Both offline CLIs now require `--settlement-sessions`; their default assumptions
+  are commission 0.15% each side, sell tax 0.10%, slippage 0.20%, lot 100 and
+  initial capital 500 million VND. Every assumption can be overridden.
+- Confirmed limitation: the production `evaluate_asmf` currently emits BUY,
+  WATCH or BLOCKED but never SELL. The simulator deliberately does not reinterpret
+  WATCH/BLOCKED as an exit because that would create a second ASMF strategy.
+  Executed ASMF runs therefore warn that positions may remain open and closed-
+  trade performance may stay unavailable until a shared ASMF exit rule is
+  separately specified.
+
+#### Tests and evidence
+
+- Verified close-T BUY fills at open T+1, SELL follows the same chronology, and
+  even extreme slippage remains within observed OHLC.
+- Verified configured costs make net return lower than gross return and reduce
+  final equity.
+- Verified a two-session settlement delay prevents a SELL until the correct
+  symbol-session index.
+- Verified equity `[100, 120, 90, 95]` produces -25% maximum drawdown.
+- Verified realized gains 100 and losses 50 produce profit factor 2.0, with
+  correct win rate, payoff and losing streak.
+- Verified zero trades leave return/risk/trade metrics unavailable rather than 0.
+- Verified VNINDEX ignores bars outside the equity curve and uses the exact same
+  first/last timestamps.
+- Verified 32 equity observations with real variation enable CAGR, Sharpe,
+  Sortino and Calmar, while shorter/degenerate inputs remain unavailable.
+- Verified an executed CL1 result round-trips through SQLite and `/performance`
+  renders saved costs, settlement and NET status.
+- Initial focused execution run found one artificial sub-day CAGR overflow. The
+  analytics boundary was hardened to require an effective span of at least one
+  day; the repeated focused suite passed.
+- Focused P2–P5/Telegram suite: **58 passed**.
+- Final focused execution/analytics suite: **10 passed**.
+- Final ASMF/backtest follow-up: **25 passed**.
+- Final full regression: `py -3.12 -m pytest -q` — **985 passed in 33.71s**.
+- CL1 and ASMF `--help` commands both pass and show the required settlement flag.
+- Real production-like backtest runs and Telegram delivery are **NOT TESTED** in
+  this clone because cache completeness and local credentials/data are not
+  available. No profitability or out-of-sample validation claim is made.
+
+Next: run the two offline jobs against an adequately populated local SQLite
+cache, then inspect the persisted Telegram output. This requires real local data
+and remains a follow-up, not a new automatically started phase.
+

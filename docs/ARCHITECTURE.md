@@ -338,7 +338,78 @@ than silently marked to market.
 Closed trades produce win rate, arithmetic average trade return, compounded-equity
 maximum drawdown, and profit factor. Profit factor is unavailable when there are
 no losing trades rather than reported as an artificial infinite number.
-`/performance` is exposed through the Telegram data-service boundary.
+The legacy metrics remain an ENGINE VALIDATION diagnostic only. Strategy
+results use the separate `backtest.models.BacktestRun` model and
+`backtest.repository` SQLite boundary. Migration 11 stores reproducible run
+metadata, nullable metrics, configuration and warnings in `backtest_runs`.
+Telegram `/performance`, `/performance CL1`, and `/performance ASMF` only read
+the latest `SUCCESS` record for the exact requested strategy; the command never
+starts a heavy backtest. Missing metrics remain `N/A`, and live performance is
+reported unavailable because the repository has no execution ledger.
+
+`backtest.adapters.CL1HistoricalAdapter` is the CL1 point-in-time boundary. For
+each requested session T after the 200-bar warm-up, it passes only the completed
+prefix ending at T to the production
+`strategy.technical_strategies.evaluate_cl1` function. It validates one symbol,
+daily timeframe and strict chronology before evaluation. `backtest.runner`
+applies the adapter to a caller-supplied multi-symbol universe/date range and
+persists the result through the same repository. The runner can retain a
+`SIGNALS_ONLY` evaluation when no execution config is supplied; the P5 offline
+CLI supplies explicit execution assumptions and persists portfolio metrics.
+
+`backtest.data.SQLiteDailyBarData` is a read-only normalized input port. The
+offline `scripts.run_cl1_backtest` job reads cached `ONE_DAY` candles and never
+runs inside a Telegram request.
+
+`backtest.adapters.ASMFHistoricalAdapter` applies the same chronology boundary
+to ASMF. At each stock session T it builds stock and VNINDEX prefixes ending no
+later than T; resolves effective-dated sector membership at T; slices every
+available sector-member series at T; and calls the existing ASMF scoring queries
+with `as_of=T`. Those queries enforce `public_date <= T` for financial reports
+and `trading_date <= T` for institutional flows. The adapter then calls the
+production `strategy.technical_strategies.evaluate_asmf` function with the five
+historical layers. It does not append runtime news context. Missing mandatory
+layers therefore remain BLOCKED exactly as the pure live strategy contract
+requires. The P5 offline CLI feeds those decisions into the shared execution
+simulator using caller-supplied settlement assumptions.
+
+## Strategy execution and analytics
+
+`backtest.execution` is the P5 long-only execution boundary. A BUY/SELL decision
+formed after close T creates a pending order; the earliest fill is the symbol's
+next available session open. Configured slippage moves the open against the
+strategy but is clamped to the observed `[low, high]`, so the simulator never
+invents a price outside the bar. SELL orders are additionally delayed until the
+position's configured sellable session index.
+
+`BacktestExecutionConfig` owns entry mode, commission, sell tax, slippage, lot
+size, initial capital, equal-weight allocation and settlement sessions. The code
+has no T+2/T+2.5 default: offline CLIs require the operator to supply
+`--settlement-sessions`. Current defaults for other assumptions are 0.15%
+commission each side, 0.10% sell tax, 0.20% adverse slippage, 100-share lots and
+500 million VND capital. Cash pays entry notional plus commission; exits return
+notional net of commission and sell tax. Open positions remain open and are
+marked to market rather than force-closed.
+
+Every unioned market timestamp produces a cash/market-value/equity/exposure
+point. `backtest.analytics` derives net total return, CAGR, equity-curve maximum
+drawdown, Sharpe, Sortino, Calmar, win rate, average net trade, profit factor,
+expectancy, average win/loss, payoff, best/worst trade, holding period, longest
+losing streak, exposure and trades/year. Statistically or mathematically
+undefined fields remain NULL. In particular, a zero-trade run has win rate 0 but
+does not fabricate total return, CAGR, Sharpe or profit factor.
+
+VNINDEX buy-and-hold uses the exact first and last timestamps of the strategy
+equity curve. The raw return difference is labelled Excess Return, not alpha.
+Persisted execution runs retain their assumptions and net summary metrics in
+`backtest_runs`; `/performance` renders them as `NET SAU CHI PHÍ`. The status is
+still `IN_SAMPLE_ONLY`, never VALIDATED without separate out-of-sample evidence.
+
+The current production `evaluate_asmf` contract emits BUY, WATCH or BLOCKED but
+has no SELL action. The simulator does not reinterpret WATCH/BLOCKED as an exit,
+because that would create a second ASMF strategy. ASMF runs may therefore retain
+open mark-to-market positions and lack closed-trade metrics until an explicit
+shared ASMF exit rule is separately designed.
 
 `scripts/run_preliminary_backtest` is a bounded diagnostic using the latest 120
 aligned ACB and VNINDEX daily bars. Its daily volume ratio and trend-only index

@@ -22,15 +22,35 @@ unchecked; they are NOT TESTED, not PASS:
 - Phase 25: coverage worker running inside the real bot process against live providers
 
 ## ACTIVE IMPLEMENTATION PHASE
-**Phase 26 — Live Acceptance, Reliability & Production Hardening — CODE + TESTS COMPLETE — pending external live validation** (Phase 25 — Market Coverage & Refresh Workers — CODE + TESTS COMPLETE; both run in one authorised iteration)
-### Documentation follow-up — README operational status (COMPLETE)
+**Performance remediation P5 — Execution, costs, settlement, benchmark & metrics — COMPLETE**
 
-- [x] Document installation, configuration and bot startup
-- [x] Document Telegram commands and maintenance scripts
-- [x] Separate arbitrary-symbol support from actual data coverage
-- [x] Record live Phase 3–7 status and remaining live gaps
-- [x] Document BCTC, institutional-flow, sector and sentiment boundaries
+- [x] Add configurable T+1 open execution without same-close fills
+- [x] Constrain every fill to the observed bar's OHLC range
+- [x] Add cash, positions, quantities, fills, fees, sell tax and slippage
+- [x] Add explicit equal-weight allocation and configurable lot size
+- [x] Add configurable settlement abstraction without inventing T+2/T+2.5
+- [x] Build a dated mark-to-market equity curve
+- [x] Keep open positions explicit and mark them to market
+- [x] Add VNINDEX buy-and-hold over the identical effective range
+- [x] Calculate supported net performance/risk/trade metrics with sufficiency rules
+- [x] Keep undefined/zero-trade metrics `NULL`/`N/A`
+- [x] Persist execution summaries and expose them through `/performance`
+- [x] Require caller-supplied settlement sessions in both offline CLIs
+- [x] Add chronology, OHLC-fill, cost, settlement, drawdown, profit-factor,
+      zero-trade, benchmark-range and advanced-risk-metric tests
+  - PASS: 58 focused P2–P5/Telegram tests.
+  - PASS: 10 focused execution/analytics tests after final metric coverage.
+- [x] Run full regression
+  - PASS: `py -3.12 -m pytest -q` — 985 passed in 33.71s after final ASMF limitation hardening.
+- [x] Verify CL1 and ASMF CLI entry points and mandatory settlement flag
+- [x] Update `README.md`, `docs/ARCHITECTURE.md`, and `PROJECT_CONTEXT.md`
 - [x] STOP and report
+
+### Follow-up requiring real local data (not started)
+
+- [ ] Run CL1 and ASMF jobs against a populated production-like SQLite cache
+- [ ] Inspect persisted `/performance`, `/performance CL1`, `/performance ASMF`
+- [ ] Keep status `IN_SAMPLE_ONLY` until a separately authorised OOS/walk-forward phase exists
 
 ## Phase 0 — Repository bootstrap & planning
 - [x] Inspect repository structure

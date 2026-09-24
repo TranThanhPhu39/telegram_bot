@@ -74,7 +74,8 @@ def test_symbol_market_why_scan_and_performance_use_real_modules() -> None:
     assert "VNINDEX" in runtime.market_overview()
     assert "khuyến nghị" in runtime.signal_explanation("FPT")
     assert runtime.scan_results() == ("FPT",)
-    assert "120 phiên" in runtime.performance_overview()
+    assert "Chưa có backtest CL1 hợp lệ" in runtime.performance_overview()
+    assert "120 phiên" not in runtime.performance_overview()
 
 
 def test_closed_market_or_network_failure_uses_sqlite_last_session() -> None:

@@ -574,3 +574,73 @@ ALTER TABLE scan_snapshots ADD COLUMN prescreen_count INTEGER NOT NULL DEFAULT 0
     CHECK (prescreen_count >= 0)
 """
 
+# --- Migration v11 (Performance remediation P2) ------------------------------
+BACKTEST_RUNS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    run_id TEXT PRIMARY KEY,
+    strategy TEXT NOT NULL,
+    run_kind TEXT NOT NULL,
+    validation_status TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    universe_size INTEGER NOT NULL,
+    symbols_json TEXT NOT NULL,
+    initial_capital REAL NOT NULL,
+    final_equity REAL,
+    trade_count INTEGER NOT NULL,
+    open_position_count INTEGER NOT NULL DEFAULT 0,
+    total_return_percent REAL,
+    cagr_percent REAL,
+    max_drawdown_percent REAL,
+    sharpe_ratio REAL,
+    sortino_ratio REAL,
+    calmar_ratio REAL,
+    win_rate_percent REAL,
+    average_return_percent REAL,
+    profit_factor REAL,
+    expectancy_percent REAL,
+    average_win_percent REAL,
+    average_loss_percent REAL,
+    payoff_ratio REAL,
+    best_trade_percent REAL,
+    worst_trade_percent REAL,
+    average_holding_sessions REAL,
+    longest_losing_streak INTEGER,
+    exposure_percent REAL,
+    trades_per_year REAL,
+    benchmark_return_percent REAL,
+    benchmark_max_drawdown_percent REAL,
+    excess_return_percent REAL,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    warnings_json TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    CHECK (length(trim(run_id)) > 0),
+    CHECK (strategy IN ('CL1', 'ASMF')),
+    CHECK (run_kind = 'STRATEGY_BACKTEST'),
+    CHECK (validation_status IN ('ENGINE_ONLY','IN_SAMPLE_ONLY','OOS_AVAILABLE','VALIDATED')),
+    CHECK (status IN ('RUNNING','SUCCESS','FAILED')),
+    CHECK (typeof(started_at) = 'integer' AND started_at > 0),
+    CHECK (completed_at IS NULL OR completed_at >= started_at),
+    CHECK (status != 'SUCCESS' OR completed_at IS NOT NULL),
+    CHECK (date(start_date) = start_date AND date(end_date) = end_date AND start_date <= end_date),
+    CHECK (typeof(universe_size) = 'integer' AND universe_size > 0),
+    CHECK (json_valid(symbols_json) AND json_type(symbols_json) = 'array'),
+    CHECK (initial_capital > 0),
+    CHECK (final_equity IS NULL OR final_equity >= 0),
+    CHECK (typeof(trade_count) = 'integer' AND trade_count >= 0),
+    CHECK (typeof(open_position_count) = 'integer' AND open_position_count >= 0),
+    CHECK (longest_losing_streak IS NULL OR (typeof(longest_losing_streak) = 'integer' AND longest_losing_streak >= 0)),
+    CHECK (json_valid(config_json) AND json_type(config_json) = 'object'),
+    CHECK (json_valid(warnings_json) AND json_type(warnings_json) = 'array'),
+    CHECK (typeof(created_at) = 'integer' AND created_at > 0)
+)
+"""
+
+BACKTEST_RUNS_LATEST_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_backtest_runs_strategy_status_completed
+ON backtest_runs(strategy, status, completed_at DESC)
+"""
+

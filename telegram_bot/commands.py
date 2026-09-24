@@ -17,7 +17,7 @@ class BotDataService(Protocol):
     def scan_results(self) -> Sequence[str]: ...
     def market_overview(self) -> str: ...
     def signal_explanation(self, symbol: str) -> str | None: ...
-    def performance_overview(self) -> str: ...
+    def performance_overview(self, strategy: str | None = None) -> str: ...
     def strategy_catalog(self) -> str: ...
     def latest_news(self, symbol: str) -> str: ...
     def sentiment_overview(self, symbol: str) -> str: ...
@@ -74,7 +74,7 @@ class UnavailableBotDataService:
     def signal_explanation(self, symbol: str) -> None:
         return None
 
-    def performance_overview(self) -> str:
+    def performance_overview(self, strategy: str | None = None) -> str:
         return "Kết quả backtest hiện chưa sẵn sàng."
 
     def strategy_catalog(self) -> str:
@@ -142,8 +142,13 @@ class TelegramCommandService:
         result = self.data.signal_explanation(symbol)
         return result if result is not None else f"Chưa có giải thích tín hiệu cho {symbol}."
 
-    def performance(self) -> str:
-        return self.data.performance_overview()
+    def performance(self, arguments: Sequence[str] | None = None) -> str:
+        values = tuple(arguments or ())
+        if not values:
+            return self.data.performance_overview()
+        if len(values) != 1 or values[0].strip().upper() not in {"CL1", "ASMF"}:
+            raise ValueError("Cách dùng: /performance [CL1|ASMF]")
+        return self.data.performance_overview(values[0].strip().upper())
 
     def strategies(self) -> str:
         return self.data.strategy_catalog()

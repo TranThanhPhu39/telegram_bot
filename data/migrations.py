@@ -41,6 +41,8 @@ from data.schema import (
     SCAN_SNAPSHOTS_TABLE_SQL,
     SCAN_SNAPSHOTS_INDEX_SQL,
     SCAN_SNAPSHOTS_PRESCREEN_COUNT_COLUMN_SQL,
+    BACKTEST_RUNS_TABLE_SQL,
+    BACKTEST_RUNS_LATEST_INDEX_SQL,
 )
 
 SCHEMA_MIGRATIONS_TABLE_SQL = """
@@ -160,6 +162,11 @@ MIGRATIONS = (
         version=10,
         name="scanner_prescreen_count",
         statements=(SCAN_SNAPSHOTS_PRESCREEN_COUNT_COLUMN_SQL,),
+    ),
+    Migration(
+        version=11,
+        name="backtest_run_results",
+        statements=(BACKTEST_RUNS_TABLE_SQL, BACKTEST_RUNS_LATEST_INDEX_SQL),
     ),
 )
 
