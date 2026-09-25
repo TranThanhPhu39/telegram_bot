@@ -179,9 +179,9 @@ py -3.12 -m scripts.test_vietcap_iq_live --symbol FPT
 
 Lệnh cuối gọi trực tiếp Vietcap IQ, không fallback sang provider khác và không
 in secret. `PASS` yêu cầu ít nhất 8 quý hoàn chỉnh có ngày công bố và hiển thị
-`schema=corporate` hoặc `schema=bank`. Harness phân biệt rõ `AUTH_FAILURE`,
-`INSUFFICIENT_DATA` và `UNSUPPORTED_SCHEMA`; chứng khoán/bảo hiểm hiện fail-closed
-cho tới khi có adapter riêng.
+`schema=corporate`, `schema=bank`, `schema=securities` hoặc `schema=insurance`.
+Harness phân biệt rõ `AUTH_FAILURE`, `INSUFFICIENT_DATA` và `UNSUPPORTED_SCHEMA`.
+BCTC chứng khoán/bảo hiểm được lưu staging nhưng chưa tham gia ASMF.
 
 ## Nạp news và sentiment
 

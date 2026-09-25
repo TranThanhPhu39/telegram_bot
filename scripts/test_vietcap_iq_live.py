@@ -52,10 +52,16 @@ def evaluate_live_result(result) -> int:
         print("FAIL: Vietcap IQ answered but returned no verified quarterly statements")
         return FAIL
 
-    is_bank = any(row.get("net_interest_income") is not None for row in result.statements)
+    schema = result.statement_schema or (
+        "bank" if any(row.get("net_interest_income") is not None for row in result.statements)
+        else "corporate"
+    )
+    is_bank = schema == "bank"
     required = (
         ("net_interest_income", "net_profit", "equity", "gross_loans", "loan_loss_reserve")
         if is_bank else
+        ("revenue", "net_income", "total_equity", "short_term_debt", "long_term_debt")
+        if schema in {"securities", "insurance"} else
         ("revenue", "net_income_parent", "total_equity", "short_term_debt", "long_term_debt")
     )
     complete = tuple(
@@ -74,7 +80,7 @@ def evaluate_live_result(result) -> int:
 
     print(
         "PASS: Vietcap IQ authenticated financial statements; "
-        f"schema={'bank' if is_bank else 'corporate'}; "
+        f"schema={schema}; "
         f"symbol={result.symbol}; complete_quarters={len(complete)}; "
         f"actual_public_dates={actual_dates}; latest={periods[-1]}"
     )

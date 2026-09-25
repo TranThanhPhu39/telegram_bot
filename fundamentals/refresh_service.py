@@ -169,6 +169,17 @@ def _reconcile_yfinance_canonical_snapshot(
         )
 
 
+def _remove_incompatible_vietcap_canonical_rows(
+    connection: sqlite3.Connection, symbol: str
+) -> None:
+    """Remove only IQ-owned rows after the symbol is proven non-corporate."""
+    with connection:
+        connection.execute(
+            "DELETE FROM financial_reports WHERE symbol=? AND source LIKE 'VietcapIQ/%'",
+            (symbol,),
+        )
+
+
 def _canonical_source_priority(source: str) -> int | None:
     """Rank automated sources; unknown/manual sources are never overwritten."""
     normalized = source.lower()
@@ -288,7 +299,12 @@ def refresh_financials(
 
     promoted_reports = []
     promoted_bank_reports = []
-    is_bank = any(row.get("net_interest_income") is not None for row in result.statements)
+    statement_schema = result.statement_schema or (
+        "bank" if any(row.get("net_interest_income") is not None for row in result.statements)
+        else "corporate"
+    )
+    is_bank = statement_schema == "bank"
+    staging_only = statement_schema in {"securities", "insurance"}
     canonical_source = (
         VIETCAP_BANK_SOURCE
         if result.provider.lower() == "vietcapiq" and is_bank
@@ -299,7 +315,9 @@ def refresh_financials(
         else result.provenance
     )
     for row in result.statements:
-        if is_bank:
+        if staging_only:
+            promotable = None
+        elif is_bank:
             promotable = promote_bank_statement(row, source=canonical_source)
             if promotable is not None and not _can_replace_bank_source(
                 connection, row.symbol, row.period, canonical_source
@@ -325,6 +343,8 @@ def refresh_financials(
         upsert_financial_reports(connection, promoted_reports)
     if promoted_bank_reports:
         upsert_bank_financial_reports(connection, promoted_bank_reports)
+    if staging_only:
+        _remove_incompatible_vietcap_canonical_rows(connection, symbol)
     if result.provider.lower() == "yfinance":
         _reconcile_yfinance_canonical_snapshot(
             connection,
@@ -335,12 +355,16 @@ def refresh_financials(
         )
 
     readiness = _canonical_financial_readiness(connection, symbol, stamp.date())
-    gap_reason = _point_in_time_gap_reason(
-        result.statements, len(promoted_reports) + len(promoted_bank_reports), readiness,
-        bank_source=canonical_source if is_bank else None,
+    gap_reason = (
+        f"{statement_schema} BCTC staged; no compatible ASMF model is implemented"
+        if staging_only else
+        _point_in_time_gap_reason(
+            result.statements, len(promoted_reports) + len(promoted_bank_reports), readiness,
+            bank_source=canonical_source if is_bank else None,
+        )
     )
 
-    coverage_status = "READY" if readiness.ready else "PARTIAL"
+    coverage_status = "PARTIAL" if staging_only else "READY" if readiness.ready else "PARTIAL"
 
     error_reason = gap_reason or result.error_reason
     coverage = record_attempt(

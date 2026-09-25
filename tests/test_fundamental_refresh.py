@@ -741,6 +741,94 @@ def test_verified_vietcap_bank_refresh_promotes_without_overwriting_manual_rows(
     assert fundamental_score(connection, "ACB", date(2026, 12, 31)) is None
 
 
+def test_verified_securities_bctc_is_staged_but_not_scored_as_corporate(connection) -> None:
+    upsert_financial_reports(connection, [FinancialReport(
+        "VIX", "2026Q2", date(2026, 8, 20), True,
+        999.0, 99.0, 2000.0, 600.0,
+        "VietcapIQ/IQ/financial-statement/borrowings-v2",
+    )])
+    upsert_financial_reports(connection, [FinancialReport(
+        "VIX", "2026Q1", date(2026, 5, 20), True,
+        888.0, 88.0, 1900.0, 500.0, "manual-reviewed",
+    )])
+    rows = tuple(
+        statement(
+            "VIX", f"{year}Q{quarter}", date(year, quarter * 3, 28),
+            revenue=1000.0, net_income_parent=100.0, total_equity=2000.0,
+            short_term_debt=500.0, long_term_debt=100.0,
+        )
+        for year, quarter in (
+            (2024, 3), (2024, 4), (2025, 1), (2025, 2),
+            (2025, 3), (2025, 4), (2026, 1), (2026, 2),
+        )
+    )
+
+    class VietcapSecuritiesProvider(StubProvider):
+        name = "VietcapIQ"
+
+        def fetch_financials(self, symbol, *, exchange=None):
+            return ProviderResult(
+                symbol=symbol, dataset="FINANCIALS", provider=self.name,
+                provider_source="IQ/financial-statement",
+                status=ProviderStatus.AVAILABLE, statements=rows,
+                statement_schema="securities",
+            )
+
+    outcome = refresh_financials(
+        connection, ProviderChain([VietcapSecuritiesProvider(statements=rows)]),
+        "VIX", force=True,
+    )
+
+    assert outcome.result is RefreshResult.SUCCESS
+    assert outcome.rows_stored == 8 and outcome.rows_promoted == 0
+    assert outcome.coverage.status == "PARTIAL"
+    assert "securities BCTC staged" in outcome.coverage.error_reason
+    assert len(load_automated_statements(connection, "VIX")) == 8
+    assert len(latest_financial_reports(connection, "VIX", date(2026, 12, 31))) == 1
+    assert fundamental_score(connection, "VIX", date(2026, 12, 31)) is None
+    remaining = connection.execute(
+        "SELECT report_period,source FROM financial_reports WHERE symbol='VIX'"
+    ).fetchall()
+    assert [tuple(row) for row in remaining] == [("2026Q1", "manual-reviewed")]
+
+
+def test_verified_insurance_bctc_is_staged_but_not_scored_as_corporate(connection) -> None:
+    rows = tuple(
+        statement(
+            "ABI", f"{year}Q{quarter}", date(year, quarter * 3, 28),
+            revenue=1000.0, net_income=100.0, total_equity=2000.0,
+            short_term_debt=50.0, long_term_debt=10.0,
+        )
+        for year, quarter in (
+            (2024, 3), (2024, 4), (2025, 1), (2025, 2),
+            (2025, 3), (2025, 4), (2026, 1), (2026, 2),
+        )
+    )
+
+    class VietcapInsuranceProvider(StubProvider):
+        name = "VietcapIQ"
+
+        def fetch_financials(self, symbol, *, exchange=None):
+            return ProviderResult(
+                symbol=symbol, dataset="FINANCIALS", provider=self.name,
+                provider_source="IQ/financial-statement",
+                status=ProviderStatus.AVAILABLE, statements=rows,
+                statement_schema="insurance",
+            )
+
+    outcome = refresh_financials(
+        connection, ProviderChain([VietcapInsuranceProvider(statements=rows)]),
+        "ABI", force=True,
+    )
+    assert outcome.result is RefreshResult.SUCCESS
+    assert outcome.rows_stored == 8 and outcome.rows_promoted == 0
+    assert outcome.coverage.status == "PARTIAL"
+    assert "insurance BCTC staged" in outcome.coverage.error_reason
+    assert len(load_automated_statements(connection, "ABI")) == 8
+    assert latest_financial_reports(connection, "ABI", date(2026, 12, 31)) == ()
+    assert fundamental_score(connection, "ABI", date(2026, 12, 31)) is None
+
+
 def test_legacy_vietcap_liability_mapped_rows_are_invisible(connection) -> None:
     row = FinancialReport(
         "FPT", "2026Q2", date(2026, 8, 22), True,

@@ -12,6 +12,7 @@ def _row(period: str, *, complete: bool = True) -> StatementRow:
     values = {"revenue": 1.0}
     if complete:
         values.update({
+            "net_income": 1.0,
             "net_income_parent": 1.0,
             "total_equity": 1.0,
             "short_term_debt": 0.0,
@@ -84,6 +85,34 @@ def test_live_harness_accepts_eight_bank_quarters(capsys) -> None:
     )
     assert evaluate_live_result(result) == PASS
     assert "schema=bank" in capsys.readouterr().out
+
+
+def test_live_harness_accepts_eight_securities_quarters(capsys) -> None:
+    rows = tuple(_row(f"{year}Q{quarter}") for year, quarter in (
+        (2024, 3), (2024, 4), (2025, 1), (2025, 2),
+        (2025, 3), (2025, 4), (2026, 1), (2026, 2),
+    ))
+    result = ProviderResult(
+        symbol="VIX", dataset="FINANCIALS", provider="VietcapIQ",
+        status=ProviderStatus.AVAILABLE, statements=rows,
+        statement_schema="securities",
+    )
+    assert evaluate_live_result(result) == PASS
+    assert "schema=securities" in capsys.readouterr().out
+
+
+def test_live_harness_accepts_eight_insurance_quarters(capsys) -> None:
+    rows = tuple(_row(f"{year}Q{quarter}") for year, quarter in (
+        (2024, 3), (2024, 4), (2025, 1), (2025, 2),
+        (2025, 3), (2025, 4), (2026, 1), (2026, 2),
+    ))
+    result = ProviderResult(
+        symbol="ABI", dataset="FINANCIALS", provider="VietcapIQ",
+        status=ProviderStatus.AVAILABLE, statements=rows,
+        statement_schema="insurance",
+    )
+    assert evaluate_live_result(result) == PASS
+    assert "schema=insurance" in capsys.readouterr().out
 
 
 def test_live_harness_incomplete_answer_is_fail(capsys) -> None:

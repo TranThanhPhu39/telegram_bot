@@ -81,6 +81,8 @@ class ProviderChain:
                     retrieved_at=result.retrieved_at or datetime.now(timezone.utc),
                     statements=result.statements, flows=result.flows,
                     error_reason=result.error_reason, attempted=tuple(attempted),
+                    diagnostic_code=result.diagnostic_code,
+                    statement_schema=result.statement_schema,
                 )
             if result.status is ProviderStatus.ERROR and first_error is None:
                 first_error = result
@@ -93,6 +95,8 @@ class ProviderChain:
                 retrieved_at=datetime.now(timezone.utc),
                 error_reason=first_error.error_reason,
                 attempted=tuple(attempted),
+                diagnostic_code=first_error.diagnostic_code,
+                statement_schema=first_error.statement_schema,
             )
         # Issue 4: attributing this to `self._providers[-1].name` (e.g.
         # "yfinance") falsely implied that provider was relied upon/valid for

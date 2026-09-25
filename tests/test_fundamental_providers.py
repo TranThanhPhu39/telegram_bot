@@ -681,14 +681,74 @@ def test_vietcap_iq_maps_verified_bank_schema_and_rejects_corporate_mapping() ->
     assert "NPL and CAR" in result.error_reason
 
 
-def test_vietcap_iq_labels_securities_schema_unsupported() -> None:
+def test_vietcap_iq_maps_verified_securities_schema() -> None:
     session = _FakeIQSession({
-        "BALANCE_SHEET": _iq_payload(_iq_balance(bsa53=0.0, bss216=10.0)),
-        "INCOME_STATEMENT": _iq_payload(_iq_income(isa3=0.0, iss42=5.0)),
+        "BALANCE_SHEET": _iq_payload(_iq_balance(bss216=10.0, bss238=125.0, bss247=75.0)),
+        "INCOME_STATEMENT": _iq_payload(_iq_income(isa1=500.0, isa2=0.0, iss42=5.0)),
+    })
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("VIX")
+    assert result.status is ProviderStatus.AVAILABLE
+    assert result.statement_schema == "securities"
+    row = result.statements[0]
+    assert row.get("revenue") == 500.0
+    assert row.get("net_income_parent") == 58.0
+    assert row.get("total_equity") == 400.0
+    assert row.get("short_term_debt") == 125.0
+    assert row.get("long_term_debt") == 75.0
+
+
+def test_vietcap_iq_rejects_securities_borrowings_identity_change() -> None:
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(_iq_balance(bss216=10.0, bss238=999.0, bss247=75.0)),
+        "INCOME_STATEMENT": _iq_payload(_iq_income(isa1=500.0, isa2=0.0, iss42=5.0)),
     })
     result = VietcapIQFinancialProvider(session=session).fetch_financials("VIX")
     assert result.status is ProviderStatus.ERROR
-    assert result.diagnostic_code == "UNSUPPORTED_SCHEMA"
+    assert result.diagnostic_code == "INSUFFICIENT_DATA"
+
+
+def test_vietcap_iq_securities_keeps_total_profit_when_parent_allocation_is_invalid() -> None:
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(_iq_balance(bss216=10.0, bss238=125.0, bss247=75.0)),
+        "INCOME_STATEMENT": _iq_payload(_iq_income(
+            isa1=500.0, isa2=0.0, isa20=60.0, isa21=2.0, isa22=10.0, iss42=5.0,
+        )),
+    })
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("SSI")
+    assert result.status is ProviderStatus.AVAILABLE
+    assert result.statements[0].get("net_income") == 60.0
+    assert result.statements[0].get("net_income_parent") is None
+
+
+def test_vietcap_iq_maps_verified_insurance_schema() -> None:
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(_iq_balance(
+            bsa55=0.0, bsa67=0.0, bsa96=1000.0, bsi139=10.0,
+        )),
+        "INCOME_STATEMENT": _iq_payload(_iq_income(
+            isa20=10.0, isa21=0.0, isa22=10.0,
+            isi51=100.0, isi52=5.0, isi104=-10.0, isi103=95.0,
+            isi53=-15.0, isi105=80.0, isi58=0.0, isi106=5.0, isi64=85.0,
+        )),
+    })
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("ABI")
+    assert result.status is ProviderStatus.AVAILABLE
+    assert result.statement_schema == "insurance"
+    assert result.statements[0].get("revenue") == 85.0
+    assert result.statements[0].get("net_income") == 10.0
+
+
+def test_vietcap_iq_rejects_insurance_revenue_identity_change() -> None:
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(_iq_balance(bsi139=10.0)),
+        "INCOME_STATEMENT": _iq_payload(_iq_income(
+            isi51=100.0, isi52=5.0, isi104=-10.0, isi103=999.0,
+            isi53=-15.0, isi105=80.0, isi58=0.0, isi106=5.0, isi64=85.0,
+        )),
+    })
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("ABI")
+    assert result.status is ProviderStatus.ERROR
+    assert result.diagnostic_code == "INSUFFICIENT_DATA"
 
 
 def test_vietcap_iq_is_first_only_when_explicitly_enabled() -> None:

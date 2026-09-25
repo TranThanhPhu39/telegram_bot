@@ -25,6 +25,12 @@ Verified bank mappings use the distinct FiinGroup bank namespaces present in
 the same payload: ``isb27`` (net interest income), ``isa22`` (parent profit),
 ``bsa78`` (equity), ``bsb104`` (gross customer loans), and ``bsb105`` (the
 negative loan-loss provision).  Bank income is cumulative year-to-date.
+
+Verified securities mappings retain the common totals but require a populated
+``bss``/``iss`` schema: ``isa3`` net operating revenue, ``isa22`` parent profit,
+``bsa53`` assets, ``bsa54`` liabilities, ``bsa56``/``bsa71`` borrowings and
+``bsa78`` equity. Securities rows are acquisition evidence only; downstream
+promotion policy decides whether a strategy model can consume them.
 """
 
 from __future__ import annotations
@@ -263,6 +269,130 @@ class VietcapIQFinancialProvider(FundamentalProvider):
             "net_profit": parent_net_income,
         }
 
+    @classmethod
+    def _securities_balance_values(
+        cls, row: Mapping[str, object]
+    ) -> dict[str, float | None]:
+        values = cls._balance_values(row)
+        if not values:
+            return {}
+        short_detail = clean_number(row.get("bss238"))
+        long_detail = clean_number(row.get("bss247"))
+        if (
+            short_detail is not None
+            and values["short_term_debt"] is not None
+            and not _close(short_detail, values["short_term_debt"])
+        ) or (
+            long_detail is not None
+            and values["long_term_debt"] is not None
+            and not _close(long_detail, values["long_term_debt"])
+        ):
+            LOGGER.warning("Rejected Vietcap IQ securities borrowings mapping: identity failed")
+            return {}
+        return values
+
+    @classmethod
+    def _securities_income_values(
+        cls, row: Mapping[str, object]
+    ) -> dict[str, float | None]:
+        revenue = clean_number(row.get("isa1"))
+        deductions = clean_number(row.get("isa2"))
+        net_revenue = clean_number(row.get("isa3"))
+        if (
+            None not in (revenue, deductions, net_revenue)
+            and not _close(revenue + deductions, net_revenue)  # type: ignore[operator]
+        ):
+            LOGGER.warning("Rejected Vietcap IQ securities revenue mapping: identity failed")
+            return {}
+        total_net_income = clean_number(row.get("isa20"))
+        minority_interest = clean_number(row.get("isa21"))
+        parent_net_income = clean_number(row.get("isa22"))
+        if not _profit_identity_valid(
+            total_net_income, parent_net_income, minority_interest
+        ):
+            LOGGER.warning(
+                "Vietcap IQ securities parent-profit allocation failed identity; "
+                "keeping total profit only"
+            )
+            parent_net_income = None
+        return {
+            "revenue": net_revenue,
+            "net_income": total_net_income,
+            "net_income_parent": parent_net_income,
+        }
+
+    @classmethod
+    def _insurance_balance_values(
+        cls, row: Mapping[str, object]
+    ) -> dict[str, float | None]:
+        assets = clean_number(row.get("bsa53"))
+        liabilities = clean_number(row.get("bsa54"))
+        equity = clean_number(row.get("bsa78"))
+        total_resources = clean_number(row.get("bsa96"))
+        short_term_loans = clean_number(row.get("bsa56"))
+        long_term_loans = clean_number(row.get("bsa71"))
+        valid = (
+            None not in (assets, liabilities, equity, short_term_loans, long_term_loans)
+            and _close(liabilities + equity, assets)  # type: ignore[operator]
+            and (total_resources is None or _close(total_resources, assets))
+        )
+        if not valid:
+            LOGGER.warning("Rejected Vietcap IQ insurance balance mapping: identity failed")
+            return {}
+        return {
+            "total_assets": assets,
+            "total_liabilities": liabilities,
+            "short_term_debt": short_term_loans,
+            "long_term_debt": long_term_loans,
+            "total_equity": equity,
+        }
+
+    @staticmethod
+    def _insurance_income_values(row: Mapping[str, object]) -> dict[str, float | None]:
+        gross_written = clean_number(row.get("isi51"))
+        assumed = clean_number(row.get("isi52"))
+        reserve_change = clean_number(row.get("isi104"))
+        premium_revenue = clean_number(row.get("isi103"))
+        deductions = clean_number(row.get("isi53"))
+        net_premium_revenue = clean_number(row.get("isi105"))
+        legacy_reserve_change = clean_number(row.get("isi58"))
+        commission_and_other = clean_number(row.get("isi106"))
+        net_insurance_revenue = clean_number(row.get("isi64"))
+        identities_valid = (
+            None not in (gross_written, assumed, reserve_change, premium_revenue)
+            and _close(  # type: ignore[operator]
+                gross_written + assumed + reserve_change, premium_revenue
+            )
+            and None not in (deductions, net_premium_revenue)
+            and _close(premium_revenue + deductions, net_premium_revenue)  # type: ignore[operator]
+            and None not in (
+                legacy_reserve_change, commission_and_other, net_insurance_revenue,
+            )
+            and _close(  # type: ignore[operator]
+                net_premium_revenue + legacy_reserve_change + commission_and_other,
+                net_insurance_revenue,
+            )
+        )
+        if not identities_valid:
+            LOGGER.warning("Rejected Vietcap IQ insurance revenue mapping: identity failed")
+            return {}
+        total_net_income = clean_number(row.get("isa20"))
+        minority_interest = clean_number(row.get("isa21"))
+        parent_net_income = clean_number(row.get("isa22"))
+        if not _profit_identity_valid(
+            total_net_income, parent_net_income, minority_interest
+        ):
+            LOGGER.warning(
+                "Vietcap IQ insurance parent-profit allocation failed identity; "
+                "keeping total profit only"
+            )
+            parent_net_income = None
+        return {
+            "revenue": net_insurance_revenue,
+            "net_income": total_net_income,
+            "net_income_parent": parent_net_income,
+        }
+
     @staticmethod
     def _has_nonzero(rows: list[dict[str, object]], prefix: str) -> bool:
         return any(
@@ -335,7 +465,7 @@ class VietcapIQFinancialProvider(FundamentalProvider):
             )
 
         schema_kind = self._schema_kind(sections)
-        if schema_kind in {"securities", "insurance", "unknown"}:
+        if schema_kind == "unknown":
             return ProviderResult.failed(
                 symbol, "FINANCIALS", self.name,
                 f"Vietcap IQ {schema_kind} statement schema is not supported",
@@ -354,6 +484,14 @@ class VietcapIQFinancialProvider(FundamentalProvider):
                     if schema_kind == "bank" and section == "BALANCE_SHEET"
                     else self._bank_income_values(raw)
                     if schema_kind == "bank"
+                    else self._securities_balance_values(raw)
+                    if schema_kind == "securities" and section == "BALANCE_SHEET"
+                    else self._securities_income_values(raw)
+                    if schema_kind == "securities"
+                    else self._insurance_balance_values(raw)
+                    if schema_kind == "insurance" and section == "BALANCE_SHEET"
+                    else self._insurance_income_values(raw)
+                    if schema_kind == "insurance"
                     else self._balance_values(raw)
                     if section == "BALANCE_SHEET"
                     else self._income_values(raw)
@@ -387,6 +525,8 @@ class VietcapIQFinancialProvider(FundamentalProvider):
         required_fields = (
             ("net_interest_income", "net_profit", "equity", "gross_loans", "loan_loss_reserve")
             if schema_kind == "bank"
+            else ("revenue", "net_income", "total_equity", "short_term_debt", "long_term_debt")
+            if schema_kind in {"securities", "insurance"}
             else ("revenue", "net_income_parent", "total_equity", "short_term_debt", "long_term_debt")
         )
         complete_rows = tuple(
@@ -422,6 +562,7 @@ class VietcapIQFinancialProvider(FundamentalProvider):
             retrieved_at=datetime.now(timezone.utc),
             statements=statements,
             attempted=tuple(attempted),
+            statement_schema=schema_kind,
             error_reason=(
                 "bank BCTC available; NPL and CAR are absent from this endpoint"
                 if schema_kind == "bank" and not bank_risk_complete else None

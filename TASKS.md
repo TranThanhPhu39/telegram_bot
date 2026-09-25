@@ -1267,6 +1267,39 @@ iteration, each stopped for explicit live confirmation before the next.
 - [x] Focused regression: 118 passed; full regression: 1015 passed.
 - [ ] NPL and CAR are absent from this IQ endpoint; ASMF bank score remains
       unavailable until verified prudential evidence supplies them.
-- [ ] Securities and insurance adapters remain separate follow-ups; their
-      schemas are recognized and rejected rather than normalized as banks.
+- [x] Securities adapter completed in the next follow-up below.
+- [ ] Insurance remains a separate follow-up; its schema is recognized and
+      rejected rather than normalized as a bank or ordinary company.
+
+## Vietcap IQ securities adapter follow-up (2026-09-25)
+
+- [x] Detect populated `bss`/`iss` schema and normalize verified common BCTC
+      totals with balance, revenue and borrowing identity checks.
+- [x] Preserve total LNST when historical parent-profit allocation cannot be
+      reconciled; leave the uncertain parent-profit field null.
+- [x] Preserve `statement_schema=securities` through `ProviderChain`.
+- [x] Store securities statements in staging only; never promote them into the
+      current corporate ASMF model.
+- [x] Reconcile legacy misclassified data by deleting only IQ-owned canonical
+      rows; manual and other-provider evidence remains untouched.
+- [x] Live acceptance: VIX and SSI PASS with 34/34 quarters through 2026Q2.
+- [x] Forced sync: VIX and SSI each have 34 staged quarters, zero promoted rows,
+      zero IQ-owned canonical rows, and explicit FINANCIALS PARTIAL diagnostics.
+- [x] Focused regression: 123 passed; full regression: 1020 passed.
+- [x] Insurance adapter completed in the next follow-up below.
+
+## Vietcap IQ insurance adapter follow-up (2026-09-25)
+
+- [x] Detect `bsi`/`isi` schema and normalize net insurance operating revenue,
+      total/parent profit, balance totals, equity and borrowings.
+- [x] Validate the three-stage insurance premium/revenue identities before
+      accepting an income row.
+- [x] Support historical insurance balance forms without inventing a missing
+      current/non-current liability allocation.
+- [x] Preserve `statement_schema=insurance` through the provider chain and keep
+      all insurance rows staging-only.
+- [x] Live acceptance: BVH and ABI PASS with 34/34 quarters through 2026Q2.
+- [x] Forced sync: BVH and ABI each have 34 staged quarters, zero promoted rows,
+      zero IQ-owned canonical rows, and explicit FINANCIALS PARTIAL diagnostics.
+- [x] Focused regression: 126 passed; full regression: 1023 passed.
 

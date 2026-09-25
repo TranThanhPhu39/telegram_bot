@@ -259,6 +259,7 @@ class ProviderResult:
     error_reason: str | None = None
     attempted: tuple[str, ...] = ()
     diagnostic_code: str | None = None
+    statement_schema: str | None = None
 
     def __post_init__(self) -> None:
         if self.dataset not in ("FINANCIALS", "INSTITUTIONAL"):
@@ -267,6 +268,8 @@ class ProviderResult:
             raise ValueError("ERROR results must carry an error_reason")
         if self.status.usable and not self.statements and not self.flows:
             raise ValueError("usable results must carry at least one row")
+        if self.statement_schema not in (None, "corporate", "bank", "securities", "insurance"):
+            raise ValueError("unknown statement_schema")
 
     @property
     def provenance(self) -> str:

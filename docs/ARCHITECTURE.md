@@ -462,8 +462,26 @@ Only rows with versioned source `/bank-ytd-v1` may enter
 `bank_financial_reports`; other automated bank conventions remain staging-only.
 The ordinary statement endpoint does not provide NPL or CAR, so those fields
 stay null and the ASMF bank score remains unavailable until prudential evidence
-is loaded. Securities (`bss`/`iss`) and insurance (`bsi`/`isi`) payloads are
-recognized but fail closed as unsupported until their separate adapters exist.
+is loaded.
+
+Securities payloads are detected from populated `bss`/`iss` namespaces. The
+adapter maps verified common totals (`isa3`, `isa20`, `isa22`, `bsa53`, `bsa54`,
+`bsa56`, `bsa71`, `bsa78`) and cross-checks `bss238`/`bss247` borrowings against
+the common summary. If historical parent-profit allocation does not reconcile,
+the independently reported total profit is retained and parent profit stays
+null. Securities rows are staging-only: provider-chain schema metadata prevents
+them from entering corporate ASMF scoring, and a refresh removes only legacy
+VietcapIQ canonical rows previously created by misclassification. Manual and
+other-provider rows are preserved.
+
+Insurance payloads use `bsi`/`isi`. The adapter normalizes `isi64` net insurance
+operating revenue and `isa20`/`isa22` profit, validating the premium chain
+`isi51 + isi52 + isi104 = isi103`, `isi103 + isi53 = isi105`, and
+`isi105 + isi58 + isi106 = isi64`. Historical insurance forms are validated by
+the total balance identity and `bsa96` total resources; they are not required to
+provide a corporate-style current/non-current liability split. Insurance rows
+are also staging-only and cannot enter the existing corporate or bank ASMF
+models.
 
 The next adapter uses VNStock 4.0.8 with KBS before VCI; it converts KBS's
 semantic wide format (one metric per row and one reporting period per column)

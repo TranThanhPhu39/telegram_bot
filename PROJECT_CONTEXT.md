@@ -4708,3 +4708,70 @@ than fabricating neutral values. Securities and insurance need their own mapping
 and strategy semantics in later, separate work. This bank-adapter follow-up is
 complete; stop before those adapters.
 
+### 2026-09-25 — Vietcap IQ securities BCTC adapter PASS
+
+Live VIX evidence established 34 quarterly balance and income rows through
+2026Q2. The populated securities namespaces are `bss`/`iss`, while the common
+summary still provides valid `bsa`/`isa` totals. The adapter now maps net
+operating revenue, total/parent profit, assets, liabilities, equity and
+short/long borrowings. It validates assets = liabilities + equity, current plus
+non-current liabilities, net revenue, and duplicated securities borrowing
+fields before accepting a row.
+
+SSI exposed four historical periods where `isa22` parent profit did not
+reconcile with `isa20` total profit and minority interest. The adapter retains
+the independently reported total profit but leaves parent profit null for those
+periods. It does not invent an allocation or discard the complete BCTC period.
+
+`ProviderResult.statement_schema` now survives `ProviderChain`. Refresh treats
+`securities` as staging-only, records an explicit coverage diagnostic, and never
+promotes it into the corporate ASMF model. A regression test caught that losing
+this metadata would promote eight securities rows. Reconciliation now removes
+only old `VietcapIQ/%` canonical rows for a confirmed securities symbol while
+preserving manual or other-provider evidence.
+
+Focused regression passed 123 tests; full regression passed 1020 tests in
+36.76s. Direct live harnesses passed VIX and SSI
+with 34 complete quarters, 34 actual publication dates and latest 2026Q2. Forced
+sync stored 34 staging rows for each symbol with `promoted_to_canonical=0`.
+Read-only SQLite verification confirmed zero IQ-owned canonical rows for both.
+Coverage is intentionally `FINANCIALS PARTIAL` with reason `securities BCTC
+staged; no compatible ASMF model is implemented`.
+
+The acquisition adapter is complete. A securities-specific ASMF model is not
+part of the current strategy design, so these statements remain contextual data
+rather than a signal input. Insurance is the next separate adapter phase.
+
+### 2026-09-25 — Vietcap IQ insurance BCTC adapter PASS
+
+Live BVH and ABI payloads established a common 34-quarter insurance schema using
+`bsi`/`isi`. The adapter maps `isi64` net insurance operating revenue plus
+`isa20` total and `isa22` parent profit. It validates premium revenue in three
+steps: gross written premium + assumed premium + reserve change = premium
+revenue; premium revenue + deductions = net premium revenue; and net premium
+revenue + legacy reserve change + commission/other income = net insurance
+operating revenue.
+
+The first BVH run produced only 20 complete quarters because 14 historical
+forms did not split total liabilities into corporate-style current and
+non-current totals. Runtime evidence showed the total balance still reconciled.
+The insurance adapter therefore validates assets = liabilities + equity and,
+when present, total resources = assets, while retaining explicit short/long loan
+fields. It does not infer the missing liability allocation. After this change,
+both BVH and ABI passed with 34 complete quarters, 34 actual publication dates
+and latest period 2026Q2.
+
+Insurance schema metadata follows the same fail-closed route as securities:
+rows are stored in staging, never promoted into corporate/bank ASMF, and a
+refresh removes only legacy IQ-owned canonical misclassifications. Forced sync
+stored 34 rows each for BVH and ABI with `promoted_to_canonical=0`; SQLite
+verification found zero IQ-owned canonical rows for both. Coverage intentionally
+reports `FINANCIALS PARTIAL` because no insurance-specific ASMF model exists.
+
+Verification completed with `126 passed` in the focused provider/refresh/live-
+harness suite and `1023 passed in 31.24s` in the full repository suite.
+
+The insurance acquisition adapter is complete. Building new industry-specific
+fundamental scoring would be a separate strategy-design phase, not an extension
+of data acquisition.
+
