@@ -7,6 +7,8 @@ import pytest
 from asmf_data.models import FinancialReport, SectorMembership
 from asmf_data.store import upsert_financial_reports, upsert_sector_memberships
 from data.database import connect_database
+from fundamentals.coverage_store import record_attempt, upsert_automated_statement
+from fundamentals.providers.base import StatementRow
 from intelligence.news.service import SentimentAggregate
 from runtime.analysis import describe_freshness, interpret_indicators
 from runtime.bot_service import RuntimeBotDataService
@@ -116,6 +118,86 @@ def test_soi_without_fundamentals_does_not_fabricate_metrics() -> None:
     text = service().symbol_overview("FPT")
     assert "Chưa có dữ liệu cơ bản point-in-time" in text
     assert "P/E" not in text
+
+
+def test_staged_securities_reports_are_partial_in_telegram() -> None:
+    runtime = service()
+    for period, published in (
+        ("2026Q1", date(2026, 5, 15)),
+        ("2026Q2", date(2026, 8, 15)),
+    ):
+        upsert_automated_statement(
+            runtime.connection,
+            StatementRow("SSI", period, published, values={
+                "revenue": 100.0, "net_income": 10.0,
+                "total_equity": 200.0, "short_term_debt": 5.0,
+                "long_term_debt": 5.0,
+            }),
+            provider="VietcapIQ", provider_source="IQ", promoted=False,
+        )
+    record_attempt(
+        runtime.connection, "SSI", "FINANCIALS", "PARTIAL",
+        provider="VietcapIQ", provider_source="IQ",
+        error_reason="securities BCTC staged; no compatible ASMF model is implemented",
+    )
+
+    detail = runtime.fundamental_overview("SSI")
+    overview = runtime.symbol_overview("SSI", "ASMF")
+
+    for text in (detail, overview):
+        assert "CƠ BẢN: PARTIAL" in text
+        assert "Đã tải 2 quý BCTC CTCK" in text
+        assert "chưa có mô hình ASMF" in text
+        assert "Fundamental data missing." not in text
+        assert "• ROE (TTM):" not in text
+    assert "CHƯA ĐỦ ĐIỀU KIỆN" in overview
+    assert "Fundamental=MISSING" in overview
+    assert "tầng Fundamental MISSING vì chưa có mô hình ASMF CTCK" in overview
+
+
+def test_staged_report_published_after_analysis_date_stays_unusable() -> None:
+    runtime = service()
+    upsert_automated_statement(
+        runtime.connection,
+        StatementRow("SSI", "2026Q4", date(2027, 2, 15), values={
+            "revenue": 100.0, "net_income": 10.0,
+        }),
+        provider="VietcapIQ", provider_source="IQ", promoted=False,
+    )
+    record_attempt(
+        runtime.connection, "SSI", "FINANCIALS", "PARTIAL",
+        provider="VietcapIQ", provider_source="IQ",
+        error_reason="securities BCTC staged; no compatible ASMF model is implemented",
+    )
+
+    text = runtime.fundamental_overview("SSI")
+
+    assert "CƠ BẢN: PARTIAL" in text
+    assert "Kỳ mới nhất chưa công bố trước ngày phân tích" in text
+    assert "As-of: N/A" in text
+    assert "• ROE (TTM):" not in text
+
+
+def test_fundamental_missing_coverage_shows_provider_reason() -> None:
+    runtime = service()
+    record_attempt(
+        runtime.connection, "DCM", "FINANCIALS", "MISSING",
+        provider="VietcapIQ", error_reason="Vietcap IQ financial provider disabled",
+    )
+
+    text = runtime.fundamental_overview("DCM")
+
+    assert "CƠ BẢN: MISSING" in text
+    assert "Vietcap IQ financial provider disabled" in text
+    assert "Fundamental data missing." not in text
+
+
+def test_fundamental_without_any_financial_evidence_explains_empty_store() -> None:
+    text = service().fundamental_overview("DCM")
+
+    assert "CƠ BẢN: MISSING" in text
+    assert "Chưa có dữ liệu cơ bản point-in-time được lưu trong SQLite cho DCM" in text
+    assert "Fundamental data missing." not in text
 
 
 def test_fundamental_view_marks_noncontiguous_quarters_insufficient() -> None:
@@ -239,7 +321,10 @@ def test_fundamental_command_shows_as_of_and_period() -> None:
 
 
 def test_fundamental_command_without_data_is_explicit() -> None:
-    assert "Fundamental data missing." in service().fundamental_overview("FPT")
+    text = service().fundamental_overview("FPT")
+    assert "CƠ BẢN: MISSING" in text
+    assert "Chưa có dữ liệu cơ bản point-in-time được lưu trong SQLite cho FPT" in text
+    assert "Fundamental data missing." not in text
 
 
 # ------------------------------------------------------------- strategy

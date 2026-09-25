@@ -28,6 +28,7 @@ from data.migrations import bootstrap_schema
 from data.models import OHLCVBar
 from data.vietcap.historical import normalize_gap_chart
 from data.vietcap.rest import VietcapRestClient, VietcapRestError, VietcapTimeFrame
+from fundamentals.coverage_store import load_automated_statements, load_coverage
 from fundamentals.repository import FundamentalFacts, load_fundamental_facts
 from runtime.analysis import (
     build_market_view,
@@ -385,6 +386,15 @@ class RuntimeBotDataService:
         facts = self._fundamental_facts(symbol, bars[-1].timestamp)
         strategy_view = self._strategy_view(strategy, bars, benchmark, sentiment)
         fundamental = self._fundamental_view(symbol, facts, bars[-1].timestamp)
+        if (
+            strategy_view is not None and strategy_view.name == "ASMF"
+            and fundamental is not None and fundamental.kind == "SECURITIES"
+        ):
+            context = "BCTC CTCK đã tải; tầng Fundamental MISSING vì chưa có mô hình ASMF CTCK."
+            strategy_view = replace(
+                strategy_view,
+                note=" ".join(part for part in (strategy_view.note, context) if part),
+            )
         risks, watch = build_risk_items(technical, market, strategy_view, sentiment)
         notes: list[str] = []
         if not benchmark:
@@ -392,7 +402,7 @@ class RuntimeBotDataService:
                 f"VNINDEX không khả dụng ({benchmark_source}); bối cảnh thị trường bị giới hạn."
             )
         if facts is None:
-            notes.append("Chưa có dữ liệu cơ bản point-in-time cho mã này.")
+            notes.append("Chưa có dữ liệu cơ bản point-in-time dùng được cho mã này.")
         return StockAnalysisView(
             symbol=symbol,
             price=price,
@@ -831,7 +841,7 @@ class RuntimeBotDataService:
         self, symbol: str, facts: FundamentalFacts | None, timestamp: int
     ) -> FundamentalView | None:
         if facts is None:
-            return None
+            return self._staged_financial_view(symbol, timestamp)
         if facts.kind == "BANK":
             metrics = (
                 MetricView("ROE (TTM)", facts.roe_percent, "%"),
@@ -869,6 +879,75 @@ class RuntimeBotDataService:
             kind=facts.kind,
             missing=facts.missing_fields,
             note=" ".join(notes),
+        )
+
+    def _staged_financial_view(self, symbol: str, timestamp: int) -> FundamentalView | None:
+        """Show acquired statements without treating staging rows as ASMF scores."""
+        staged = load_automated_statements(self.connection, symbol)
+        coverage = load_coverage(self.connection, symbol, "FINANCIALS")
+        if not staged and coverage is None:
+            return FundamentalView(
+                status="MISSING", missing=("BCTC point-in-time",),
+                note=(
+                    f"Chưa có dữ liệu cơ bản point-in-time được lưu trong SQLite "
+                    f"cho {symbol}. Lệnh Telegram chỉ đọc dữ liệu đã đồng bộ."
+                ),
+            )
+        if not staged:
+            assert coverage is not None
+            status = coverage.status if coverage.status in {
+                "MISSING", "ERROR", "STALE", "IN_PROGRESS", "PARTIAL",
+            } else "INSUFFICIENT"
+            reason = (
+                f"BCTC FINANCIALS {coverage.status}: "
+                f"{coverage.error_reason or 'chưa có BCTC hợp lệ trong kho point-in-time'}"
+            )
+            source = (
+                f"{coverage.provider}/{coverage.provider_source}"
+                if coverage.provider and coverage.provider_source
+                else coverage.provider
+            )
+            return FundamentalView(
+                status=status, source=source, missing=("BCTC point-in-time",), note=reason,
+            )
+        preferred_source = (
+            f"{coverage.provider}/{coverage.provider_source}"
+            if coverage is not None and coverage.provider and coverage.provider_source
+            else coverage.provider if coverage is not None else None
+        )
+        source_rows = tuple(
+            row for row in staged
+            if preferred_source is not None and row["source"].casefold() == preferred_source.casefold()
+        ) or staged
+        latest = source_rows[0]
+        source = str(latest["source"])
+        quarters = {row["period"] for row in source_rows if len(row["period"]) == 6 and row["period"][4] == "Q"}
+        count = len(quarters)
+        quantity = f"{count} quý BCTC" if count else "BCTC"
+        diagnostic = (coverage.error_reason or "") if coverage is not None else ""
+        if "securities BCTC staged" in diagnostic:
+            kind = "SECURITIES"
+            reason = f"Đã tải {quantity} CTCK; dữ liệu đang chờ vì chưa có mô hình ASMF cho CTCK."
+            missing = ("mô hình ASMF cho CTCK",)
+        elif "insurance BCTC staged" in diagnostic:
+            kind = "INSURANCE"
+            reason = f"Đã tải {quantity} bảo hiểm; dữ liệu đang chờ vì chưa có mô hình ASMF cho bảo hiểm."
+            missing = ("mô hình ASMF cho bảo hiểm",)
+        else:
+            kind = None
+            reason = f"Đã tải {quantity} vào bảng chờ; chưa đủ điều kiện tính ASMF."
+            missing = ("BCTC hợp lệ cho ASMF",)
+            if diagnostic:
+                reason += " Lý do nguồn: " + diagnostic[:180]
+        analysis_date = datetime.fromtimestamp(timestamp, VIETNAM_TIMEZONE).date().isoformat()
+        public_date = latest["public_date"]
+        if public_date is None or public_date > analysis_date:
+            reason += f" Kỳ mới nhất chưa công bố trước ngày phân tích {analysis_date}."
+        return FundamentalView(
+            status="PARTIAL" if coverage is not None and coverage.status == "PARTIAL" else "INSUFFICIENT",
+            period=latest["period"],
+            as_of=public_date if public_date is not None and public_date <= analysis_date else None,
+            source=source, kind=kind, missing=missing, note=reason,
         )
 
     def _data_quality(

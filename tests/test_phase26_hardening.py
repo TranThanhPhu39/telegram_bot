@@ -231,7 +231,10 @@ def test_short_history_keeps_warmup_indicators_unavailable_never_zero() -> None:
 
 def test_missing_fundamentals_and_asmf_fail_closed() -> None:
     runtime = service(FakeClient(payload()))
-    assert runtime.fundamental_overview("FPT") == "🧾 FPT — CƠ BẢN\nFundamental data missing."
+    fundamental = runtime.fundamental_overview("FPT")
+    assert "CƠ BẢN: MISSING" in fundamental
+    assert "Chưa có dữ liệu cơ bản point-in-time được lưu trong SQLite cho FPT" in fundamental
+    assert "Fundamental data missing." not in fundamental
     asmf = runtime.symbol_overview("FPT", "ASMF")
     assert "CHƯA ĐỦ ĐIỀU KIỆN" in asmf and "MUA" not in asmf.split("ASMF")[1][:80]
     assert "Fundamental" in asmf or "cơ bản" in asmf.lower() or "Thiếu dữ liệu" in asmf
