@@ -12,10 +12,10 @@ from fundamentals.providers.base import StatementRow
 from intelligence.news.service import SentimentAggregate
 from runtime.analysis import describe_freshness, interpret_indicators
 from runtime.bot_service import RuntimeBotDataService
-from runtime.views import Freshness
+from runtime.views import DataQualityView, Freshness
 from scanner.universe import ScannerInstrument
 from telegram_bot.commands import TelegramCommandService
-from telegram_bot.formatters import format_stock_overview, format_technical
+from telegram_bot.formatters import format_data_quality, format_stock_overview, format_technical
 
 NOW = 1_800_000_000
 UTC = timezone.utc
@@ -103,6 +103,8 @@ def test_soi_renders_every_supported_section() -> None:
     for marker in ("GIÁ", "KỸ THUẬT", "HỖ TRỢ / KHÁNG CỰ", "THỊ TRƯỜNG",
                    "Chiến lược CL1", "CƠ BẢN", "SENTIMENT", "DỮ LIỆU"):
         assert marker in text
+    assert "Giá trên nến ngày:" in text
+    assert "Đóng cửa:" not in text
     assert "Phiên dữ liệu" not in text or "Dữ liệu phiên" in text
 
 
@@ -300,6 +302,17 @@ def test_freshness_is_derived_from_the_session_date(age_days, expected) -> None:
 
 def test_unavailable_history_is_labelled_unavailable() -> None:
     assert describe_freshness(None, NOW, cached=True) == (Freshness.UNAVAILABLE, None)
+
+
+def test_same_day_daily_bar_is_not_labelled_as_realtime_or_closed_price() -> None:
+    quality = DataQualityView(
+        freshness=Freshness.EOD_TODAY, session_date="2026-09-25", staleness_days=0,
+        market_source="Vietcap historical",
+    )
+    text = format_data_quality(quality)
+    assert "Nến ngày hôm nay" in text
+    assert "có thể chưa chốt" in text
+    assert "Realtime" not in text
 
 
 def test_soi_shows_session_and_source_provenance() -> None:

@@ -4947,6 +4947,15 @@ remains NOT TESTED. Focused Telegram/dashboard/provider regression passed 161
 tests; full suite passed 1,035 tests on Python 3.13 with the documented
 temporary Protobuf version-check override.
 
+### 2026-09-25 — daily-bar price wording
+
+The screenshot showed an active-session `/soi` response labeled `Đóng cửa` even
+though the view was built from Vietcap `ONE_DAY` historical bars. The response
+now labels this `Giá trên nến ngày`; the same-day freshness label says the candle
+may still be forming and does not claim a realtime tick. The `/chart` caption
+uses the same daily-candle wording. Three focused dashboard/chart regressions
+pass. No stock-level realtime quote source was added.
+
 Verification:
 
 - `py -3.12 -m pytest -q tests\\test_hose_sector_pdf.py tests\\test_asmf_data.py tests\\test_asmf_historical_adapter.py tests\\test_backtest_repository.py tests\\test_backtest_execution.py` — 35 passed.

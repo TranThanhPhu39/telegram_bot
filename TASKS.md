@@ -1390,3 +1390,9 @@ iteration, each stopped for explicit live confirmation before the next.
 - [x] Focused Telegram/dashboard/provider regression: **161 passed**; full `python -m pytest tests/ -q` with the protobuf version-check override: **1035 passed**.
 - [ ] No production DB or `.env` is available in this checkout; DCM's live coverage row and SSI's live staging row remain NOT TESTED here.
 
+## Daily-candle price wording follow-up (2026-09-25)
+- [x] Replace `/soi`'s `Đóng cửa` label with `Giá trên nến ngày`; the runtime reads Vietcap `ONE_DAY` history, not a stock WebSocket tick.
+- [x] Label same-day daily bars as potentially unclosed and keep them distinct from `REALTIME`.
+- [x] Update `/chart` caption to describe its latest daily-candle price accurately.
+- [x] Focused price-label regression: **3 passed**.
+

@@ -31,8 +31,8 @@ HEADER_DIVIDER = "━━━━━━━━━━━━━━━━━━━━�
 
 FRESHNESS_LABELS = {
     Freshness.REALTIME: "Realtime",
-    Freshness.EOD_TODAY: "EOD (phiên gần nhất là hôm nay)",
-    Freshness.EOD: "EOD (phiên đã đóng)",
+    Freshness.EOD_TODAY: "Nến ngày hôm nay (không phải tick realtime; có thể chưa chốt)",
+    Freshness.EOD: "Nến ngày của phiên đã đóng",
     Freshness.STALE: "Cached/cũ",
     Freshness.UNAVAILABLE: "Không có dữ liệu",
 }
@@ -63,8 +63,8 @@ def format_stock_overview(view: StockAnalysisView, extra_blocks: Sequence[str] =
     if view.price is not None:
         blocks.append(
             "💰 GIÁ\n"
-            f"• Đóng cửa: {number(view.price.close)} ({percent(view.price.change_percent)})\n"
-            f"• Khối lượng: {integer(view.price.volume)}\n"
+            f"• Giá trên nến ngày: {number(view.price.close)} ({percent(view.price.change_percent)})\n"
+            f"• Khối lượng nến ngày: {integer(view.price.volume)}\n"
             f"• Dữ liệu phiên: {view.price.session_date or UNAVAILABLE}"
         )
 

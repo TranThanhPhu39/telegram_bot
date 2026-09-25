@@ -36,6 +36,10 @@ giá danh mục lấy lịch sử Vietcap trước, sau đó mới dùng SQLite 
 lỗi. Các luồng WebSocket realtime đã được kiểm thử độc lập, nhưng không phải mọi
 phản hồi Telegram đều lấy trực tiếp từ WebSocket.
 
+Giá trong `/soi` và chú thích `/chart` được lấy từ nến ngày Vietcap. Vì vậy bot
+ghi `Giá trên nến ngày`, không gọi đó là tick realtime hay giá đóng cửa khi phiên
+cùng ngày có thể vẫn đang chạy.
+
 ## Giới hạn dữ liệu cần biết
 
 - BCTC point-in-time có thể được đồng bộ tự động từ Vietcap IQ khi

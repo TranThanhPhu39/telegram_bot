@@ -55,6 +55,10 @@ def test_chart_returns_png_bytes_and_caption_for_available_history() -> None:
     assert result.png_bytes.startswith(b"\x89PNG\r\n\x1a\n")
     assert "FPT" in result.caption
     assert "phiên" in result.caption
+    assert "Giá cuối trên nến ngày" in result.caption
+    assert "Đóng cửa gần nhất" not in result.caption
+    assert "EOD_TODAY" not in result.caption
+    assert "có thể chưa chốt" in result.caption
 
 
 def test_chart_reports_honest_error_when_no_history_exists() -> None:

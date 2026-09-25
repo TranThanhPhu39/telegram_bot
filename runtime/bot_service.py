@@ -235,10 +235,17 @@ class RuntimeBotDataService:
                 error=f"Không thể vẽ biểu đồ {symbol}: {error}",
             )
         freshness = self._data_quality(bars[-1].timestamp, source)
+        freshness_label = {
+            Freshness.REALTIME: "Realtime",
+            Freshness.EOD_TODAY: "Nến ngày hôm nay (có thể chưa chốt)",
+            Freshness.EOD: "Nến ngày phiên đã đóng",
+            Freshness.STALE: "Cached/cũ",
+            Freshness.UNAVAILABLE: "Không có dữ liệu",
+        }[freshness.freshness]
         caption = (
             f"{chart.symbol} · {chart.timeframe} · {chart.visible_bars} phiên\n"
-            f"Đóng cửa gần nhất: {chart.last_close:,.2f}\n"
-            f"Nguồn: {source} · {freshness.freshness.value}"
+            f"Giá cuối trên nến ngày: {chart.last_close:,.2f}\n"
+            f"Nguồn: {source} · {freshness_label}"
         )
         return ChartRequestView(
             symbol=symbol, png_bytes=chart.png_bytes, caption=caption, error=None,
