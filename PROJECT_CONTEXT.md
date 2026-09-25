@@ -4925,6 +4925,28 @@ on compatible Fundamental semantics for the remaining 18 symbols. The run is
 still `IN_SAMPLE_ONLY`, uses a fixed current VN30 basket, and retains
 survivorship bias.
 
+### 2026-09-25 — Telegram BCTC evidence visibility
+
+The user's screenshot showed `/fundamental DCM` returning only the generic
+`Fundamental data missing.`. The same rendering also hid the reason when
+Vietcap IQ had actually acquired securities statements but deliberately left
+them staging-only because no securities ASMF model exists.
+
+The Telegram runtime now reads FINANCIALS staging/coverage metadata when no
+canonical `FundamentalFacts` are available. It reports the staged quarter count,
+source and model/promotion reason as `PARTIAL`; an empty store or a recorded
+provider failure shows the actual missing/error reason. `/soi ASMF` keeps the
+Fundamental layer missing and the strategy blocked, with an explicit note that
+the securities BCTC was fetched but has no compatible ASMF model. A future
+publication date remains unusable for the analyzed bar's `as_of` date.
+
+No financial metric is calculated from staging rows. The DCM production DB and
+SSI/CTCK production staging rows are absent from this checkout, so the renderer
+fix is tested with an offline staged-securities fixture only; production state
+remains NOT TESTED. Focused Telegram/dashboard/provider regression passed 161
+tests; full suite passed 1,035 tests on Python 3.13 with the documented
+temporary Protobuf version-check override.
+
 Verification:
 
 - `py -3.12 -m pytest -q tests\\test_hose_sector_pdf.py tests\\test_asmf_data.py tests\\test_asmf_historical_adapter.py tests\\test_backtest_repository.py tests\\test_backtest_execution.py` — 35 passed.

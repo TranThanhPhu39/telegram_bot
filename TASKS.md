@@ -1382,3 +1382,11 @@ iteration, each stopped for explicit live confirmation before the next.
 - [x] Live acceptance: FPT=corporate, VIX=securities and ABI=insurance, each
       with 34 complete quarters and 34 actual publication dates through 2026Q2.
 
+## Telegram financial-evidence status follow-up (2026-09-25)
+- [x] When no canonical facts exist but automated BCTC rows are staged, `/fundamental` and `/soi` now show PARTIAL/INSUFFICIENT with fetched quarter count, source and reason instead of the generic `Fundamental data missing.`
+- [x] When no report evidence exists but a FINANCIALS coverage record does, the commands show its MISSING/ERROR/STALE status and recorded reason.
+- [x] Securities BCTC is identified as acquired but staging-only; the ASMF Fundamental layer remains MISSING and BUY remains blocked because no securities ASMF model exists.
+- [x] Preserve point-in-time behavior: a staged report published after the analyzed price date is explicitly marked unavailable for that analysis.
+- [x] Focused Telegram/dashboard/provider regression: **161 passed**; full `python -m pytest tests/ -q` with the protobuf version-check override: **1035 passed**.
+- [ ] No production DB or `.env` is available in this checkout; DCM's live coverage row and SSI's live staging row remain NOT TESTED here.
+

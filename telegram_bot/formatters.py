@@ -601,7 +601,14 @@ def _fundamental_block(fundamental, *, compact: bool = False) -> str:
     for metric in shown:
         lines.append(f"• {metric.label}: {metric.value:,.2f}{metric.unit}")
     if not shown:
-        lines.append("Fundamental data missing.")
+        if fundamental.period:
+            lines.append("• Đã có BCTC nhưng chưa đủ dữ liệu hợp lệ để tính chỉ số.")
+        elif not fundamental.note:
+            lines.append("Fundamental data missing.")
+    if compact and fundamental.note and fundamental.status in {
+        "PARTIAL", "MISSING", "ERROR", "STALE", "INSUFFICIENT",
+    }:
+        lines.append(f"• {fundamental.note}")
     if fundamental.missing and not compact:
         lines.append("• Thiếu: " + ", ".join(fundamental.missing))
     if fundamental.period or fundamental.as_of:

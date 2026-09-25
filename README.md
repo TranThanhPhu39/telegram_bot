@@ -181,7 +181,9 @@ Lệnh cuối gọi trực tiếp Vietcap IQ, không fallback sang provider khá
 in secret. `PASS` yêu cầu ít nhất 8 quý hoàn chỉnh có ngày công bố và hiển thị
 `schema=corporate`, `schema=bank`, `schema=securities` hoặc `schema=insurance`.
 Harness phân biệt rõ `AUTH_FAILURE`, `INSUFFICIENT_DATA` và `UNSUPPORTED_SCHEMA`.
-BCTC chứng khoán/bảo hiểm được lưu staging nhưng chưa tham gia ASMF.
+BCTC chứng khoán/bảo hiểm được lưu staging nhưng chưa tham gia ASMF. Telegram
+hiển thị `PARTIAL` cùng số quý và lý do staging thay vì ghi chung là không có
+BCTC; ASMF vẫn chặn lớp Fundamental cho tới khi có mô hình tương thích.
 
 For bank symbols, the provider also reads IQ `statistics-financial`. Quarterly
 `npl` is converted back to an NPL balance only when the reported LLR ratio
