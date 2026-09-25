@@ -60,6 +60,9 @@ VIETCAP_IQ_FRONTEND_URL = "https://trading.vietcap.com.vn"
 FINANCIAL_STATEMENT_PATH = (
     "/api/iq-insight-service/v1/company/{symbol}/financial-statement"
 )
+STATISTICS_FINANCIAL_PATH = (
+    "/api/iq-insight-service/v1/company/{symbol}/statistics-financial"
+)
 SECTIONS = ("BALANCE_SHEET", "INCOME_STATEMENT")
 DEFAULT_TIMEOUT_SECONDS = 15.0
 _SYMBOL_PATTERN = re.compile(r"[A-Z0-9]+\Z")
@@ -162,6 +165,26 @@ class VietcapIQFinancialProvider(FundamentalProvider):
         if not isinstance(quarters, list):
             raise ValueError("Vietcap IQ response has no quarters array")
         return [dict(row) for row in quarters if isinstance(row, Mapping)]
+
+    def _fetch_statistics(self, symbol: str) -> list[dict[str, object]]:
+        url = VIETCAP_IQ_BASE_URL + STATISTICS_FINANCIAL_PATH.format(symbol=symbol)
+        response: _HttpResponse = self._session.get(  # type: ignore[assignment,union-attr]
+            url,
+            headers=self._headers(),
+            timeout=self._timeout_seconds,
+        )
+        if response.status_code in (401, 403):
+            raise _AuthenticationFailure(f"HTTP {response.status_code}")
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, Mapping):
+            raise ValueError("Vietcap IQ statistics response must be an object")
+        if payload.get("successful") is not True or payload.get("status") != 200:
+            raise ValueError("Vietcap IQ statistics wrapper reports failure")
+        data = payload.get("data")
+        if not isinstance(data, list):
+            raise ValueError("Vietcap IQ statistics response has no data array")
+        return [dict(row) for row in data if isinstance(row, Mapping)]
 
     @staticmethod
     def _period(row: Mapping[str, object]) -> str | None:
@@ -268,6 +291,86 @@ class VietcapIQFinancialProvider(FundamentalProvider):
             "net_interest_income": net_interest_income,
             "net_profit": parent_net_income,
         }
+
+    @staticmethod
+    def _bank_risk_ratios(
+        rows: list[dict[str, object]],
+    ) -> dict[str, dict[str, float | None]]:
+        """Return only quarter-specific ratios with verified frontend semantics.
+
+        ``quarter=5`` is Vietcap's annual series and is deliberately excluded;
+        annual CAR must not masquerade as a Q4 disclosure. Zero CAR is the
+        frontend's missing-value sentinel for quarters where it was not
+        reported, so it remains ``None`` rather than becoming a real 0% ratio.
+        """
+        ratios: dict[str, dict[str, float | None]] = {}
+        for row in rows:
+            if str(row.get("ratioType") or "").upper() != "RATIO_TTM":
+                continue
+            year = clean_number(row.get("yearReport"))
+            quarter = clean_number(row.get("quarter"))
+            if (
+                year is None or quarter is None
+                or not year.is_integer() or not quarter.is_integer()
+                or int(quarter) not in range(1, 5)
+            ):
+                continue
+            period = normalize_period((year, quarter))
+            if period is None:
+                continue
+            npl_ratio = clean_number(row.get("npl"))
+            coverage_ratio = clean_number(row.get("loansLossReservesToNPLs"))
+            car_ratio = clean_number(row.get("car"))
+            ratios[period] = {
+                "npl_ratio": (
+                    npl_ratio if npl_ratio is not None and 0 <= npl_ratio <= 1 else None
+                ),
+                "coverage_ratio": (
+                    abs(coverage_ratio)
+                    if coverage_ratio is not None and coverage_ratio != 0
+                    else None
+                ),
+                "car_percent": (
+                    car_ratio * 100
+                    if car_ratio is not None and 0 < car_ratio <= 1
+                    else None
+                ),
+            }
+        return ratios
+
+    @staticmethod
+    def _merge_bank_risk_values(
+        period: str,
+        values: dict[str, object],
+        ratios: Mapping[str, Mapping[str, float | None]],
+    ) -> None:
+        risk = ratios.get(period)
+        if risk is None:
+            return
+        gross_loans = clean_number(values.get("gross_loans"))
+        reserve = clean_number(values.get("loan_loss_reserve"))
+        npl_ratio = risk.get("npl_ratio")
+        coverage_ratio = risk.get("coverage_ratio")
+        if (
+            gross_loans is not None and gross_loans > 0
+            and reserve is not None and reserve >= 0
+            and npl_ratio is not None and npl_ratio > 0
+            and coverage_ratio is not None
+        ):
+            nonperforming_loans = gross_loans * npl_ratio
+            computed_coverage = reserve / nonperforming_loans
+            if math.isclose(
+                computed_coverage, coverage_ratio, rel_tol=1e-6, abs_tol=1e-6
+            ):
+                values["nonperforming_loans"] = nonperforming_loans
+            else:
+                LOGGER.warning(
+                    "Rejected Vietcap IQ bank NPL mapping for %s: coverage identity failed",
+                    period,
+                )
+        car_percent = risk.get("car_percent")
+        if car_percent is not None:
+            values["car_percent"] = car_percent
 
     @classmethod
     def _securities_balance_values(
@@ -472,6 +575,27 @@ class VietcapIQFinancialProvider(FundamentalProvider):
                 attempted=tuple(attempted), diagnostic_code=UNSUPPORTED_SCHEMA,
             )
 
+        bank_risk_ratios: dict[str, dict[str, float | None]] = {}
+        statistics_loaded = False
+        if schema_kind == "bank":
+            try:
+                statistics = self._fetch_statistics(symbol)
+            except _AuthenticationFailure:
+                attempted.append(f"STATISTICS_FINANCIAL:{AUTH_FAILURE}")
+                LOGGER.warning(
+                    "Vietcap IQ statistics authentication failed for %s", symbol
+                )
+            except Exception as error:
+                attempted.append(f"STATISTICS_FINANCIAL:{type(error).__name__}")
+                LOGGER.warning(
+                    "Vietcap IQ statistics failed for %s: %s",
+                    symbol, type(error).__name__,
+                )
+            else:
+                attempted.append("STATISTICS_FINANCIAL:ok")
+                bank_risk_ratios = self._bank_risk_ratios(statistics)
+                statistics_loaded = True
+
         merged: dict[str, dict[str, object]] = {}
         public_dates: dict[str, list[date]] = {}
         for section, rows in sections.items():
@@ -501,6 +625,10 @@ class VietcapIQFinancialProvider(FundamentalProvider):
                 public_date = _parse_public_date(raw.get("publicDate"))
                 if public_date is not None:
                     public_dates.setdefault(period, []).append(public_date)
+
+        if schema_kind == "bank":
+            for period, values in merged.items():
+                self._merge_bank_risk_values(period, values, bank_risk_ratios)
 
         statements = tuple(
             StatementRow(
@@ -553,7 +681,11 @@ class VietcapIQFinancialProvider(FundamentalProvider):
             symbol=symbol,
             dataset="FINANCIALS",
             provider=self.name,
-            provider_source="IQ/financial-statement",
+            provider_source=(
+                "IQ/financial-statement+statistics-financial"
+                if schema_kind == "bank" and statistics_loaded
+                else "IQ/financial-statement"
+            ),
             status=(
                 ProviderStatus.AVAILABLE
                 if complete and bank_risk_complete
@@ -564,7 +696,7 @@ class VietcapIQFinancialProvider(FundamentalProvider):
             attempted=tuple(attempted),
             statement_schema=schema_kind,
             error_reason=(
-                "bank BCTC available; NPL and CAR are absent from this endpoint"
+                "bank BCTC available; NPL or CAR is absent for one or more quarters"
                 if schema_kind == "bank" and not bank_risk_complete else None
             ),
         )

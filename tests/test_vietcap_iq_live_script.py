@@ -71,7 +71,8 @@ def test_live_harness_accepts_eight_bank_quarters(capsys) -> None:
             values={
                 "net_interest_income": 10.0, "net_profit": 2.0,
                 "equity": 100.0, "gross_loans": 800.0,
-                "loan_loss_reserve": 20.0,
+                "loan_loss_reserve": 20.0, "nonperforming_loans": 10.0,
+                "car_percent": 9.0,
             },
         )
         for year, quarter in (
@@ -84,7 +85,9 @@ def test_live_harness_accepts_eight_bank_quarters(capsys) -> None:
         status=ProviderStatus.PARTIAL, statements=rows,
     )
     assert evaluate_live_result(result) == PASS
-    assert "schema=bank" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "schema=bank" in output
+    assert "npl_quarters=8" in output and "car_quarters=8" in output
 
 
 def test_live_harness_accepts_eight_securities_quarters(capsys) -> None:

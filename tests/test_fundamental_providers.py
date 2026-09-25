@@ -536,6 +536,10 @@ class _FakeIQSession:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
     def get(self, url: str, **kwargs: object) -> _FakeIQResponse:
+        if url.endswith("/statistics-financial"):
+            self.calls.append(("STATISTICS_FINANCIAL", kwargs))
+            payload = self.sections.get("STATISTICS_FINANCIAL", {})
+            return _FakeIQResponse(payload, self.status_code)
         params = kwargs.get("params")
         assert isinstance(params, dict)
         section = str(params["section"])
@@ -550,6 +554,10 @@ def _iq_payload(row: dict[str, object]) -> dict[str, object]:
         "successful": True,
         "data": {"years": [], "quarters": [row]},
     }
+
+
+def _iq_statistics(*rows: dict[str, object]) -> dict[str, object]:
+    return {"status": 200, "successful": True, "data": list(rows)}
 
 
 def _iq_balance(**overrides: object) -> dict[str, object]:
@@ -677,8 +685,75 @@ def test_vietcap_iq_maps_verified_bank_schema_and_rejects_corporate_mapping() ->
     assert row.get("equity") == 100.0
     assert row.get("gross_loans") == 800.0
     assert row.get("loan_loss_reserve") == 20.0
+    assert row.get("nonperforming_loans") is None
+    assert row.get("car_percent") is None
     assert row.get("revenue") is None
-    assert "NPL and CAR" in result.error_reason
+    assert "NPL or CAR" in result.error_reason
+
+
+def test_vietcap_iq_maps_bank_npl_and_car_from_verified_quarterly_ratios() -> None:
+    balance = _iq_balance(
+        organCode="ACB", bsa53=1000.0, bsa54=900.0, bsa55=0.0,
+        bsa56=0.0, bsa67=0.0, bsa71=0.0, bsa78=100.0,
+        bsb103=780.0, bsb104=800.0, bsb105=-20.0,
+    )
+    income = _iq_income(
+        organCode="ACB", isa3=0.0, isa20=10.0, isa21=-1.0, isa22=9.0,
+        isb25=80.0, isb26=-30.0, isb27=50.0,
+    )
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(balance),
+        "INCOME_STATEMENT": _iq_payload(income),
+        "STATISTICS_FINANCIAL": _iq_statistics({
+            "yearReport": 2026, "quarter": 2, "ratioType": "RATIO_TTM",
+            "npl": 0.025, "loansLossReservesToNPLs": -1.0, "car": 0.10,
+        }),
+    })
+
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("ACB")
+
+    assert result.status is ProviderStatus.AVAILABLE
+    assert result.provider_source == "IQ/financial-statement+statistics-financial"
+    assert [name for name, _ in session.calls] == [
+        "BALANCE_SHEET", "INCOME_STATEMENT", "STATISTICS_FINANCIAL",
+    ]
+    row = result.statements[0]
+    assert row.get("nonperforming_loans") == 20.0
+    assert row.get("loan_loss_reserve") == 20.0
+    assert row.get("car_percent") == 10.0
+
+
+def test_vietcap_iq_bank_ratios_fail_closed_on_coverage_mismatch_and_zero_car() -> None:
+    balance = _iq_balance(
+        organCode="ACB", bsa53=1000.0, bsa54=900.0, bsa55=0.0,
+        bsa56=0.0, bsa67=0.0, bsa71=0.0, bsa78=100.0,
+        bsb103=780.0, bsb104=800.0, bsb105=-20.0,
+    )
+    income = _iq_income(
+        organCode="ACB", isa3=0.0, isa20=10.0, isa21=-1.0, isa22=9.0,
+        isb25=80.0, isb26=-30.0, isb27=50.0,
+    )
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(balance),
+        "INCOME_STATEMENT": _iq_payload(income),
+        "STATISTICS_FINANCIAL": _iq_statistics(
+            {
+                "yearReport": 2026, "quarter": 2, "ratioType": "RATIO_TTM",
+                "npl": 0.025, "loansLossReservesToNPLs": -9.0, "car": 0.0,
+            },
+            {
+                "yearReport": 2026, "quarter": 5, "ratioType": "RATIO_YEAR",
+                "npl": 0.025, "loansLossReservesToNPLs": -1.0, "car": 0.12,
+            },
+        ),
+    })
+
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("ACB")
+
+    assert result.status is ProviderStatus.PARTIAL
+    row = result.statements[0]
+    assert row.get("nonperforming_loans") is None
+    assert row.get("car_percent") is None
 
 
 def test_vietcap_iq_maps_verified_securities_schema() -> None:

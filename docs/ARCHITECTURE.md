@@ -458,11 +458,16 @@ being forced through the corporate mapper. The verified adapter maps cumulative
 `isb27` net interest income, `isa22` parent profit, `bsa78` equity, `bsb104`
 gross customer loans, and the magnitude of negative `bsb105` loan-loss
 provision. It validates both the balance-sheet and loan-netting identities.
-Only rows with versioned source `/bank-ytd-v1` may enter
+The separate `statistics-financial` endpoint supplies quarter-specific NPL and
+LLR ratios. The adapter derives the NPL balance from gross loans only when the
+independent identity `loan-loss reserve / NPL = abs(LLR)` reconciles. Non-zero
+quarterly CAR is converted from a decimal ratio to percent; zero is treated as
+missing, annual `quarter=5` records never masquerade as Q4, and CAR is never
+forward-filled. Only rows with versioned source `/bank-ytd-risk-v2` may enter
 `bank_financial_reports`; other automated bank conventions remain staging-only.
-The ordinary statement endpoint does not provide NPL or CAR, so those fields
-stay null and the ASMF bank score remains unavailable until prudential evidence
-is loaded.
+ASMF can therefore score a historical as-of date whose latest bank quarter has
+all prudential inputs. A current quarter without disclosed CAR remains
+unavailable rather than borrowing an older ratio.
 
 Securities payloads are detected from populated `bss`/`iss` namespaces. The
 adapter maps verified common totals (`isa3`, `isa20`, `isa22`, `bsa53`, `bsa54`,

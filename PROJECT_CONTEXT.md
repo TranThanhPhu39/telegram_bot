@@ -4775,3 +4775,43 @@ The insurance acquisition adapter is complete. Building new industry-specific
 fundamental scoring would be a separate strategy-design phase, not an extension
 of data acquisition.
 
+### 2026-09-25 — Vietcap IQ bank risk metrics PASS
+
+The earlier bank adapter inspected only `financial-statement`, where NPL and
+CAR were not available as normalized ratios. Audit of the current IQ frontend
+bundle established the exact additional route
+`/api/iq-insight-service/v1/company/{ticker}/statistics-financial`. Its
+quarterly `RATIO_TTM` rows expose `npl`, `loansLossReservesToNPLs` and sparse
+`car`; the separate `/financial-statement/metrics` route is only a statement
+field dictionary and is not itself risk data.
+
+The adapter now joins risk rows by exact year/quarter. It reconstructs the NPL
+balance as `gross_loans * npl_ratio` only when the independently reported
+coverage ratio reconciles with `abs(bsb105) / NPL`. CAR is accepted only when it
+is a non-zero decimal ratio and is converted to percent. IQ annual
+`quarter=5` rows are excluded, zero CAR is treated as missing, and neither CAR
+nor any other prudential value is forward-filled. Combined canonical rows use
+the versioned source
+`VietcapIQ/IQ/financial-statement+statistics-financial/bank-ytd-risk-v2` and
+retain the actual statement `publicDate` boundary.
+
+Live ACB returned 34 complete statement quarters, 31 reconciled NPL quarters
+and 6 disclosed CAR quarters. TPB returned 34, 30 and 6 respectively. Two
+historical periods failed the LLR identity and stayed null. Forced sync stored
+34 v2 canonical rows for each bank; coverage is `FINANCIALS READY`. Read-only
+verification produced historical point-in-time ASMF scores at 2025-09-30 of
+33.33 for ACB and 50.0 for TPB. The current 2026Q2 score remains `None` for both
+because that quarter has no disclosed CAR; this is intended fail-closed
+behavior, not an acquisition failure.
+
+Focused provider/refresh/scoring/harness regression passed 137 tests. The full
+repository suite initially failed during collection because the tracked manual
+script `scripts/test_soi_asmf_live.py` built a credentialed runtime at import
+time. Wrapping that behavior in `main()` preserved direct execution while
+making pytest collection side-effect free. The final full suite passed 1025
+tests in 49.56s.
+
+The bank risk-metrics phase is complete. Current-quarter ASMF must remain
+unavailable until Vietcap publishes a non-zero CAR for that quarter; using a
+stale CAR would change strategy semantics and was not implemented.
+

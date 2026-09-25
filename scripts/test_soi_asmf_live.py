@@ -8,12 +8,18 @@ load_dotenv()
 from runtime.bot_service import build_runtime_service_from_env
 from telegram_bot.commands import TelegramCommandService
 
-bot_data = build_runtime_service_from_env()
-cmd_service = TelegramCommandService(bot_data)
 
-for sym in ['FPT', 'VIC']:
-    print(f'\n==================== /soi {sym} ASMF ====================')
-    res = cmd_service.soi([sym, 'ASMF'], user_id=123)
-    print(res)
+def main() -> int:
+    bot_data = build_runtime_service_from_env()
+    try:
+        cmd_service = TelegramCommandService(bot_data)
+        for symbol in ("FPT", "VIC"):
+            print(f"\n==================== /soi {symbol} ASMF ====================")
+            print(cmd_service.soi([symbol, "ASMF"], user_id=123))
+    finally:
+        bot_data.connection.close()
+    return 0
 
-bot_data.connection.close()
+
+if __name__ == "__main__":
+    raise SystemExit(main())

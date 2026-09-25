@@ -183,6 +183,13 @@ in secret. `PASS` yêu cầu ít nhất 8 quý hoàn chỉnh có ngày công b�
 Harness phân biệt rõ `AUTH_FAILURE`, `INSUFFICIENT_DATA` và `UNSUPPORTED_SCHEMA`.
 BCTC chứng khoán/bảo hiểm được lưu staging nhưng chưa tham gia ASMF.
 
+For bank symbols, the provider also reads IQ `statistics-financial`. Quarterly
+`npl` is converted back to an NPL balance only when the reported LLR ratio
+reconciles with `bsb105`; non-zero quarterly CAR is normalized to percent.
+Annual `quarter=5` rows, zero CAR sentinels and failed identities stay missing.
+The live harness reports `npl_quarters` and `car_quarters` so sparse prudential
+coverage is visible instead of being silently forward-filled.
+
 ## Nạp news và sentiment
 
 Telegram chỉ đọc news database, không gọi CafeF ngay trong command path. Chạy

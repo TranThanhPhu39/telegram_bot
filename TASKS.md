@@ -1265,11 +1265,10 @@ iteration, each stopped for explicit live confirmation before the next.
       quarters through 2026Q2; VIX correctly reports `UNSUPPORTED_SCHEMA`.
 - [x] Forced ACB sync persisted 34 canonical bank quarters; coverage is READY.
 - [x] Focused regression: 118 passed; full regression: 1015 passed.
-- [ ] NPL and CAR are absent from this IQ endpoint; ASMF bank score remains
-      unavailable until verified prudential evidence supplies them.
+- [x] NPL/LLR and sparse quarterly CAR were recovered from the verified IQ
+      `statistics-financial` endpoint in the later risk-metrics follow-up.
 - [x] Securities adapter completed in the next follow-up below.
-- [ ] Insurance remains a separate follow-up; its schema is recognized and
-      rejected rather than normalized as a bank or ordinary company.
+- [x] Insurance adapter completed in the later follow-up below.
 
 ## Vietcap IQ securities adapter follow-up (2026-09-25)
 
@@ -1302,4 +1301,24 @@ iteration, each stopped for explicit live confirmation before the next.
 - [x] Forced sync: BVH and ABI each have 34 staged quarters, zero promoted rows,
       zero IQ-owned canonical rows, and explicit FINANCIALS PARTIAL diagnostics.
 - [x] Focused regression: 126 passed; full regression: 1023 passed.
+
+## Vietcap IQ bank risk-metrics follow-up (2026-09-25)
+
+- [x] Audit the IQ frontend bundle and verify the exact authenticated
+      `/company/{ticker}/statistics-financial` route without guessing fields.
+- [x] Map quarter-specific NPL, LLR and CAR; exclude annual `quarter=5`, treat
+      zero CAR as missing, and never forward-fill prudential ratios.
+- [x] Derive NPL balance only when `reserve / NPL = abs(LLR)` reconciles; reject
+      mismatched historical periods fail-closed.
+- [x] Version canonical provenance as `/bank-ytd-risk-v2` and preserve actual
+      statement publication dates for point-in-time visibility.
+- [x] Live acceptance: ACB PASS with 31 NPL/6 CAR quarters; TPB PASS with
+      30 NPL/6 CAR quarters; both retain 34 complete BCTC quarters through 2026Q2.
+- [x] Forced sync: ACB/TPB each persisted 34 canonical bank rows from the v2
+      source and report `FINANCIALS READY`.
+- [x] Historical point-in-time ASMF at 2025-09-30: ACB=33.33, TPB=50.0.
+      Current 2026Q2 scores correctly remain unavailable because CAR is absent.
+- [x] Focused regression: 137 passed; full regression: 1025 passed.
+- [x] Guard `scripts/test_soi_asmf_live.py` against import-time execution so
+      pytest collection does not require live market credentials.
 

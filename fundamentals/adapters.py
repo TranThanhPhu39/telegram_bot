@@ -123,7 +123,9 @@ def promote_corporate_statement(
         return None
 
 
-VIETCAP_BANK_SOURCE = "VietcapIQ/IQ/financial-statement/bank-ytd-v1"
+VIETCAP_BANK_SOURCE = (
+    "VietcapIQ/IQ/financial-statement+statistics-financial/bank-ytd-risk-v2"
+)
 
 
 def bank_promotion_gap(row: StatementRow, *, source: str) -> str | None:

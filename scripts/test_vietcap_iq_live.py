@@ -78,11 +78,21 @@ def evaluate_live_result(result) -> int:
         )
         return FAIL
 
+    bank_risk_summary = ""
+    if is_bank:
+        npl_quarters = sum(
+            row.get("nonperforming_loans") is not None for row in complete
+        )
+        car_quarters = sum(row.get("car_percent") is not None for row in complete)
+        bank_risk_summary = (
+            f"; npl_quarters={npl_quarters}; car_quarters={car_quarters}"
+        )
     print(
         "PASS: Vietcap IQ authenticated financial statements; "
         f"schema={schema}; "
         f"symbol={result.symbol}; complete_quarters={len(complete)}; "
         f"actual_public_dates={actual_dates}; latest={periods[-1]}"
+        f"{bank_risk_summary}"
     )
     return PASS
 
