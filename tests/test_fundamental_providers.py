@@ -633,14 +633,14 @@ def test_vietcap_iq_unusable_partial_allows_provider_chain_fallback() -> None:
     assert result.attempted == ("VietcapIQ:ERROR", "VNStock:AVAILABLE")
 
 
-def test_vietcap_iq_rejects_conflicting_section_public_dates() -> None:
+def test_vietcap_iq_uses_later_component_public_date_without_lookahead() -> None:
     session = _FakeIQSession({
         "BALANCE_SHEET": _iq_payload(_iq_balance()),
         "INCOME_STATEMENT": _iq_payload(_iq_income(publicDate="2026-08-23T00:00:00")),
     })
     result = VietcapIQFinancialProvider(session=session).fetch_financials("FPT")
-    assert result.status is ProviderStatus.MISSING
-    assert result.statements == ()
+    assert result.status is ProviderStatus.AVAILABLE
+    assert result.statements[0].public_date == date(2026, 8, 23)
 
 
 def test_vietcap_iq_http_failure_becomes_error_and_never_crashes_chain() -> None:
@@ -648,8 +648,47 @@ def test_vietcap_iq_http_failure_becomes_error_and_never_crashes_chain() -> None
     result = VietcapIQFinancialProvider(session=session).fetch_financials("FPT")
     assert result.status is ProviderStatus.ERROR
     assert result.attempted == (
-        "BALANCE_SHEET:ConnectionError", "INCOME_STATEMENT:ConnectionError"
+        "BALANCE_SHEET:AUTH_FAILURE", "INCOME_STATEMENT:AUTH_FAILURE"
     )
+    assert result.diagnostic_code == "AUTH_FAILURE"
+
+
+def test_vietcap_iq_maps_verified_bank_schema_and_rejects_corporate_mapping() -> None:
+    balance = _iq_balance(
+        organCode="ACB", bsa53=1000.0, bsa54=900.0, bsa55=0.0,
+        bsa56=0.0, bsa67=0.0, bsa71=0.0, bsa78=100.0,
+        bsb103=780.0, bsb104=800.0, bsb105=-20.0,
+    )
+    income = _iq_income(
+        organCode="ACB", isa3=0.0, isa20=10.0, isa21=-1.0, isa22=9.0,
+        isb25=80.0, isb26=-30.0, isb27=50.0,
+    )
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(balance),
+        "INCOME_STATEMENT": _iq_payload(income),
+    })
+
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("ACB")
+
+    assert result.status is ProviderStatus.PARTIAL
+    row = result.statements[0]
+    assert row.get("net_interest_income") == 50.0
+    assert row.get("net_profit") == 9.0
+    assert row.get("equity") == 100.0
+    assert row.get("gross_loans") == 800.0
+    assert row.get("loan_loss_reserve") == 20.0
+    assert row.get("revenue") is None
+    assert "NPL and CAR" in result.error_reason
+
+
+def test_vietcap_iq_labels_securities_schema_unsupported() -> None:
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(_iq_balance(bsa53=0.0, bss216=10.0)),
+        "INCOME_STATEMENT": _iq_payload(_iq_income(isa3=0.0, iss42=5.0)),
+    })
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("VIX")
+    assert result.status is ProviderStatus.ERROR
+    assert result.diagnostic_code == "UNSUPPORTED_SCHEMA"
 
 
 def test_vietcap_iq_is_first_only_when_explicitly_enabled() -> None:

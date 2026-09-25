@@ -14,11 +14,17 @@ import sys
 from dotenv import load_dotenv
 
 from fundamentals.providers.base import ProviderStatus
-from fundamentals.providers.vietcap_iq_provider import VietcapIQFinancialProvider
+from fundamentals.providers.vietcap_iq_provider import (
+    AUTH_FAILURE,
+    INSUFFICIENT_DATA,
+    UNSUPPORTED_SCHEMA,
+    VietcapIQFinancialProvider,
+)
 
 PASS = 0
 FAIL = 1
 NOT_TESTED = 3
+UNSUPPORTED = 2
 
 
 def _configured(name: str) -> str | None:
@@ -28,6 +34,16 @@ def _configured(name: str) -> str | None:
 
 def evaluate_live_result(result) -> int:
     """Print a redacted verdict and return a stable process exit code."""
+    if result.diagnostic_code == AUTH_FAILURE:
+        print("NOT TESTED — AUTH_FAILURE: Vietcap IQ rejected the configured Authorization")
+        print("No session secret was printed or persisted")
+        return NOT_TESTED
+    if result.diagnostic_code == UNSUPPORTED_SCHEMA:
+        print("UNSUPPORTED_SCHEMA: authenticated payload uses an unimplemented industry schema")
+        return UNSUPPORTED
+    if result.diagnostic_code == INSUFFICIENT_DATA:
+        print("INSUFFICIENT_DATA: authenticated payload has no canonical-complete quarterly rows")
+        return FAIL
     if result.status is ProviderStatus.ERROR:
         print("NOT TESTED: Vietcap IQ rejected or could not complete the authenticated request")
         print("No session secret was printed or persisted")
@@ -36,25 +52,29 @@ def evaluate_live_result(result) -> int:
         print("FAIL: Vietcap IQ answered but returned no verified quarterly statements")
         return FAIL
 
+    is_bank = any(row.get("net_interest_income") is not None for row in result.statements)
+    required = (
+        ("net_interest_income", "net_profit", "equity", "gross_loans", "loan_loss_reserve")
+        if is_bank else
+        ("revenue", "net_income_parent", "total_equity", "short_term_debt", "long_term_debt")
+    )
     complete = tuple(
         row for row in result.statements
-        if row.get("revenue") is not None
-        and row.get("net_income_parent") is not None
-        and row.get("total_equity") is not None
-        and row.get("short_term_debt") is not None
-        and row.get("long_term_debt") is not None
+        if row.public_date is not None
+        and all(row.get(field) is not None for field in required)
     )
     periods = tuple(row.period for row in complete)
     actual_dates = sum(row.public_date is not None for row in complete)
     if len(complete) < 8:
         print(
-            "FAIL: Vietcap IQ authenticated response has fewer than 8 complete "
+            "INSUFFICIENT_DATA: Vietcap IQ authenticated response has fewer than 8 complete "
             f"quarters ({len(complete)})"
         )
         return FAIL
 
     print(
         "PASS: Vietcap IQ authenticated financial statements; "
+        f"schema={'bank' if is_bank else 'corporate'}; "
         f"symbol={result.symbol}; complete_quarters={len(complete)}; "
         f"actual_public_dates={actual_dates}; latest={periods[-1]}"
     )

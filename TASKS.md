@@ -1251,3 +1251,22 @@ iteration, each stopped for explicit live confirmation before the next.
 - [ ] Production database refresh and real Telegram delivery after deployment/restart — NOT TESTED because this clone has no `.env`, Vietcap credentials, bot token, or production database.
 - [x] STOP before Issue 2.
 
+## Vietcap IQ bank adapter follow-up (2026-09-25)
+
+- [x] Detect bank payloads from verified non-zero `bsb`/`isb` namespaces instead
+      of applying the corporate balance identity.
+- [x] Map cumulative bank BCTC fields with balance, loan-netting, interest-income
+      and profit identity checks; use the later component publication date.
+- [x] Promote only versioned `VietcapIQ/.../bank-ytd-v1` rows into
+      `bank_financial_reports`; generic bank rows remain staging-only.
+- [x] Distinguish harness `AUTH_FAILURE`, `INSUFFICIENT_DATA` and
+      `UNSUPPORTED_SCHEMA` without printing session secrets.
+- [x] Live acceptance: ACB PASS 34/34 quarters through 2026Q2; TPB PASS 34/34
+      quarters through 2026Q2; VIX correctly reports `UNSUPPORTED_SCHEMA`.
+- [x] Forced ACB sync persisted 34 canonical bank quarters; coverage is READY.
+- [x] Focused regression: 118 passed; full regression: 1015 passed.
+- [ ] NPL and CAR are absent from this IQ endpoint; ASMF bank score remains
+      unavailable until verified prudential evidence supplies them.
+- [ ] Securities and insurance adapters remain separate follow-ups; their
+      schemas are recognized and rejected rather than normalized as banks.
+

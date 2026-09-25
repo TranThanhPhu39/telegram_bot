@@ -4672,3 +4672,39 @@ cache immediately while the background fetch completes, and the next request
 sees the update. The periodic market-wide RSS cadence remains configurable
 (default 30 minutes). The phase is COMPLETE; stop before another phase.
 
+### 2026-09-25 — Vietcap IQ bank BCTC adapter PASS
+
+The ACB failure was schema selection, not authentication. Live IQ payloads carry
+all industry namespaces in one object: corporate totals use `bsa`/`isa`, while
+actual bank detail is non-zero under `bsb`/`isb`. Securities use `bss`/`iss` and
+insurance uses `bsi`/`isi`; those are not interchangeable with a bank model.
+
+The provider now detects the populated namespace before mapping. Verified bank
+normalization uses cumulative `isb27` net interest income, `isa22` parent profit,
+`bsa78` equity, `bsb104` gross customer loans and the absolute value of negative
+`bsb105` loan-loss provision. Each row must satisfy total assets = liabilities +
+equity, net loans = gross loans + signed provision, and net interest income =
+interest income + signed interest expense. Minority-interest magnitude is
+validated independently of its issuer-specific sign convention. When balance
+and income sections have different publication dates, the later date is used so
+the combined row cannot become visible early.
+
+Only source `VietcapIQ/IQ/financial-statement/bank-ytd-v1` can be promoted into
+`bank_financial_reports`; unknown/manual bank rows are never overwritten and
+generic automated bank conventions remain staging-only. The direct harness now
+emits distinct `AUTH_FAILURE`, `INSUFFICIENT_DATA`, or `UNSUPPORTED_SCHEMA`
+verdicts. Authenticated securities/insurance payloads fail closed rather than
+being mislabeled as authorization failures or corporate data.
+
+Focused regression passed 118 tests; full regression passed 1015 tests in
+51.68s. Live direct acceptance passed ACB and TPB
+with 34 complete quarters, 34 actual publication dates and latest 2026Q2. VIX
+returned the intended `UNSUPPORTED_SCHEMA`. Forced ACB refresh persisted 34 bank
+quarters and coverage reports `FINANCIALS READY` with VietcapIQ provenance.
+
+The IQ statement endpoint does not provide NPL or CAR. Those nullable prudential
+inputs remain missing, so ASMF bank fundamental scoring stays unavailable rather
+than fabricating neutral values. Securities and insurance need their own mapping
+and strategy semantics in later, separate work. This bank-adapter follow-up is
+complete; stop before those adapters.
+

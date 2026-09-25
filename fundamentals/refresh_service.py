@@ -18,12 +18,19 @@ from datetime import date, datetime, timezone
 from enum import Enum
 import sqlite3
 
-from asmf_data.store import upsert_financial_reports, upsert_institutional_flows
+from asmf_data.store import (
+    upsert_bank_financial_reports,
+    upsert_financial_reports,
+    upsert_institutional_flows,
+)
 from asmf_data.quarters import QuarterContinuity, analyze_quarter_continuity
 from fundamentals.adapters import (
+    VIETCAP_BANK_SOURCE,
+    bank_promotion_gap,
     corporate_promotion_gap,
     flow_row_to_institutional_flow,
     promote_corporate_statement,
+    promote_bank_statement,
 )
 from fundamentals.coverage_store import (
     _COVERAGE_STATUS_FROM_PROVIDER_STATUS,
@@ -85,6 +92,7 @@ def _count_canonical_institutional_flows(
 def _point_in_time_gap_reason(
     statements: tuple[StatementRow, ...], promoted_count: int,
     readiness: QuarterContinuity,
+    *, bank_source: str | None = None,
 ) -> str | None:
     """Explain, for coverage visibility, why usable raw statement rows did not
     all reach the point-in-time canonical ``financial_reports`` table.
@@ -94,7 +102,11 @@ def _point_in_time_gap_reason(
     """
     gap_counts: dict[str, int] = {}
     for row in statements:
-        gap = corporate_promotion_gap(row)
+        gap = (
+            bank_promotion_gap(row, source=bank_source)
+            if bank_source is not None
+            else corporate_promotion_gap(row)
+        )
         if gap is not None:
             gap_counts[gap] = gap_counts.get(gap, 0) + 1
     detail = "; ".join(
@@ -192,6 +204,20 @@ def _can_replace_canonical_source(
     return incoming_priority >= existing_priority
 
 
+def _can_replace_bank_source(
+    connection: sqlite3.Connection, symbol: str, period: str, incoming_source: str
+) -> bool:
+    """Never overwrite manually imported/OCR bank evidence."""
+    row = connection.execute(
+        "SELECT source FROM bank_financial_reports WHERE symbol=? AND report_period=?",
+        (symbol, period),
+    ).fetchone()
+    if row is None:
+        return True
+    existing = str(row["source"])
+    return existing == incoming_source or existing.startswith("VietcapIQ/")
+
+
 def _has_legacy_vietcap_canonical_rows(
     connection: sqlite3.Connection, symbol: str
 ) -> bool:
@@ -261,31 +287,44 @@ def refresh_financials(
         )
 
     promoted_reports = []
+    promoted_bank_reports = []
+    is_bank = any(row.get("net_interest_income") is not None for row in result.statements)
     canonical_source = (
-        f"{result.provenance}/quarterly"
+        VIETCAP_BANK_SOURCE
+        if result.provider.lower() == "vietcapiq" and is_bank
+        else f"{result.provenance}/quarterly"
         if result.provider.lower() == "yfinance"
         else f"{result.provenance}/borrowings-v2"
         if result.provider.lower() == "vietcapiq"
         else result.provenance
     )
     for row in result.statements:
-        promotable = promote_corporate_statement(row, source=canonical_source)
-        if (
-            promotable is not None
-            and not _can_replace_canonical_source(
+        if is_bank:
+            promotable = promote_bank_statement(row, source=canonical_source)
+            if promotable is not None and not _can_replace_bank_source(
                 connection, row.symbol, row.period, canonical_source
-            )
-        ):
-            promotable = None
+            ):
+                promotable = None
+        else:
+            promotable = promote_corporate_statement(row, source=canonical_source)
+            if promotable is not None and not _can_replace_canonical_source(
+                connection, row.symbol, row.period, canonical_source
+            ):
+                promotable = None
         upsert_automated_statement(
             connection, row, provider=result.provider,
             provider_source=result.provider_source,
             promoted=promotable is not None, now=stamp,
         )
         if promotable is not None:
-            promoted_reports.append(promotable)
+            if is_bank:
+                promoted_bank_reports.append(promotable)
+            else:
+                promoted_reports.append(promotable)
     if promoted_reports:
         upsert_financial_reports(connection, promoted_reports)
+    if promoted_bank_reports:
+        upsert_bank_financial_reports(connection, promoted_bank_reports)
     if result.provider.lower() == "yfinance":
         _reconcile_yfinance_canonical_snapshot(
             connection,
@@ -297,7 +336,8 @@ def refresh_financials(
 
     readiness = _canonical_financial_readiness(connection, symbol, stamp.date())
     gap_reason = _point_in_time_gap_reason(
-        result.statements, len(promoted_reports), readiness
+        result.statements, len(promoted_reports) + len(promoted_bank_reports), readiness,
+        bank_source=canonical_source if is_bank else None,
     )
 
     coverage_status = "READY" if readiness.ready else "PARTIAL"
@@ -316,7 +356,8 @@ def refresh_financials(
     return RefreshOutcome(
         symbol=symbol, dataset="FINANCIALS", result=outcome,
         provider=result.provider, provider_source=result.provider_source,
-        rows_stored=len(result.statements), rows_promoted=len(promoted_reports),
+        rows_stored=len(result.statements),
+        rows_promoted=len(promoted_reports) + len(promoted_bank_reports),
         error_reason=gap_reason, coverage=coverage,
     )
 

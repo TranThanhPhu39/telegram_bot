@@ -258,6 +258,7 @@ class ProviderResult:
     flows: tuple[FlowRow, ...] = ()
     error_reason: str | None = None
     attempted: tuple[str, ...] = ()
+    diagnostic_code: str | None = None
 
     def __post_init__(self) -> None:
         if self.dataset not in ("FINANCIALS", "INSTITUTIONAL"):
@@ -279,24 +280,28 @@ class ProviderResult:
         cls, symbol: str, dataset: str, provider: str, *,
         provider_source: str | None = None, reason: str | None = None,
         attempted: tuple[str, ...] = (),
+        diagnostic_code: str | None = None,
     ) -> "ProviderResult":
         return cls(
             symbol=symbol, dataset=dataset, provider=provider,
             status=ProviderStatus.MISSING, provider_source=provider_source,
             retrieved_at=datetime.now(timezone.utc), error_reason=reason,
             attempted=attempted,
+            diagnostic_code=diagnostic_code,
         )
 
     @classmethod
     def failed(
         cls, symbol: str, dataset: str, provider: str, reason: str, *,
         provider_source: str | None = None, attempted: tuple[str, ...] = (),
+        diagnostic_code: str | None = None,
     ) -> "ProviderResult":
         return cls(
             symbol=symbol, dataset=dataset, provider=provider,
             status=ProviderStatus.ERROR, provider_source=provider_source,
             retrieved_at=datetime.now(timezone.utc),
             error_reason=reason[:500], attempted=attempted,
+            diagnostic_code=diagnostic_code,
         )
 
 

@@ -9,24 +9,17 @@ Two independent decisions are made here, both conservative on purpose:
    every field that table requires as NOT NULL. A missing accounting value is
    never guessed — the row stays in staging instead of entering canonical data.
 
-2. A **bank** statement is never promoted into ``bank_financial_reports``,
-   ever, regardless of how complete it looks. That table's downstream reader
-   (``fundamentals.repository._standalone_quarters``) de-cumulates
-   Vietnamese banks' verified year-to-date reporting convention (each
-   quarter's row already includes prior quarters of the same fiscal year).
-   A generic provider's bank rows may or may not follow that same
-   convention, and this repository cannot inspect vnstock's real bank output
-   without network access to confirm it. Silently mixing standalone-quarter
-   data into a table whose reader assumes cumulative data would corrupt ROE
-   and profit-growth for every bank symbol. So bank statement rows are kept
-   in the staging table only, for provenance/coverage display, and the
-   OCR/Vietstock path remains the sole writer of ``bank_financial_reports``.
+2. A bank statement is promoted only from the explicitly versioned Vietcap IQ
+   bank adapter. Its ``isb`` income fields were verified as cumulative
+   year-to-date and its balance fields are guarded by accounting identities.
+   Generic provider bank rows remain staging-only so standalone and cumulative
+   reporting conventions cannot be mixed silently.
 """
 
 from __future__ import annotations
 
 from datetime import date
-from asmf_data.models import FinancialReport, InstitutionalFlow
+from asmf_data.models import BankFinancialReport, FinancialReport, InstitutionalFlow
 from asmf_data.quarters import is_quarter_period
 from fundamentals.providers.base import (
     DEFAULT_FS_PUBLISH_LAG_DAYS,
@@ -130,9 +123,51 @@ def promote_corporate_statement(
         return None
 
 
-def promote_bank_statement(row: StatementRow, *, source: str) -> None:
-    """Deliberately a no-op — see the module docstring for why."""
+VIETCAP_BANK_SOURCE = "VietcapIQ/IQ/financial-statement/bank-ytd-v1"
+
+
+def bank_promotion_gap(row: StatementRow, *, source: str) -> str | None:
+    """Return why a bank row is unsafe for the cumulative canonical table."""
+    if source != VIETCAP_BANK_SOURCE:
+        return "unverified bank reporting convention"
+    public_date, _ = resolve_public_date(row)
+    if public_date is None:
+        return "no public_date or parsable report_period"
+    if not is_quarter_period(row.period):
+        return "report_period is not quarterly"
+    for field in ("net_interest_income", "net_profit", "equity", "gross_loans"):
+        if row.get(field) is None:
+            return f"missing {field}"
+    if row.get("net_interest_income") < 0:  # type: ignore[operator]
+        return "negative net_interest_income"
+    if row.get("equity") <= 0 or row.get("gross_loans") <= 0:  # type: ignore[operator]
+        return "non-positive equity or gross_loans"
     return None
+
+
+def promote_bank_statement(
+    row: StatementRow, *, source: str
+) -> BankFinancialReport | None:
+    """Promote only verified cumulative Vietcap IQ bank statement rows."""
+    if bank_promotion_gap(row, source=source) is not None:
+        return None
+    public_date, _ = resolve_public_date(row)
+    if public_date is None:
+        return None
+    try:
+        return BankFinancialReport(
+            symbol=row.symbol, report_period=row.period, public_date=public_date,
+            period_months=int(row.period[-1]) * 3,
+            net_interest_income=row.get("net_interest_income"),  # type: ignore[arg-type]
+            net_profit=row.get("net_profit"),  # type: ignore[arg-type]
+            equity=row.get("equity"),  # type: ignore[arg-type]
+            gross_loans=row.get("gross_loans"),  # type: ignore[arg-type]
+            nonperforming_loans=row.get("nonperforming_loans"),
+            loan_loss_reserve=row.get("loan_loss_reserve"),
+            car_percent=row.get("car_percent"), source=source,
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def flow_row_to_institutional_flow(row: FlowRow, *, source: str) -> InstitutionalFlow:

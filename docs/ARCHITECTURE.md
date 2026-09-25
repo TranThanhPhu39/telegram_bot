@@ -453,6 +453,18 @@ Corrected rows carry `/borrowings-v2`; older Vietcap rows are hidden until a
 successful refresh replaces them. Automated source precedence prevents a later
 VNStock, TCBS or Yahoo fallback from downgrading a corrected Vietcap quarter.
 
+Bank payloads are detected from the non-zero `bsb`/`isb` namespaces rather than
+being forced through the corporate mapper. The verified adapter maps cumulative
+`isb27` net interest income, `isa22` parent profit, `bsa78` equity, `bsb104`
+gross customer loans, and the magnitude of negative `bsb105` loan-loss
+provision. It validates both the balance-sheet and loan-netting identities.
+Only rows with versioned source `/bank-ytd-v1` may enter
+`bank_financial_reports`; other automated bank conventions remain staging-only.
+The ordinary statement endpoint does not provide NPL or CAR, so those fields
+stay null and the ASMF bank score remains unavailable until prudential evidence
+is loaded. Securities (`bss`/`iss`) and insurance (`bsi`/`isi`) payloads are
+recognized but fail closed as unsupported until their separate adapters exist.
+
 The next adapter uses VNStock 4.0.8 with KBS before VCI; it converts KBS's
 semantic wide format (one metric per row and one reporting period per column)
 into provider-independent `StatementRow` values. Sources are constructed and
@@ -462,7 +474,7 @@ response. TCBS follows VNStock and yfinance remains the final fallback.
 All automated statements first enter staging with provider/source provenance.
 Rows use an actual provider `public_date` when available or the established
 period-end-plus-45-day fallback; period end itself is never used as publication
-date. Automated bank statements are never promoted because their cumulative-
+date. Generic bank statements are not promoted because their cumulative-
 versus-standalone convention has not been established. This keeps acquisition
 coverage separate from ASMF evidence safety.
 

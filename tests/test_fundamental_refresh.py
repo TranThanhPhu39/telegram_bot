@@ -17,6 +17,7 @@ from asmf_data.models import FinancialReport
 from data.database import connect_database
 from data.migrations import bootstrap_schema
 from fundamentals.adapters import (
+    VIETCAP_BANK_SOURCE,
     corporate_promotion_gap,
     flow_row_to_institutional_flow,
     promote_bank_statement,
@@ -430,6 +431,18 @@ def test_bank_statements_are_never_promoted_regardless_of_completeness() -> None
     assert promote_bank_statement(row, source="VNStock") is None
 
 
+def test_verified_vietcap_bank_statement_promotes_as_cumulative_ytd() -> None:
+    row = statement(
+        "ACB", "2026Q2", date(2026, 8, 10),
+        net_interest_income=50.0, net_profit=10.0, equity=900.0,
+        gross_loans=8000.0, loan_loss_reserve=200.0,
+    )
+    report = promote_bank_statement(row, source=VIETCAP_BANK_SOURCE)
+    assert report is not None
+    assert report.period_months == 6
+    assert report.loan_loss_reserve == 200.0
+
+
 def test_flow_row_to_institutional_flow_keeps_missing_legs_missing() -> None:
     row = FlowRow("FPT", date(2026, 9, 1), foreign_buy_value=10.0)
     converted = flow_row_to_institutional_flow(row, source="VNStock/VCI")
@@ -489,10 +502,10 @@ def test_asmf_score_is_identical_whether_data_arrives_manually_or_via_automated_
     assert automated_score == manual_score
 
 
-def test_bank_score_still_comes_only_from_the_ocr_vietstock_path_never_from_automated_staging(
+def test_unverified_automated_bank_rows_never_reach_canonical_scoring(
     connection,
 ) -> None:
-    """Even a complete automated bank statement must not leak into scoring."""
+    """A complete row without verified cumulative provenance stays staging-only."""
     bank_row = statement(
         "FPT", "2026Q2", date(2026, 8, 10),  # symbol reused, content shaped like a bank
         net_interest_income=50.0, net_profit=10.0, equity=900.0, gross_loans=8000.0,
@@ -688,6 +701,44 @@ def test_legacy_yfinance_rows_are_invisible_before_the_first_corrected_refresh(c
 
     assert latest_financial_reports(connection, "FPT", date(2026, 1, 1)) == ()
     assert fundamental_score(connection, "FPT", date(2026, 1, 1)) is None
+
+
+def test_verified_vietcap_bank_refresh_promotes_without_overwriting_manual_rows(connection) -> None:
+    periods = (
+        "2024Q3", "2024Q4", "2025Q1", "2025Q2",
+        "2025Q3", "2025Q4", "2026Q1", "2026Q2",
+    )
+    rows = tuple(
+        statement(
+            "ACB", period, date(int(period[:4]), int(period[-1]) * 3, 28),
+            net_interest_income=100.0 * int(period[-1]),
+            net_profit=20.0 * int(period[-1]), equity=1000.0,
+            gross_loans=8000.0, loan_loss_reserve=200.0,
+        )
+        for period in periods
+    )
+
+    class VietcapBankProvider(StubProvider):
+        name = "VietcapIQ"
+
+        def fetch_financials(self, symbol, *, exchange=None):
+            return ProviderResult(
+                symbol=symbol, dataset="FINANCIALS", provider=self.name,
+                provider_source="IQ/financial-statement",
+                status=ProviderStatus.PARTIAL, statements=rows,
+                error_reason="bank BCTC available; NPL and CAR are absent",
+            )
+
+    outcome = refresh_financials(
+        connection, ProviderChain([VietcapBankProvider(statements=rows)]),
+        "ACB", force=True,
+    )
+    stored = latest_bank_financial_reports(connection, "ACB", date(2026, 12, 31))
+    assert outcome.rows_promoted == 8
+    assert outcome.coverage.status == "READY"
+    assert len(stored) == 8
+    assert stored[0]["source"] == VIETCAP_BANK_SOURCE
+    assert fundamental_score(connection, "ACB", date(2026, 12, 31)) is None
 
 
 def test_legacy_vietcap_liability_mapped_rows_are_invisible(connection) -> None:

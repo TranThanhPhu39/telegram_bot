@@ -178,8 +178,10 @@ py -3.12 -m scripts.test_vietcap_iq_live --symbol FPT
 ```
 
 Lệnh cuối gọi trực tiếp Vietcap IQ, không fallback sang provider khác và không
-in secret. `PASS` yêu cầu ít nhất 8 quý hoàn chỉnh có ngày công bố; session bị
-từ chối được báo `NOT TESTED`, không bị diễn giải thành dữ liệu thiếu của mã.
+in secret. `PASS` yêu cầu ít nhất 8 quý hoàn chỉnh có ngày công bố và hiển thị
+`schema=corporate` hoặc `schema=bank`. Harness phân biệt rõ `AUTH_FAILURE`,
+`INSUFFICIENT_DATA` và `UNSUPPORTED_SCHEMA`; chứng khoán/bảo hiểm hiện fail-closed
+cho tới khi có adapter riêng.
 
 ## Nạp news và sentiment
 

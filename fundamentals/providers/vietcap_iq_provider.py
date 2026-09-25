@@ -20,6 +20,11 @@ Verified non-bank mappings from the BALANCE_SHEET and INCOME_STATEMENT payloads:
 The identities ``bsa55 + bsa67 == bsa54`` and
 ``bsa54 + bsa78 == bsa53`` are revalidated per row.  Rows that fail are not
 promoted as complete evidence.
+
+Verified bank mappings use the distinct FiinGroup bank namespaces present in
+the same payload: ``isb27`` (net interest income), ``isa22`` (parent profit),
+``bsa78`` (equity), ``bsb104`` (gross customer loans), and ``bsb105`` (the
+negative loan-loss provision).  Bank income is cumulative year-to-date.
 """
 
 from __future__ import annotations
@@ -53,6 +58,14 @@ SECTIONS = ("BALANCE_SHEET", "INCOME_STATEMENT")
 DEFAULT_TIMEOUT_SECONDS = 15.0
 _SYMBOL_PATTERN = re.compile(r"[A-Z0-9]+\Z")
 
+AUTH_FAILURE = "AUTH_FAILURE"
+INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+UNSUPPORTED_SCHEMA = "UNSUPPORTED_SCHEMA"
+
+
+class _AuthenticationFailure(RuntimeError):
+    pass
+
 
 class _HttpResponse:
     status_code: int
@@ -72,6 +85,18 @@ def _parse_public_date(value: object) -> date | None:
 
 def _close(left: float, right: float) -> bool:
     return math.isclose(left, right, rel_tol=1e-9, abs_tol=1.0)
+
+
+def _profit_identity_valid(
+    total: float | None, parent: float | None, minority: float | None
+) -> bool:
+    """Fiin payloads vary the minority-interest sign across issuers/periods."""
+    return (
+        total is None
+        or parent is None
+        or minority is None
+        or _close(abs(total - parent), abs(minority))
+    )
 
 
 class VietcapIQFinancialProvider(FundamentalProvider):
@@ -116,6 +141,8 @@ class VietcapIQFinancialProvider(FundamentalProvider):
             headers=self._headers(),
             timeout=self._timeout_seconds,
         )
+        if response.status_code in (401, 403):
+            raise _AuthenticationFailure(f"HTTP {response.status_code}")
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, Mapping):
@@ -177,11 +204,8 @@ class VietcapIQFinancialProvider(FundamentalProvider):
         total_net_income = clean_number(row.get("isa20"))
         parent_net_income = clean_number(row.get("isa22"))
         minority_interest = clean_number(row.get("isa21"))
-        if (
-            total_net_income is not None
-            and parent_net_income is not None
-            and minority_interest is not None
-            and not _close(parent_net_income + minority_interest, total_net_income)
+        if not _profit_identity_valid(
+            total_net_income, parent_net_income, minority_interest
         ):
             LOGGER.warning("Rejected Vietcap IQ income mapping: profit identity failed")
             return {}
@@ -190,6 +214,78 @@ class VietcapIQFinancialProvider(FundamentalProvider):
             "net_income": total_net_income,
             "net_income_parent": parent_net_income,
         }
+
+    @staticmethod
+    def _bank_balance_values(row: Mapping[str, object]) -> dict[str, float | None]:
+        assets = clean_number(row.get("bsa53"))
+        liabilities = clean_number(row.get("bsa54"))
+        equity = clean_number(row.get("bsa78"))
+        net_loans = clean_number(row.get("bsb103"))
+        gross_loans = clean_number(row.get("bsb104"))
+        provision = clean_number(row.get("bsb105"))
+        valid = (
+            None not in (assets, liabilities, equity, net_loans, gross_loans, provision)
+            and _close(liabilities + equity, assets)  # type: ignore[operator]
+            and _close(gross_loans + provision, net_loans)  # type: ignore[operator]
+            and gross_loans > 0  # type: ignore[operator]
+            and provision <= 0  # type: ignore[operator]
+        )
+        if not valid:
+            LOGGER.warning("Rejected Vietcap IQ bank balance mapping: accounting identity failed")
+            return {}
+        return {
+            "equity": equity,
+            "gross_loans": gross_loans,
+            "loan_loss_reserve": abs(provision),  # type: ignore[arg-type]
+        }
+
+    @staticmethod
+    def _bank_income_values(row: Mapping[str, object]) -> dict[str, float | None]:
+        interest_income = clean_number(row.get("isb25"))
+        interest_expense = clean_number(row.get("isb26"))
+        net_interest_income = clean_number(row.get("isb27"))
+        total_net_income = clean_number(row.get("isa20"))
+        minority_interest = clean_number(row.get("isa21"))
+        parent_net_income = clean_number(row.get("isa22"))
+        valid = (
+            None not in (interest_income, interest_expense, net_interest_income)
+            and _close(interest_income + interest_expense, net_interest_income)  # type: ignore[operator]
+            and parent_net_income is not None
+            and _profit_identity_valid(
+                total_net_income, parent_net_income, minority_interest
+            )
+        )
+        if not valid:
+            LOGGER.warning("Rejected Vietcap IQ bank income mapping: accounting identity failed")
+            return {}
+        return {
+            "net_interest_income": net_interest_income,
+            "net_profit": parent_net_income,
+        }
+
+    @staticmethod
+    def _has_nonzero(rows: list[dict[str, object]], prefix: str) -> bool:
+        return any(
+            key.lower().startswith(prefix)
+            and (value := clean_number(raw)) is not None
+            and value != 0
+            for row in rows
+            for key, raw in row.items()
+        )
+
+    @classmethod
+    def _schema_kind(cls, sections: Mapping[str, list[dict[str, object]]]) -> str:
+        balance = sections.get("BALANCE_SHEET", [])
+        income = sections.get("INCOME_STATEMENT", [])
+        if cls._has_nonzero(balance, "bsb") and cls._has_nonzero(income, "isb"):
+            return "bank"
+        if cls._has_nonzero(balance, "bss") or cls._has_nonzero(income, "iss"):
+            return "securities"
+        if cls._has_nonzero(balance, "bsi") or cls._has_nonzero(income, "isi"):
+            return "insurance"
+        if cls._has_nonzero(balance, "bsa") and cls._has_nonzero(income, "isa"):
+            return "corporate"
+        return "unknown"
 
     def fetch_financials(
         self, symbol: str, *, exchange: str | None = None
@@ -207,9 +303,14 @@ class VietcapIQFinancialProvider(FundamentalProvider):
 
         attempted: list[str] = []
         sections: dict[str, list[dict[str, object]]] = {}
+        authentication_failed = False
         for section in SECTIONS:
             try:
                 sections[section] = self._fetch_section(symbol, section)
+            except _AuthenticationFailure:
+                authentication_failed = True
+                attempted.append(f"{section}:{AUTH_FAILURE}")
+                LOGGER.warning("Vietcap IQ authentication failed for %s", symbol)
             except Exception as error:
                 attempted.append(f"{section}:{type(error).__name__}")
                 LOGGER.warning(
@@ -219,6 +320,13 @@ class VietcapIQFinancialProvider(FundamentalProvider):
             else:
                 attempted.append(f"{section}:ok")
 
+        if authentication_failed:
+            return ProviderResult.failed(
+                symbol, "FINANCIALS", self.name,
+                "Vietcap IQ authorization was rejected",
+                attempted=tuple(attempted), diagnostic_code=AUTH_FAILURE,
+            )
+
         if not sections:
             return ProviderResult.failed(
                 symbol, "FINANCIALS", self.name,
@@ -226,15 +334,27 @@ class VietcapIQFinancialProvider(FundamentalProvider):
                 attempted=tuple(attempted),
             )
 
+        schema_kind = self._schema_kind(sections)
+        if schema_kind in {"securities", "insurance", "unknown"}:
+            return ProviderResult.failed(
+                symbol, "FINANCIALS", self.name,
+                f"Vietcap IQ {schema_kind} statement schema is not supported",
+                attempted=tuple(attempted), diagnostic_code=UNSUPPORTED_SCHEMA,
+            )
+
         merged: dict[str, dict[str, object]] = {}
-        public_dates: dict[str, date] = {}
+        public_dates: dict[str, list[date]] = {}
         for section, rows in sections.items():
             for raw in rows:
                 period = self._period(raw)
                 if period is None:
                     continue
                 values = (
-                    self._balance_values(raw)
+                    self._bank_balance_values(raw)
+                    if schema_kind == "bank" and section == "BALANCE_SHEET"
+                    else self._bank_income_values(raw)
+                    if schema_kind == "bank"
+                    else self._balance_values(raw)
                     if section == "BALANCE_SHEET"
                     else self._income_values(raw)
                 )
@@ -242,21 +362,15 @@ class VietcapIQFinancialProvider(FundamentalProvider):
                     merged.setdefault(period, {}).update(values)
                 public_date = _parse_public_date(raw.get("publicDate"))
                 if public_date is not None:
-                    existing = public_dates.get(period)
-                    if existing is not None and existing != public_date:
-                        LOGGER.warning(
-                            "Vietcap IQ publicDate mismatch for %s %s", symbol, period
-                        )
-                        merged.pop(period, None)
-                        public_dates.pop(period, None)
-                        continue
-                    public_dates[period] = public_date
+                    public_dates.setdefault(period, []).append(public_date)
 
         statements = tuple(
             StatementRow(
                 symbol=symbol,
                 period=period,
-                public_date=public_dates.get(period),
+                # A combined row becomes point-in-time usable only after both
+                # component statements are public, so the later date is safe.
+                public_date=max(public_dates.get(period, []), default=None),
                 consolidated=True,
                 values={name: clean_number(value) for name, value in merged[period].items()},
                 public_date_source="actual" if period in public_dates else None,
@@ -268,41 +382,50 @@ class VietcapIQFinancialProvider(FundamentalProvider):
             return ProviderResult.missing(
                 symbol, "FINANCIALS", self.name,
                 reason="Vietcap IQ returned no verified quarterly rows",
-                attempted=tuple(attempted),
+                attempted=tuple(attempted), diagnostic_code=INSUFFICIENT_DATA,
             )
+        required_fields = (
+            ("net_interest_income", "net_profit", "equity", "gross_loans", "loan_loss_reserve")
+            if schema_kind == "bank"
+            else ("revenue", "net_income_parent", "total_equity", "short_term_debt", "long_term_debt")
+        )
         complete_rows = tuple(
             row for row in statements
             if row.public_date is not None
-            and row.get("revenue") is not None
-            and row.get("net_income_parent") is not None
-            and row.get("total_equity") is not None
-            and row.get("short_term_debt") is not None
-            and row.get("long_term_debt") is not None
+            and all(row.get(field) is not None for field in required_fields)
         )
         if not complete_rows:
             return ProviderResult.failed(
                 symbol, "FINANCIALS", self.name,
                 "Vietcap IQ returned no canonical-complete quarterly rows",
-                attempted=tuple(attempted),
+                attempted=tuple(attempted), diagnostic_code=INSUFFICIENT_DATA,
             )
         complete = all(
             row.public_date is not None
-            and row.get("revenue") is not None
-            and row.get("net_income_parent") is not None
-            and row.get("total_equity") is not None
-            and row.get("short_term_debt") is not None
-            and row.get("long_term_debt") is not None
+            and all(row.get(field) is not None for field in required_fields)
             for row in statements
+        )
+        bank_risk_complete = schema_kind != "bank" or all(
+            row.get("nonperforming_loans") is not None and row.get("car_percent") is not None
+            for row in complete_rows
         )
         return ProviderResult(
             symbol=symbol,
             dataset="FINANCIALS",
             provider=self.name,
             provider_source="IQ/financial-statement",
-            status=ProviderStatus.AVAILABLE if complete else ProviderStatus.PARTIAL,
+            status=(
+                ProviderStatus.AVAILABLE
+                if complete and bank_risk_complete
+                else ProviderStatus.PARTIAL
+            ),
             retrieved_at=datetime.now(timezone.utc),
             statements=statements,
             attempted=tuple(attempted),
+            error_reason=(
+                "bank BCTC available; NPL and CAR are absent from this endpoint"
+                if schema_kind == "bank" and not bank_risk_complete else None
+            ),
         )
 
     def fetch_institutional_flow(
