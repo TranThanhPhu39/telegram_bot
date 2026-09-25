@@ -27,6 +27,7 @@ SECTORS = {
 
 _ROW = re.compile(r"^\s*\d+\s+([A-Z][A-Z0-9]{2})\s+\S")
 _SECTOR_MARKER = "cac chi so nganh vnallshare sector indices"
+_NO_INDEX_MARKER = "nganh moi chua co chi so"
 
 
 def extract_pdf_pages(path: str | Path) -> tuple[str, ...]:
@@ -69,6 +70,9 @@ def parse_hose_sector_pages(
             started = True
         if not started:
             continue
+        if _NO_INDEX_MARKER in normalized_page:
+            current = None
+            continue
         heading = _sector_heading(normalized_page)
         if heading is not None:
             current = heading
@@ -97,6 +101,27 @@ def parse_hose_sector_pages(
     if missing:
         raise ValueError(f"HOSE sector PDF is missing requested sectors: {', '.join(sorted(missing))}")
     return result
+
+
+def extract_vnallshare_symbols(pages: tuple[str, ...]) -> frozenset[str]:
+    """Return the eligible symbols printed in the VNAllshare table."""
+    started = False
+    symbols: set[str] = set()
+    for page in pages:
+        normalized_page = _ascii(page)
+        if _SECTOR_MARKER in normalized_page:
+            break
+        if "chi so vnallshare" in normalized_page:
+            started = True
+        if not started:
+            continue
+        for line in page.splitlines():
+            match = _ROW.match(line)
+            if match is not None:
+                symbols.add(match.group(1))
+    if not symbols:
+        raise ValueError("PDF has no VNAllshare component table")
+    return frozenset(symbols)
 
 
 def parse_hose_sector_pdf(
