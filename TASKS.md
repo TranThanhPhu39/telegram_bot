@@ -33,15 +33,18 @@ unchecked; they are NOT TESTED, not PASS:
 - [x] Rerun the identical 2026-06-01 through 2026-09-24 ASMF fixed-basket test
 - [x] Reduce missing-Fundamental decisions from 1,582 to 1,076 and total BLOCKED
   decisions from 1,852 to 1,827
-- [ ] Supply verified historical sector memberships before 2026-09-20
+- [x] Supply effective-dated HOSE VNAllshare sector memberships from 2026-02-02,
+  including strict PDF/count validation and the 2026-08-03 rebalance
+- [x] Reduce missing-Sector decisions from 1,759 to 26 and total BLOCKED
+  decisions from 1,827 to 1,102 in the identical VN30 ASMF test
 - [ ] Supply compatible current Fundamental scores for the remaining 18 symbols
 
 The phase is split at a concrete external-data/model boundary. All 30 local
-sector memberships are a real snapshot first observed on 2026-09-20; backdating
-them would introduce look-ahead bias. Current-quarter bank scores remain absent
-when CAR is undisclosed, and securities symbols have no compatible ASMF model.
-The refreshed 30-symbol run is persisted honestly with 1,827 BLOCKED and 45
-WATCH decisions; no missing input was neutralized.
+sector memberships now have point-in-time HOSE evidence for the tested period;
+the current Vietcap snapshot was not backdated. Current-quarter bank scores
+remain absent when CAR is undisclosed, and securities symbols have no compatible
+ASMF model. The latest 30-symbol run is persisted honestly with 1,102 BLOCKED
+and 770 WATCH decisions; no missing input was neutralized.
 
 ### Previous completed phase
 

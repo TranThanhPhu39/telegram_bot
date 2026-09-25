@@ -4895,3 +4895,38 @@ semantics for the remaining symbols; missing values must not be converted to
 neutral scores. The latest Telegram ASMF performance record remains the honest
 30-symbol refreshed run and `IN_SAMPLE_ONLY`.
 
+### 2026-09-25 — HOSE historical sector memberships imported; ASMF sector blocker largely cleared
+
+The historical sector follow-up used HOSE VNAllshare Sector component
+publications rather than backdating the current Vietcap classification snapshot.
+The January 2026 publication is effective from 2026-02-02 and contains eight
+sector tables directly. Its PDF omits the Real Estate and Utilities pages, so
+those two tables were reconstructed by intersecting the July 2026 GICS sector
+tables with the January 2026 VNAllshare eligibility table. The resulting 43
+Real Estate and 13 Utilities constituents match the official April/May 2026
+HOSE sector factsheet counts. The July 2026 publication supplies all ten sector
+tables effective from 2026-08-03. The reconstruction is explicitly labelled
+`HOSE/HOSE-Index/2026-01/derived-missing-pages`; it is not represented as a
+directly printed January table.
+
+Added `asmf_data.hose_sector_pdf` and
+`scripts.import_hose_sector_pdf`. The parser recognizes the ten HOSE GICS sector
+indices, handles continuation pages, excludes the separate "new industry, no
+index" table, can filter against a VNAllshare eligibility PDF, validates
+requested sector counts, and supports dry-run before database writes. Imported
+243 direct January rows, 56 derived missing-page rows, and 312 July rows.
+
+The identical current-constituent VN30 ASMF test (2026-06-01 through
+2026-09-24) was persisted as `vn30-current-asmf-hose-sector-20260925`. It has
+1,872 decisions: 1,102 BLOCKED and 770 WATCH, no trades. Missing Sector fell
+from 1,759 to 26 decisions; missing Fundamental remains 1,076. Therefore the
+historical sector work is accepted, while the active phase remains split solely
+on compatible Fundamental semantics for the remaining 18 symbols. The run is
+still `IN_SAMPLE_ONLY`, uses a fixed current VN30 basket, and retains
+survivorship bias.
+
+Verification:
+
+- `py -3.12 -m pytest -q tests\\test_hose_sector_pdf.py tests\\test_asmf_data.py tests\\test_asmf_historical_adapter.py tests\\test_backtest_repository.py tests\\test_backtest_execution.py` — 35 passed.
+- `py -3.12 -m pytest -q` — 1,031 passed.
+

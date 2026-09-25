@@ -233,6 +233,14 @@ py -3.12 scripts\import_asmf_eod.py --bank-financials bank_financials.csv
 py -3.12 scripts\import_asmf_eod.py --flows institutional_flows.csv
 ```
 
+Danh mục ngành lịch sử HOSE có thể được nạp trực tiếp từ PDF đã tải về. Phải
+khai báo ngày hiệu lực thật và nên khóa số lượng từng ngành bằng
+`--expect-count`; dùng `--dry-run` trước khi ghi database:
+
+```powershell
+py -3.12 -m scripts.import_hose_sector_pdf --pdf hose-index.pdf --effective-from 2026-08-03 --source HOSE/HOSE-Index/2026-07 --expect-count VNFIN=46 --dry-run
+```
+
 Mỗi dòng dữ liệu phải có nguồn và mốc thời gian/as-of phù hợp. BCTC sử dụng ngày
 công bố thật để tránh look-ahead trong phân tích và backtest.
 
