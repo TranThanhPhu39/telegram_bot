@@ -512,9 +512,13 @@ class VietcapIQFinancialProvider(FundamentalProvider):
         income = sections.get("INCOME_STATEMENT", [])
         if cls._has_nonzero(balance, "bsb") and cls._has_nonzero(income, "isb"):
             return "bank"
-        if cls._has_nonzero(balance, "bss") or cls._has_nonzero(income, "iss"):
+        # IQ payloads can carry isolated non-zero cross-industry fields even for
+        # ordinary companies (live FPT exposes bss136 and bsb108).  An industry
+        # schema therefore requires evidence in both its balance and income
+        # namespaces; a lone prefix is not a sufficient discriminator.
+        if cls._has_nonzero(balance, "bss") and cls._has_nonzero(income, "iss"):
             return "securities"
-        if cls._has_nonzero(balance, "bsi") or cls._has_nonzero(income, "isi"):
+        if cls._has_nonzero(balance, "bsi") and cls._has_nonzero(income, "isi"):
             return "insurance"
         if cls._has_nonzero(balance, "bsa") and cls._has_nonzero(income, "isa"):
             return "corporate"

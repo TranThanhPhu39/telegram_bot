@@ -1322,3 +1322,15 @@ iteration, each stopped for explicit live confirmation before the next.
 - [x] Guard `scripts/test_soi_asmf_live.py` against import-time execution so
       pytest collection does not require live market credentials.
 
+## Vietcap IQ FPT schema false-positive fix (2026-09-25)
+
+- [x] Reproduce the live payload shape: FPT has valid corporate `bsa`/`isa`
+      statements plus isolated non-zero `bsb108` and `bss136` fields.
+- [x] Require paired balance+income namespace evidence for bank, securities and
+      insurance classification; a lone cross-industry field cannot override a
+      valid corporate schema.
+- [x] Add a regression fixture for the exact FPT false-positive shape.
+- [x] Focused regression: 84 passed; full regression: 1026 passed.
+- [x] Live acceptance: FPT=corporate, VIX=securities and ABI=insurance, each
+      with 34 complete quarters and 34 actual publication dates through 2026Q2.
+

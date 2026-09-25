@@ -616,6 +616,22 @@ def test_vietcap_iq_normalizes_verified_quarter_and_actual_public_date() -> None
     assert canonical.public_date == date(2026, 8, 22)
 
 
+def test_vietcap_iq_fpt_ignores_isolated_cross_industry_fields() -> None:
+    """Live FPT carries bsb108/bss136 but has no bank/securities income schema."""
+    session = _FakeIQSession({
+        "BALANCE_SHEET": _iq_payload(_iq_balance(bsb108=1.0, bss136=1.0)),
+        "INCOME_STATEMENT": _iq_payload(_iq_income()),
+    })
+
+    result = VietcapIQFinancialProvider(session=session).fetch_financials("FPT")
+
+    assert result.status is ProviderStatus.AVAILABLE
+    assert result.statement_schema == "corporate"
+    assert [name for name, _ in session.calls] == ["BALANCE_SHEET", "INCOME_STATEMENT"]
+    assert result.statements[0].get("revenue") == 500.0
+    assert result.statements[0].get("short_term_debt") == 125.0
+
+
 def test_vietcap_iq_fails_closed_when_accounting_identity_changes() -> None:
     session = _FakeIQSession({
         "BALANCE_SHEET": _iq_payload(_iq_balance(bsa78=999.0)),

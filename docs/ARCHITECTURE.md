@@ -453,8 +453,12 @@ Corrected rows carry `/borrowings-v2`; older Vietcap rows are hidden until a
 successful refresh replaces them. Automated source precedence prevents a later
 VNStock, TCBS or Yahoo fallback from downgrading a corrected Vietcap quarter.
 
-Bank payloads are detected from the non-zero `bsb`/`isb` namespaces rather than
-being forced through the corporate mapper. The verified adapter maps cumulative
+Industry schemas require non-zero evidence in both their balance and income
+namespaces (`bsb`+`isb`, `bss`+`iss`, or `bsi`+`isi`). A lone cross-industry
+field is not sufficient: live FPT carries non-zero `bsb108` and `bss136` while
+remaining a corporate `bsa`/`isa` issuer. Bank payloads are therefore detected
+from paired `bsb`/`isb` evidence rather than being forced through the corporate
+mapper. The verified adapter maps cumulative
 `isb27` net interest income, `isa22` parent profit, `bsa78` equity, `bsb104`
 gross customer loans, and the magnitude of negative `bsb105` loan-loss
 provision. It validates both the balance-sheet and loan-netting identities.

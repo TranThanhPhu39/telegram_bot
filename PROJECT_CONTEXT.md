@@ -4815,3 +4815,25 @@ The bank risk-metrics phase is complete. Current-quarter ASMF must remain
 unavailable until Vietcap publishes a non-zero CAR for that quarter; using a
 stale CAR would change strategy semantics and was not implemented.
 
+### 2026-09-25 — FPT Vietcap IQ schema false-positive PASS
+
+Live FPT began failing with 34 securities-borrowing identity warnings because
+the IQ payload contains isolated non-zero `bsb108` and `bss136` fields alongside
+its complete corporate `bsa`/`isa` statements. `_schema_kind()` previously used
+`any bss OR any iss` for securities (and the same OR rule for insurance), so the
+single `bss136` value won before the corporate branch. The securities mapper
+then correctly rejected every FPT quarter because its `bss238`/`bss247` identity
+was not a securities statement.
+
+Industry detection now requires paired non-zero balance and income namespaces:
+`bsb`+`isb` for banks, `bss`+`iss` for securities and `bsi`+`isi` for insurance.
+This preserves fail-closed behavior when a section is missing and prevents a
+lone cross-industry field from overriding valid corporate evidence. A regression
+fixture reproduces the exact FPT `bsb108`/`bss136` payload shape.
+
+Focused provider/harness regression passed 84 tests. The full repository suite
+passed 1026 tests in 49.50s. Direct authenticated live checks passed FPT as
+`schema=corporate`, VIX as `schema=securities`, and ABI as `schema=insurance`;
+all three returned 34 complete quarters, 34 actual publication dates and latest
+period 2026Q2. The false-positive fix is complete.
+
