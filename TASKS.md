@@ -22,6 +22,51 @@ unchecked; they are NOT TESTED, not PASS:
 - Phase 25: coverage worker running inside the real bot process against live providers
 
 ## ACTIVE IMPLEMENTATION PHASE
+
+**VN30 ASMF data-readiness follow-up — SPLIT AT EXTERNAL DATA BOUNDARY**
+
+- [x] Force-refresh FINANCIALS for all 30 current VN30 constituents through the
+  production provider chain
+- [x] Confirm 30/30 provider outcomes completed without `FAILED`: 14 `SUCCESS`,
+  16 `PARTIAL`
+- [x] Increase current-date Fundamental availability from 5/30 to 12/30
+- [x] Rerun the identical 2026-06-01 through 2026-09-24 ASMF fixed-basket test
+- [x] Reduce missing-Fundamental decisions from 1,582 to 1,076 and total BLOCKED
+  decisions from 1,852 to 1,827
+- [ ] Supply verified historical sector memberships before 2026-09-20
+- [ ] Supply compatible current Fundamental scores for the remaining 18 symbols
+
+The phase is split at a concrete external-data/model boundary. All 30 local
+sector memberships are a real snapshot first observed on 2026-09-20; backdating
+them would introduce look-ahead bias. Current-quarter bank scores remain absent
+when CAR is undisclosed, and securities symbols have no compatible ASMF model.
+The refreshed 30-symbol run is persisted honestly with 1,827 BLOCKED and 45
+WATCH decisions; no missing input was neutralized.
+
+### Previous completed phase
+
+**Current VN30 fixed-basket backtest follow-up — COMPLETE (PASS)**
+
+- [x] Verify the 30 constituents against the SSIAM VN30 creation basket dated
+  2026-09-22
+- [x] Audit local daily-history coverage: all 30 symbols and VNINDEX have at
+  least 200 completed daily bars
+- [x] Persist CL1 over all 30 symbols for 2026-06-01 through 2026-09-24
+- [x] Persist fail-closed ASMF over the identical fixed universe and range
+- [x] Verify both `/performance CL1` and `/performance ASMF` render
+  `Universe: 30 mã`
+
+CL1 produced 1,872 decisions, eight closed trades and two open positions. ASMF
+produced 1,852 BLOCKED and 20 WATCH decisions because historical sector breadth
+and point-in-time financial coverage remain incomplete. Both runs are
+`IN_SAMPLE_ONLY`. The fixed current basket has survivorship bias and is not a
+historical point-in-time VN30-membership backtest.
+
+Stop condition reached: both current-basket runs are persisted and selected by
+the Telegram performance command. No strategy rule or missing-data policy was
+changed.
+
+### Previous completed phase
 **News coverage, freshness and sentiment integrity — COMPLETE (PASS)**
 
 - [x] Confirm production gaps from SQLite: only 29 linked tickers; FPT had two

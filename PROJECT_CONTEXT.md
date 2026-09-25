@@ -4837,3 +4837,61 @@ passed 1026 tests in 49.50s. Direct authenticated live checks passed FPT as
 all three returned 34 complete quarters, 34 actual publication dates and latest
 period 2026Q2. The false-positive fix is complete.
 
+### 2026-09-25 — Current VN30 fixed-basket backtest PASS
+
+The user requested VN30 backtests after `/performance` still showed the earlier
+three-symbol CL1 run and one-symbol ASMF readiness run. The repository does not
+store effective-dated VN30 membership, so the current basket was verified from
+the SSIAM VN30 creation basket dated 2026-09-22 and used as an explicit fixed
+30-symbol universe: ACB, BID, BSR, CTG, FPT, GAS, GVR, HDB, HPG, LPB, MBB, MCH,
+MSN, MWG, SAB, SHB, SSB, SSI, STB, TCB, TCX, VCB, VHM, VIB, VIC, VJC, VNM, VPB,
+VPL and VRE.
+
+A read-only audit confirmed every constituent and VNINDEX has at least 200
+completed local daily bars. Both strategies were run over 2026-06-01 through
+2026-09-24 with the existing explicit two-trading-session settlement choice and
+default costs.
+
+- `vn30-current-cl1-20260925`: 1,872 decisions (21 BUY, 602 SELL, 1,249 WATCH),
+  eight closed trades, two open positions, net total return -1.13%, maximum
+  drawdown -1.29%, and VNINDEX return -4.95%.
+- `vn30-current-asmf-20260925`: 1,872 decisions (1,852 BLOCKED, 20 WATCH), no
+  trades, 1,582 decisions missing point-in-time financial quality and 1,759
+  missing sector breadth. Return and drawdown remain NULL/N/A by design.
+
+Repository and Telegram-formatter verification passed for both latest records;
+`/performance CL1` and `/performance ASMF` now render `Universe: 30 mã`. Both
+runs remain `IN_SAMPLE_ONLY`. The result is a current-constituent fixed-basket
+test and therefore has survivorship bias; it must not be described as a
+historically reconstituted VN30 backtest. No strategy code or fail-closed rule
+was changed.
+
+### 2026-09-25 — VN30 ASMF data-readiness follow-up split at external boundary
+
+Forced FINANCIALS refresh completed for all 30 current VN30 constituents through
+the production provider chain with 14 `SUCCESS`, 16 `PARTIAL`, and zero
+`FAILED` outcomes. Corporate canonical data improved materially. Bank payloads
+were retained when valid, but current scores still fail closed when Vietcap does
+not disclose a usable current CAR or a risk identity fails. SSI and TCX remain
+securities staging data because no securities-specific ASMF model exists.
+
+At 2026-09-24, current Fundamental availability increased from 5/30 to 12/30:
+FPT, GAS, GVR, HPG, MCH, MSN, MWG, SAB, VHM, VJC, VNM and VRE. The identical
+fixed-basket ASMF backtest was rerun as
+`vn30-current-asmf-refreshed-20260925`. It produced 1,872 decisions: 1,827
+BLOCKED and 45 WATCH, with no trades. Missing Fundamental decisions fell from
+1,582 to 1,076. Missing Sector decisions stayed at 1,759.
+
+The unchanged Sector count is explained by verified effective dates rather than
+download failure: all 30 VN30 symbols have membership rows, but every row begins
+on the real observation date 2026-09-20. The Vietcap `getAll` catalog is a
+current snapshot and has no observed historical-date parameter. Assigning that
+snapshot to 2026-06-01 would violate the point-in-time ASMF contract and create
+look-ahead bias, so it was not done.
+
+This follow-up stops at a safe external-data/model boundary. Completion requires
+a verified effective-dated historical sector source plus compatible Fundamental
+semantics for the remaining symbols; missing values must not be converted to
+neutral scores. The latest Telegram ASMF performance record remains the honest
+30-symbol refreshed run and `IN_SAMPLE_ONLY`.
+
